@@ -6,6 +6,7 @@ import { MAX_DURATION_SECONDS, MAX_VIRTUAL_USERS, validateLoadProfile } from './
 import {
   buildOperationConfigurations,
   createOperationSettings,
+  hasMultipleServers,
   parameterKey,
   type ImportedSpecification,
   type Operation,
@@ -44,6 +45,7 @@ function LoadTestApp() {
   const [specification, setSpecification] = useState(sample)
   const [imported, setImported] = useState<ImportedSpecification>()
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [operationSettings, setOperationSettings] = useState<Record<string, OperationSettings>>({})
   const [baseUrl, setBaseUrl] = useState('')
   const [vus, setVus] = useState(1)
@@ -51,6 +53,24 @@ function LoadTestApp() {
   const [run, setRun] = useState<TestRun>()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadDemo() {
+      try {
+        const response = await fetch('/api/demo-specification')
+        if (!response.ok) return
+        const content = await response.text()
+        if (!cancelled && content.trim() !== '') setSpecification(content)
+      } catch {
+        // Fallback auf eingebettetes Sample, falls Backend nicht erreichbar ist.
+      }
+    }
+
+    loadDemo()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (!run || !['QUEUED', 'RUNNING'].includes(run.status)) return
@@ -75,8 +95,10 @@ function LoadTestApp() {
       if (!response.ok) throw new Error(data.message)
       setImported(data)
       setBaseUrl(data.baseUrl)
-      setSelected(new Set(data.operations.filter(operation => !operation.destructive).map(operation => operation.operationId)))
+      const nonDestructive = data.operations.filter(operation => !operation.destructive)
+      setSelected(new Set(nonDestructive.length > 0 ? [nonDestructive[0].operationId] : []))
       setOperationSettings(createOperationSettings(data.operations))
+      setCollapsed(new Set(data.operations.map(operation => operation.operationId)))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Import fehlgeschlagen')
     } finally {
@@ -119,6 +141,13 @@ function LoadTestApp() {
 
   function toggle(id: string) {
     setSelected(current => {
+      if (current.has(id)) return new Set<string>()
+      return new Set([id])
+    })
+  }
+
+  function toggleExpanded(id: string) {
+    setCollapsed(current => {
       const next = new Set(current)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -181,7 +210,9 @@ function LoadTestApp() {
             operation={operation}
             selected={selected.has(operation.operationId)}
             settings={operationSettings[operation.operationId]}
+            expanded={!collapsed.has(operation.operationId)}
             onToggle={() => toggle(operation.operationId)}
+            onToggleExpand={() => toggleExpanded(operation.operationId)}
             onParameterChange={(key, value) => updateParameter(operation.operationId, key, value)}
             onRequestBodyChange={value => updateRequestBody(operation.operationId, value)}
             onBearerTokenChange={value => updateBearerToken(operation.operationId, value)}
@@ -192,6 +223,30 @@ function LoadTestApp() {
       <section className="card">
         <div className="step">3</div>
         <h2>Lastprofil</h2>
+        {hasMultipleServers(imported.servers) && (
+          <div className="server-selector">
+            <label htmlFor="base-url-select">Server auswählen</label>
+            <select
+              id="base-url-select"
+              value={baseUrl}
+              onChange={event => setBaseUrl(event.target.value)}
+            >
+              {(() => {
+                const known = imported.servers.some(server => server.url === baseUrl)
+                const options = imported.servers.map(server => (
+                  <option key={server.url} value={server.url}>
+                    {server.url}{server.description ? ` — ${server.description}` : ''}
+                  </option>
+                ))
+                if (!known && baseUrl) {
+                  options.push(<option key="__custom__" value={baseUrl}>{baseUrl} — Eigene URL</option>)
+                }
+                return options
+              })()}
+            </select>
+            <small>Die Eingabe unten überschreibt die Auswahl und erlaubt eigene URLs.</small>
+          </div>
+        )}
         <div className="grid">
           <label>Base URL<input value={baseUrl} onChange={event => setBaseUrl(event.target.value)} /></label>
           <label>Virtual Users<input type="number" min="1" max={MAX_VIRTUAL_USERS} step="1" value={vus} aria-describedby="virtual-users-hint" onChange={event => setVus(Number(event.target.value))} /><small id="virtual-users-hint">1 bis {MAX_VIRTUAL_USERS}</small></label>
@@ -217,7 +272,9 @@ type OperationEditorProps = {
   operation: Operation
   selected: boolean
   settings?: OperationSettings
+  expanded: boolean
   onToggle: () => void
+  onToggleExpand: () => void
   onParameterChange: (key: string, value: string) => void
   onRequestBodyChange: (value: string) => void
   onBearerTokenChange: (value: string) => void
@@ -226,24 +283,45 @@ type OperationEditorProps = {
 function OperationEditor({
   operation,
   selected,
+  expanded,
   settings,
   onToggle,
+  onToggleExpand,
   onParameterChange,
   onRequestBodyChange,
   onBearerTokenChange,
 }: OperationEditorProps) {
   if (!settings) return null
 
-  return <article className={`operation-card ${selected ? 'selected' : ''}`}>
+  return <article className={`operation-card ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''}`}>
+    {operation.destructive && <span className="destructive-badge" title="Schreibender Endpunkt">schreibend</span>}
+
     <label className="operation-heading">
-      <input type="checkbox" checked={selected} onChange={onToggle} />
+      <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Endpunkt ${operation.method} ${operation.path} auswählen`} />
       <span className={`method ${operation.method.toLowerCase()}`}>{operation.method}</span>
       <code>{operation.path}</code>
-      <span className="operation-summary">{operation.summary}</span>
-      {operation.destructive && <b>schreibend</b>}
     </label>
+    <div className="operation-meta">
+      <span className="operation-id" aria-label={`Operation ${operation.operationId}`}>{operation.operationId}</span>
+      {operation.summary && <p className="operation-summary">{operation.summary}</p>}
+    </div>
 
-    <div className="configuration-grid">
+    <button
+      type="button"
+      className="expand-toggle"
+      onClick={onToggleExpand}
+      aria-expanded={expanded}
+      aria-label={expanded ? 'Endpunkt einklappen' : 'Endpunkt aufklappen'}
+      title={expanded ? 'Einklappen' : 'Aufklappen'}
+    >
+      <svg className="chevron" viewBox="0 0 12 12" aria-hidden="true">
+        {expanded
+          ? <path d="M1 2 L6 10 L11 2 L6 6 Z" fill="currentColor" />
+          : <path d="M2 1 L10 6 L2 11 L6 6 Z" fill="currentColor" />}
+      </svg>
+    </button>
+
+    {expanded && <div className="configuration-grid">
       {operation.parameters.map(parameter => {
         const key = parameterKey(parameter)
         return <label className="parameter-box" key={key}>
@@ -290,7 +368,7 @@ function OperationEditor({
           onChange={event => onBearerTokenChange(event.target.value)}
         />
       </label>
-    </div>
+    </div>}
   </article>
 }
 

@@ -53,6 +53,136 @@ class SwaggerSpecificationImporterTest {
     }
 
     @Test
+    fun `imports multiple OpenAPI servers and uses the first as baseUrl`() {
+        val spec =
+            """
+            openapi: 3.0.3
+            info: {title: Multi, version: "1"}
+            servers:
+              - url: https://api.example.com
+                description: Production
+              - url: https://staging.example.com
+                description: Staging
+              - url: http://localhost:8080
+            paths:
+              /ping:
+                get:
+                  operationId: ping
+                  responses:
+                    '200': {description: OK}
+            """.trimIndent()
+        val imported = importer.import(spec)
+
+        assertEquals("https://api.example.com", imported.baseUrl)
+        assertEquals(
+            listOf(
+                de.lasttest.api.ApiServer("https://api.example.com", "Production"),
+                de.lasttest.api.ApiServer("https://staging.example.com", "Staging"),
+                de.lasttest.api.ApiServer("http://localhost:8080", null),
+            ),
+            imported.servers,
+        )
+    }
+
+    @Test
+    fun `substitutes server variables with their defaults`() {
+        val spec =
+            """
+            openapi: 3.0.3
+            info: {title: Templated, version: "1"}
+            servers:
+              - url: https://{environment}.example.com/api
+                description: Multi-region
+                variables:
+                  environment:
+                    default: api
+                    enum: [api, api-eu, api-us]
+              - url: https://{port}.backing.example.com
+                variables:
+                  port:
+                    enum: [8443, 9443]
+            paths:
+              /ping:
+                get:
+                  operationId: ping
+                  responses:
+                    '200': {description: OK}
+            """.trimIndent()
+        val imported = importer.import(spec)
+
+        assertEquals("https://api.example.com/api", imported.servers[0].url)
+        assertEquals("Multi-region", imported.servers[0].description)
+        assertEquals("https://8443.backing.example.com", imported.servers[1].url)
+    }
+
+    @Test
+    fun `ignores servers with blank URL or blank description`() {
+        val spec =
+            """
+            openapi: 3.0.3
+            info: {title: Edge, version: "1"}
+            servers:
+              - url: https://ok.example.com
+                description: ""
+              - url: ""
+                description: missing-url
+              - url: https://also.example.com
+                description: ~
+            paths:
+              /ping:
+                get:
+                  operationId: ping
+                  responses:
+                    '200': {description: OK}
+            """.trimIndent()
+        val imported = importer.import(spec)
+
+        assertEquals(listOf(de.lasttest.api.ApiServer("https://ok.example.com", null), de.lasttest.api.ApiServer("https://also.example.com", null)), imported.servers)
+    }
+
+    @Test
+    fun `falls back to the OpenAPI default server when the document declares none`() {
+        val spec =
+            """
+            openapi: 3.0.3
+            info: {title: Default server, version: "1"}
+            paths:
+              /ping:
+                get:
+                  operationId: ping
+                  responses:
+                    '200': {description: OK}
+            """.trimIndent()
+        val imported = importer.import(spec)
+
+        assertEquals(1, imported.servers.size)
+        assertEquals("/", imported.servers.single().url)
+    }
+
+    @Test
+    fun `keeps the placeholder when a server variable has no default and no enum`() {
+        val spec =
+            """
+            openapi: 3.0.3
+            info: {title: Placeholder, version: "1"}
+            servers:
+              - url: https://{tenant}.example.com
+                variables:
+                  tenant:
+                    description: tenant id
+            paths:
+              /ping:
+                get:
+                  operationId: ping
+                  responses:
+                    '200': {description: OK}
+            """.trimIndent()
+        val imported = importer.import(spec)
+
+        assertEquals("https://{tenant}.example.com", imported.servers.single().url)
+    }
+
+    @Test
     fun `maps parser values and directly constructed schema edge cases`() {
         val mapper = ObjectMapper()
         assertEquals(mapOf("value" to 1), importer.normalizeExample(mapper.readTree("{\"value\":1}")))

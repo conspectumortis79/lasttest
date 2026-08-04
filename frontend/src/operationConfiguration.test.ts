@@ -3,7 +3,9 @@ import { test } from 'node:test'
 import {
   buildOperationConfigurations,
   createOperationSettings,
+  hasMultipleServers,
   parameterKey,
+  type ApiServer,
   type Operation,
 } from './operationConfiguration.ts'
 
@@ -143,4 +145,26 @@ test('allows an optional parameter to be cleared', () => {
   const configurations = buildOperationConfigurations([getOperation], new Set(['getPet']), settings)
 
   equal(configurations[0].parameterValues[1].value, '')
+})
+
+test('hasMultipleServers shows the selector only when the spec declares more than one server', () => {
+  equal(hasMultipleServers(undefined), false)
+  equal(hasMultipleServers([]), false)
+  equal(hasMultipleServers([{ url: 'https://api.example.com', description: 'Production' }]), false)
+  equal(
+    hasMultipleServers([
+      { url: 'https://api.example.com', description: 'Production' },
+      { url: 'https://staging.example.com', description: 'Staging' },
+    ]),
+    true,
+  )
+})
+
+test('hasMultipleServers treats null description as a valid server', () => {
+  const servers: ApiServer[] = [
+    { url: 'https://a.example.com', description: null },
+    { url: 'https://b.example.com', description: null },
+  ]
+
+  equal(hasMultipleServers(servers), true)
 })

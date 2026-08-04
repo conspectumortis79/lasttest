@@ -1,6 +1,7 @@
 FROM eclipse-temurin:25-jdk AS backend-build
 WORKDIR /workspace
 COPY backend .
+COPY demo /demo
 RUN ./gradlew bootJar --no-daemon
 
 FROM node:22-alpine AS frontend-build

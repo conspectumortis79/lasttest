@@ -1,5 +1,6 @@
 package de.lasttest.api
 
+import de.lasttest.demo.DemoSpecificationProvider
 import de.lasttest.domain.SpecificationImporter
 import de.lasttest.domain.TestRunService
 import org.springframework.http.HttpHeaders
@@ -11,6 +12,7 @@ class LastTestControllerTest {
     private val imported = ImportedSpecification("Test API", "1", "https://example.test", emptyList())
     private val existingRun = TestRun("run-1", TestRunStatus.COMPLETED, "2026-01-01T00:00:00Z")
     private val service = RecordingTestRunService(existingRun)
+    private val demoSpecificationProvider = DemoSpecificationProvider(resourceName = "/demo/recorded.yaml")
     private val controller =
         LastTestController(
             importer =
@@ -18,7 +20,15 @@ class LastTestControllerTest {
                     override fun import(content: String): ImportedSpecification = imported
                 },
             testRuns = service,
+            demoSpecificationProvider = demoSpecificationProvider,
         )
+
+    @Test
+    fun `returns the bundled demo specification`() {
+        val recorded = controller.demoSpecification()
+
+        assertEquals("openapi: 3.0.3\ninfo:\n  title: Recorded\n", recorded)
+    }
 
     @Test
     fun `imports a specification`() {

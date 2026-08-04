@@ -9,6 +9,12 @@ data class ImportedSpecification(
     val version: String,
     val baseUrl: String,
     val operations: List<ApiOperation>,
+    val servers: List<ApiServer> = emptyList(),
+)
+
+data class ApiServer(
+    val url: String,
+    val description: String? = null,
 )
 
 data class ApiOperation(

@@ -18,11 +18,21 @@ export type Operation = {
   bearerAuth: boolean
 }
 
+export type ApiServer = {
+  url: string
+  description: string | null
+}
+
 export type ImportedSpecification = {
   title: string
   version: string
   baseUrl: string
   operations: Operation[]
+  servers: ApiServer[]
+}
+
+export function hasMultipleServers(servers: ApiServer[] | undefined): boolean {
+  return (servers?.length ?? 0) > 1
 }
 
 export type OperationSettings = {

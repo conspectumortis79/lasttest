@@ -133,6 +133,17 @@ export function manualK6Command(configuration: TestRunConfiguration | undefined,
   return `k6 run -e BASE_URL=${JSON.stringify(baseUrl)} ${k6ScriptDownloadName(runId)}`
 }
 
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
+  if (!clipboard?.writeText) return false
+  try {
+    await clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function operationDisplayPath(operation: ReportOperation): string {
   let path = operation.path
   for (const parameter of operation.parameterValues.filter(value => value.location === 'path')) {

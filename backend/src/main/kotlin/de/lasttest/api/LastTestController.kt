@@ -1,5 +1,6 @@
 package de.lasttest.api
 
+import de.lasttest.demo.DemoSpecificationProvider
 import de.lasttest.domain.InvalidSpecificationException
 import de.lasttest.domain.SpecificationImporter
 import de.lasttest.domain.TestRunService
@@ -24,7 +25,11 @@ import org.springframework.web.bind.annotation.RestController
 class LastTestController(
     private val importer: SpecificationImporter,
     private val testRuns: TestRunService,
+    private val demoSpecificationProvider: DemoSpecificationProvider,
 ) {
+    @GetMapping("/demo-specification", produces = [DEMO_SPECIFICATION_MEDIA_TYPE])
+    fun demoSpecification(): String = demoSpecificationProvider.load()
+
     @PostMapping("/specifications/import")
     fun import(
         @RequestBody request: ImportSpecificationRequest,
@@ -40,7 +45,7 @@ class LastTestController(
         @PathVariable id: String,
     ): ResponseEntity<TestRun> = testRuns.find(id)?.let(ResponseEntity<TestRun>::ok) ?: ResponseEntity.notFound().build()
 
-    @GetMapping("/test-runs/{id}/script", produces = ["application/javascript"])
+    @GetMapping("/test-runs/{id}/script", produces = [K6_SCRIPT_MEDIA_TYPE])
     fun script(
         @PathVariable id: String,
     ): ResponseEntity<String> {
@@ -48,7 +53,7 @@ class LastTestController(
         val disposition = ContentDisposition.attachment().filename("lasttest-$id.js").build()
         return ResponseEntity
             .ok()
-            .contentType(K6_SCRIPT_MEDIA_TYPE)
+            .contentType(k6ScriptMediaType)
             .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
             .body(script)
     }
@@ -57,6 +62,8 @@ class LastTestController(
     fun invalid(exception: IllegalArgumentException): ResponseEntity<Map<String, Any>> = ResponseEntity.badRequest().body(mapOf("message" to (exception.message ?: "Ungültige Anfrage")))
 
     private companion object {
-        val K6_SCRIPT_MEDIA_TYPE: MediaType = MediaType.parseMediaType("application/javascript")
+        const val K6_SCRIPT_MEDIA_TYPE: String = "application/javascript"
+        const val DEMO_SPECIFICATION_MEDIA_TYPE: String = "application/yaml"
+        val k6ScriptMediaType: MediaType = MediaType.parseMediaType(K6_SCRIPT_MEDIA_TYPE)
     }
 }

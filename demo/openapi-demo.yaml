@@ -5,6 +5,13 @@ info:
   version: 1.0.0
 servers:
   - url: http://localhost:8286/demo-api
+    description: Lokale lasttest-Demo (funktioniert sofort)
+  - url: https://staging.lasttest.example.com/demo-api
+    description: Staging-Umgebung
+  - url: https://integration.lasttest.example.com/demo-api
+    description: Integration-Umgebung
+  - url: https://api.lasttest.example.com/demo-api
+    description: Produktion
 paths:
   /products:
     get:

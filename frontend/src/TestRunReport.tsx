@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import {
   checkSuccessRate,
   completedRequestCount,
+  copyTextToClipboard,
   formatBytes,
   formatInteger,
   formatNumber,
@@ -317,24 +318,31 @@ function GeneratedK6Script({
   generatedScript?: string
   scriptError: string
 }) {
-  return <details className="report-script">
-    <summary>Generiertes k6-Testskript</summary>
-    {scriptError && <div className="report-alert failure">{scriptError}</div>}
-    {!generatedScript && !scriptError && <div className="report-loading">k6-Testskript wird geladen …</div>}
-    {generatedScript && <>
-      <div className="script-warning"><strong>Sicherheitshinweis:</strong> Das exportierte Skript kann konfigurierte Header und Bearer-Tokens enthalten. Bitte sicher verwahren.</div>
-      <pre data-testid="generated-k6-script">{generatedScript}</pre>
-      <div className="script-command">
-        <span>Manueller Start</span>
-        <code>{manualK6Command(run.configuration, run.id)}</code>
-      </div>
-      <a
-        className="script-download"
-        href={k6ScriptUrl(run.id)}
-        download={k6ScriptDownloadName(run.id)}
-      >k6-Testskript herunterladen (.js) ↓</a>
-    </>}
-  </details>
+  return <>
+    <div className="script-actions-top">
+      {generatedScript && <CopyScriptButton text={generatedScript} />}
+    </div>
+    <details className="report-script">
+      <summary>Generiertes k6-Testskript</summary>
+      {scriptError && <div className="report-alert failure">{scriptError}</div>}
+      {!generatedScript && !scriptError && <div className="report-loading">k6-Testskript wird geladen …</div>}
+      {generatedScript && <>
+        <div className="script-warning"><strong>Sicherheitshinweis:</strong> Das exportierte Skript kann konfigurierte Header und Bearer-Tokens enthalten. Bitte sicher verwahren.</div>
+        <pre data-testid="generated-k6-script">{generatedScript}</pre>
+        <div className="script-actions">
+          <a
+            className="script-download"
+            href={k6ScriptUrl(run.id)}
+            download={k6ScriptDownloadName(run.id)}
+          >k6-Testskript herunterladen (.js) ↓</a>
+        </div>
+        <div className="script-command">
+          <span>Manueller Start</span>
+          <code>{manualK6Command(run.configuration, run.id)}</code>
+        </div>
+      </>}
+    </details>
+  </>
 }
 
 function PendingOrFailedReport({
@@ -363,4 +371,30 @@ function formatJson(raw: string): string {
   } catch {
     return raw
   }
+}
+
+
+function CopyScriptButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timeout = window.setTimeout(() => setCopied(false), 1500)
+    return () => window.clearTimeout(timeout)
+  }, [copied])
+
+  async function handleClick() {
+    if (await copyTextToClipboard(text)) setCopied(true)
+  }
+
+  return (
+    <button
+      type="button"
+      className={copied ? 'script-copy copied' : 'script-copy'}
+      aria-label={copied ? 'Skript in die Zwischenablage kopiert' : 'k6-Testskript in die Zwischenablage kopieren'}
+      onClick={handleClick}
+    >
+      {copied ? 'Kopiert ✓' : 'In Zwischenablage kopieren'}
+    </button>
+  )
 }

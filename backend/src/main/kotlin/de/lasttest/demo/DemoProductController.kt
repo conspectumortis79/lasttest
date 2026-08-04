@@ -18,12 +18,11 @@ import java.util.concurrent.atomic.AtomicLong
 @RestController
 @RequestMapping("/demo-api/products")
 class DemoProductController {
-    private val sequence = AtomicLong(2)
+    private val sequence = AtomicLong(SEED_LAST_ID)
     private val products = ConcurrentHashMap<Long, Product>()
 
     init {
-        products[1] = Product(1, "Clean Code", "books", 34.95, true)
-        products[2] = Product(2, "Mechanical Keyboard", "hardware", 89.90, true)
+        SEED_PRODUCTS.forEach { seed -> products[seed.id] = seed }
     }
 
     @GetMapping
@@ -64,9 +63,7 @@ class DemoProductController {
         @PathVariable id: Long,
         @RequestBody request: ProductRequest,
     ): ResponseEntity<Product> {
-        if (!products.containsKey(id)) {
-            return ResponseEntity.notFound().build()
-        }
+        if (!products.containsKey(id)) return ResponseEntity.notFound().build()
         val product = request.toProduct(id)
         products[id] = product
         return ResponseEntity.ok(product)
@@ -75,7 +72,14 @@ class DemoProductController {
     @DeleteMapping("/{id}")
     fun delete(
         @PathVariable id: Long,
-    ): ResponseEntity<Void> = if (products.remove(id) != null) ResponseEntity.noContent().build() else ResponseEntity.notFound().build()
+    ): ResponseEntity<Void> {
+        val template = SEED_BY_ID[id]
+        if (template != null) {
+            products[id] = template
+            return ResponseEntity.noContent().build()
+        }
+        return if (products.remove(id) != null) ResponseEntity.noContent().build() else ResponseEntity.notFound().build()
+    }
 
     private fun findProducts(
         category: String?,
@@ -100,6 +104,13 @@ class DemoProductController {
 
     private companion object {
         const val BEARER_PREFIX = "Bearer "
+        val SEED_PRODUCTS: List<Product> =
+            listOf(
+                Product(1, "Clean Code", "books", 34.95, true),
+                Product(2, "Mechanical Keyboard", "hardware", 89.90, true),
+            )
+        val SEED_BY_ID: Map<Long, Product> = SEED_PRODUCTS.associateBy(Product::id)
+        const val SEED_LAST_ID: Long = 2
     }
 }
 

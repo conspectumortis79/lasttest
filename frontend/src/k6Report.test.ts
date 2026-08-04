@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   checkSuccessRate,
   completedRequestCount,
+  copyTextToClipboard,
   formatBytes,
   formatInteger,
   formatNumber,
@@ -125,5 +126,71 @@ test('keeps unresolved paths and omits empty queries', () => {
   }
 
   equal(operationDisplayPath(operation), '/pets/{id}')
+})
+
+test('copyTextToClipboard returns true when navigator.clipboard.writeText resolves', async () => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { clipboard: { writeText: async () => undefined } },
+    configurable: true,
+    writable: true,
+  })
+  try {
+    equal(await copyTextToClipboard('hello world'), true)
+  } finally {
+    if (originalDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', originalDescriptor)
+    } else {
+      delete (globalThis as { navigator?: unknown }).navigator
+    }
+  }
+})
+
+test('copyTextToClipboard returns false when navigator.clipboard.writeText rejects', async () => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { clipboard: { writeText: async () => { throw new Error('denied') } } },
+    configurable: true,
+    writable: true,
+  })
+  try {
+    equal(await copyTextToClipboard('hello world'), false)
+  } finally {
+    if (originalDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', originalDescriptor)
+    } else {
+      delete (globalThis as { navigator?: unknown }).navigator
+    }
+  }
+})
+
+test('copyTextToClipboard returns false when navigator is not defined', async () => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  delete (globalThis as { navigator?: unknown }).navigator
+  try {
+    equal(await copyTextToClipboard('hello world'), false)
+  } finally {
+    if (originalDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', originalDescriptor)
+    }
+  }
+})
+
+test('copyTextToClipboard returns false when navigator.clipboard is unavailable', async () => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { clipboard: undefined },
+    configurable: true,
+    writable: true,
+  })
+  try {
+    equal(await copyTextToClipboard('hello world'), false)
+  } finally {
+    if (originalDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', originalDescriptor)
+    } else {
+      delete (globalThis as { navigator?: unknown }).navigator
+    }
+  }
 })
 

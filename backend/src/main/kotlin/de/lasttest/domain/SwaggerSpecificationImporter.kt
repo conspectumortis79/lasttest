@@ -3,6 +3,7 @@ package de.lasttest.domain
 import com.fasterxml.jackson.databind.ObjectMapper
 import de.lasttest.api.ApiOperation
 import de.lasttest.api.ApiParameter
+import de.lasttest.api.ApiServer
 import de.lasttest.api.ImportedSpecification
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.media.ArraySchema
@@ -10,6 +11,8 @@ import io.swagger.v3.oas.models.media.Schema
 import io.swagger.v3.oas.models.parameters.Parameter
 import io.swagger.v3.oas.models.security.SecurityRequirement
 import io.swagger.v3.oas.models.security.SecurityScheme
+import io.swagger.v3.oas.models.servers.Server
+import io.swagger.v3.oas.models.servers.ServerVariable
 import io.swagger.v3.parser.OpenAPIV3Parser
 import io.swagger.v3.parser.converter.SwaggerConverter
 import io.swagger.v3.parser.core.models.ParseOptions
@@ -73,13 +76,30 @@ class SwaggerSpecificationImporter : SpecificationImporter {
         if (operations.isEmpty()) {
             throw InvalidSpecificationException(listOf("Die Spezifikation enthält keine REST-Operationen."))
         }
+        val servers = extractServers(api)
         return ImportedSpecification(
             title = api.info?.title ?: "Unbenannte API",
             version = api.info?.version.orEmpty(),
-            baseUrl = api.servers?.firstOrNull()?.url ?: "",
+            baseUrl = servers.firstOrNull()?.url ?: "",
+            servers = servers,
             operations = operations.sortedWith(compareBy(ApiOperation::path, ApiOperation::method)),
         )
     }
+
+    internal fun extractServers(api: OpenAPI): List<ApiServer> = api.servers!!.mapNotNull(::toApiServer)
+
+    internal fun toApiServer(server: Server): ApiServer? {
+        val template = server.url?.takeIf { it.isNotBlank() } ?: return null
+        val variables = server.variables.orEmpty()
+        val resolved =
+            variables.entries.fold(template) { url, (name, variable) ->
+                val value = variable.defaultValue() ?: return@fold url
+                url.replace("{$name}", value)
+            }
+        return ApiServer(url = resolved, description = server.description?.takeIf { it.isNotBlank() })
+    }
+
+    private fun ServerVariable.defaultValue(): String? = default ?: enum?.firstOrNull()
 
     private fun parseDocument(content: String): OpenAPI {
         val openApiResult = OpenAPIV3Parser().readContents(content)

@@ -105,6 +105,44 @@ class DemoProductControllerTest(
     }
 
     @Test
+    fun `seeded products are reset to their default state after deletion so subsequent reads succeed`() {
+        val original = client.getForEntity(url("/products/1"), Product::class.java).body
+        assertEquals("Clean Code", original?.name)
+
+        val updated =
+            client.exchange(
+                url("/products/1"),
+                HttpMethod.PUT,
+                HttpEntity(ProductRequest("Dirty", "software", 1.0, false)),
+                Product::class.java,
+            )
+        assertEquals(HttpStatus.OK, updated.statusCode)
+        assertEquals("Dirty", updated.body?.name)
+
+        val deleted = client.exchange(url("/products/1"), HttpMethod.DELETE, HttpEntity.EMPTY, Void::class.java)
+        assertEquals(HttpStatus.NO_CONTENT, deleted.statusCode)
+
+        val afterDelete = client.getForEntity(url("/products/1"), Product::class.java)
+        assertEquals(HttpStatus.OK, afterDelete.statusCode)
+        assertEquals("Clean Code", afterDelete.body?.name)
+        assertEquals("books", afterDelete.body?.category)
+        assertEquals(34.95, afterDelete.body?.price)
+        assertEquals(true, afterDelete.body?.available)
+    }
+
+    @Test
+    fun `non-seeded products are actually removed by delete`() {
+        val created = client.postForEntity(url("/products"), ProductRequest("Ephemeral", "software", 9.99), Product::class.java)
+        val product = checkNotNull(created.body)
+        val createdId = product.id
+
+        val deleted = client.exchange(url("/products/$createdId"), HttpMethod.DELETE, HttpEntity.EMPTY, Void::class.java)
+        assertEquals(HttpStatus.NO_CONTENT, deleted.statusCode)
+
+        assertEquals(HttpStatus.NOT_FOUND, statusOfGet("/products/$createdId"))
+    }
+
+    @Test
     fun `unknown products cannot be updated or deleted`() {
         val updateStatus =
             statusOfExchange(

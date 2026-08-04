@@ -55,6 +55,7 @@ val coverageIncludes =
         "de/lasttest/api/LastTestController.class",
         "de/lasttest/config/StartupMessageLogger.class",
         "de/lasttest/demo/DemoProductController.class",
+        "de/lasttest/demo/DemoSpecificationProvider.class",
         "de/lasttest/domain/DefaultK6ScriptGenerator.class",
         "de/lasttest/domain/LocalK6TestRunService.class",
         "de/lasttest/domain/SwaggerSpecificationImporter.class",
@@ -66,6 +67,13 @@ fun JacocoReportBase.includeProductionLogic() {
             coverageIncludes.forEach(::include)
         },
     )
+}
+
+tasks.processResources {
+    from(layout.projectDirectory.dir("../demo")) {
+        include("openapi-demo.yaml")
+        into("demo")
+    }
 }
 
 tasks.jacocoTestReport {
