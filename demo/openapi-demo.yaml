@@ -1,0 +1,163 @@
+openapi: 3.0.3
+info:
+  title: Lasttest Demo API
+  description: Demo-Spezifikation zum Testen von GET-, POST-, PUT- und DELETE-Anfragen.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8286/demo-api
+paths:
+  /products:
+    get:
+      operationId: listProducts
+      summary: Produkte mit optionalem Filter auflisten
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [books, hardware, software]
+            example: books
+        - name: available
+          in: query
+          required: false
+          schema:
+            type: boolean
+            example: true
+        - name: maxPrice
+          in: query
+          required: false
+          schema:
+            type: number
+            format: double
+            minimum: 0.01
+            example: 50.00
+      responses:
+        '200':
+          description: Produktliste
+    post:
+      operationId: createProduct
+      summary: Neues Produkt anlegen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProduct'
+            example:
+              name: Clean Code
+              category: books
+              price: 34.95
+              available: true
+      responses:
+        '201':
+          description: Produkt angelegt
+  /products/search:
+    post:
+      operationId: searchProducts
+      summary: Produkte per JSON-Body suchen (Bearer-Demo)
+      description: Als Bearer-Token kann für die Demo ein beliebiger nicht-leerer Wert verwendet werden.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductSearch'
+            example:
+              category: hardware
+              available: true
+              maxPrice: 100.00
+      responses:
+        '200':
+          description: Gefilterte Produktliste
+        '401':
+          description: Bearer-Token fehlt
+  /products/{id}:
+    get:
+      operationId: getProduct
+      summary: Produkt anhand seiner ID abrufen
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Produkt gefunden
+        '404':
+          description: Produkt nicht gefunden
+    put:
+      operationId: updateProduct
+      summary: Produkt aktualisieren
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProduct'
+            example:
+              name: Clean Code, zweite Auflage
+              category: books
+              price: 39.95
+              available: true
+      responses:
+        '200':
+          description: Produkt aktualisiert
+    delete:
+      operationId: deleteProduct
+      summary: Produkt löschen
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '204':
+          description: Produkt gelöscht
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ProductId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        example: 1
+  schemas:
+    CreateProduct:
+      type: object
+      required: [name, category, price]
+      properties:
+        name:
+          type: string
+          example: Clean Code
+        category:
+          type: string
+          enum: [books, hardware, software]
+        price:
+          type: number
+          format: double
+          minimum: 0.01
+          example: 34.95
+        available:
+          type: boolean
+          default: true
+    ProductSearch:
+      type: object
+      properties:
+        category:
+          type: string
+          enum: [books, hardware, software]
+          example: hardware
+        available:
+          type: boolean
+          example: true
+        maxPrice:
+          type: number
+          format: double
+          minimum: 0.01
+          example: 100.00

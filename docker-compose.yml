@@ -1,0 +1,8 @@
+services:
+  lasttest:
+    build: .
+    ports:
+      - "8286:8286"
+    environment:
+      LASTTEST_PUBLIC_URL: http://localhost:8286/
+    restart: unless-stopped
