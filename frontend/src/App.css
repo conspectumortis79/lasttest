@@ -37,8 +37,13 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 .chevron { display: block; width: 18px; height: 18px; }
 .destructive-badge { position: absolute; top: .95rem; right: 3.6rem; padding: .15rem .5rem; border: 1px solid #793b4b; border-radius: 999px; color: #ffae78; background: #2a1820; font-size: .65rem; font-weight: 800; letter-spacing: .04rem; text-transform: uppercase; pointer-events: none; }
 .configuration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; padding: 0 .9rem .9rem .9rem; border-top: 1px solid #1a2435; padding-top: .9rem; }
-.parameter-box { display: block; min-width: 0; padding: .75rem; border: 1px solid #293950; border-radius: 9px; background: #111b29; color: #aeb9ca; }
-.parameter-box input { display: block; width: 100%; margin-top: .55rem; padding: .65rem; border: 1px solid #33425b; border-radius: 7px; color: white; background: #080d14; }
+.parameter-box { display: block; min-width: 0; padding: .75rem; border: 1px solid #293950; border-radius: 9px; background: #111b29; color: #aeb9ca; transition: border-color .15s ease, background-color .15s ease; }
+.parameter-box input { display: block; width: 100%; margin-top: .55rem; padding: .65rem; border: 1px solid #33425b; border-radius: 7px; color: white; background: #080d14; transition: border-color .15s ease, background-color .15s ease; }
+.parameter-box.has-error { border-color: #893c50; background: #1a1018; }
+.parameter-box.has-error input { border-color: #893c50; background: #1f0e16; }
+.parameter-error { display: flex; align-items: center; gap: .35rem; margin-top: .55rem; padding: .4rem .6rem; border: 1px solid #893c50; border-radius: 6px; color: #ffb5c3; background: rgba(70, 30, 42, .85); font-size: .78rem; line-height: 1.3; }
+.parameter-error::before { content: '⚠'; flex: 0 0 auto; font-size: .9rem; color: #ffb5c3; }
+.type-hint { padding: .15rem .4rem; border-radius: 4px; color: #b9c5d8; background: #1c2b3e; font-family: "SFMono-Regular", Consolas, monospace; font-size: .7rem; }
 .field-heading { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; min-height: 1.3rem; }
 .field-heading strong { color: #dbe5f3; }
 .field-heading code { padding: .15rem .35rem; border-radius: 4px; color: #8fdcc8; background: #1c2b3e; font-size: .72rem; }
@@ -59,6 +64,8 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 .grid input { display: block; width: 100%; margin-top: .4rem; padding: .7rem; border: 1px solid #33425b; border-radius: 8px; color: white; background: #080d14; }
 .grid small { display: block; margin-top: .3rem; color: #718198; }
 .start { margin-top: 1.3rem; width: 100%; background: linear-gradient(90deg, #755bff, #9a5df3); }
+.validation-summary { margin-top: 1.3rem; }
+.validation-hint { margin: 1rem 0 0; color: #93a2b8; font-size: .85rem; }
 .status { display: inline-block; border-radius: 20px; padding: .35rem .8rem; background: #344258; font-weight: 800; }.status.completed { background: #1d634f; }.status.failed { background: #7a3045; }
 .report-link { display: inline-block; margin: .5rem 0 1rem; padding: .75rem 1rem; border: 1px solid #7d63ff; border-radius: 9px; color: #dcd6ff; font-weight: 800; text-decoration: none; }
 .report-link:hover { background: #7d63ff22; }

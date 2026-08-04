@@ -411,3 +411,363 @@ test('runs the selected destructive endpoint with bearer token and downloads the
   ])
   expect(download.suggestedFilename()).toMatch(/^lasttest-.*\.js$/)
 })
+
+test('validates parameter values against the OpenAPI schema while the user types', async ({ page }) => {
+  const typedSpec = `openapi: 3.0.3
+info:
+  title: Typed API
+  version: "1"
+servers:
+  - url: http://localhost:8286/typed
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: count
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+        - name: price
+          in: query
+          required: false
+          schema:
+            type: number
+            format: double
+            minimum: 0.01
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [books, hardware, software]
+        - name: email
+          in: query
+          required: false
+          schema:
+            type: string
+            format: email
+        - name: enabled
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200': {description: OK}
+`
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'typed.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from(typedSpec),
+  })
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Typed API/ })).toBeVisible()
+  const card = page.locator('.operation-card').first()
+  await expect(card).toBeVisible()
+  const toggle = card.locator('button.expand-toggle')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+
+  const idInput = page.getByLabel('listItems: id')
+  const countInput = page.getByLabel('listItems: count')
+  const priceInput = page.getByLabel('listItems: price')
+  const categoryInput = page.getByLabel('listItems: category')
+  const emailInput = page.getByLabel('listItems: email')
+  const enabledInput = page.getByLabel('listItems: enabled')
+
+  // Schema-Typen werden als kleiner Hinweis angezeigt.
+  await expect(page.locator('.parameter-box', { has: idInput }).locator('.type-hint')).toHaveText('int64')
+  await expect(page.locator('.parameter-box', { has: countInput }).locator('.type-hint')).toHaveText('int32')
+  await expect(page.locator('.parameter-box', { has: priceInput }).locator('.type-hint')).toHaveText('double')
+  await expect(page.locator('.parameter-box', { has: categoryInput }).locator('.type-hint')).toHaveText('string enum')
+  await expect(page.locator('.parameter-box', { has: emailInput }).locator('.type-hint')).toHaveText('email')
+  await expect(page.locator('.parameter-box', { has: enabledInput }).locator('.type-hint')).toHaveText('boolean')
+
+  // Die importierten Beispielwerte (id=1, count=1, price=0.01, category=books, email=test@example.com, enabled=true)
+// sind alle schema-konform und lösen keinen Hinweis aus.
+  await expect(card.locator('.parameter-error')).toHaveCount(0)
+
+  // int64: Buchstaben → rote Fehlermeldung.
+  await idInput.fill('abc')
+  const idBox = page.locator('.parameter-box', { has: idInput })
+  await expect(idBox.locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Ganzzahl (long).')
+  await expect(idInput).toHaveAttribute('aria-invalid', 'true')
+
+  // int64: gültiger Wert → Fehlermeldung verschwindet.
+  await idInput.fill('42')
+  await expect(idBox.locator('.parameter-error')).toHaveCount(0)
+
+  // int32: out-of-range → Fehlermeldung über Bereich.
+  await countInput.fill('2147483648')
+  await expect(page.locator('.parameter-box', { has: countInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Ganzzahl (int32).')
+
+  // int32: unter minimum → eigene minimum-Meldung.
+  await countInput.fill('0')
+  await expect(page.locator('.parameter-box', { has: countInput }).locator('.parameter-error')).toHaveText('Ungültig: Wert muss ≥ 1 sein.')
+
+  // int32: gültig → Fehlermeldung verschwindet.
+  await countInput.fill('50')
+  await expect(page.locator('.parameter-box', { has: countInput }).locator('.parameter-error')).toHaveCount(0)
+
+  // double: Buchstaben → Fehlermeldung.
+  await priceInput.fill('not-a-number')
+  await expect(page.locator('.parameter-box', { has: priceInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Zahl (double).')
+
+  // double: gültige Dezimalzahl → ok.
+  await priceInput.fill('19.95')
+  await expect(page.locator('.parameter-box', { has: priceInput }).locator('.parameter-error')).toHaveCount(0)
+
+  // enum: ungültiger Wert → Meldung listet erlaubte Werte.
+  await categoryInput.fill('toys')
+  await expect(page.locator('.parameter-box', { has: categoryInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet einen Wert aus „books“, „hardware“ oder „software“.')
+
+  // enum: gültig → ok.
+  await categoryInput.fill('books')
+  await expect(page.locator('.parameter-box', { has: categoryInput }).locator('.parameter-error')).toHaveCount(0)
+
+  // email: ungültig → Meldung.
+  await emailInput.fill('not-an-email')
+  await expect(page.locator('.parameter-box', { has: emailInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet eine E-Mail-Adresse.')
+
+  // email: gültig → ok.
+  await emailInput.fill('user@example.com')
+  await expect(page.locator('.parameter-box', { has: emailInput }).locator('.parameter-error')).toHaveCount(0)
+
+  // boolean: „yes“ ist nicht erlaubt.
+  await enabledInput.fill('yes')
+  await expect(page.locator('.parameter-box', { has: enabledInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet true oder false.')
+
+  // boolean: „true“ ist erlaubt.
+  await enabledInput.fill('true')
+  await expect(page.locator('.parameter-box', { has: enabledInput }).locator('.parameter-error')).toHaveCount(0)
+})
+
+test('disables the start button when a parameter value is invalid and re-enables it on correction', async ({ page }) => {
+  const typedSpec = `openapi: 3.0.3
+info:
+  title: Typed API
+  version: "1"
+servers:
+  - url: http://localhost:8286/typed
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200': {description: OK}
+`
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'typed.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from(typedSpec),
+  })
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Typed API/ })).toBeVisible()
+  await expect(page.locator('.operation-card')).toHaveCount(1)
+
+  // Karten aufklappen, damit das id-Feld sichtbar wird.
+  const card = page.locator('.operation-card').first()
+  const toggle = card.locator('button.expand-toggle')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+
+  const idInput = page.getByLabel('listItems: id')
+  const startButton = page.getByRole('button', { name: 'k6-Lasttest starten' })
+
+  // Mit leerem Wert ist alles gültig → Button aktiv.
+  await expect(startButton).toBeEnabled()
+
+  // Buchstaben in das int64-Feld → Fehlermeldung + Button deaktiviert.
+  await idInput.fill('abc')
+  await expect(card.locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Ganzzahl (long).')
+  await expect(page.getByRole('alert').filter({ hasText: 'Bitte korrigiere die rot markierten Eingaben' })).toBeVisible()
+  await expect(startButton).toBeDisabled()
+
+  // Endpunkt abwählen → nichts zum Starten ausgewählt → Button bleibt deaktiviert.
+  await page.getByLabel('Endpunkt GET /items auswählen').uncheck()
+  await expect(startButton).toBeDisabled()
+
+  // Endpunkt erneut auswählen → Validierung greift wieder.
+  await page.getByLabel('Endpunkt GET /items auswählen').check()
+  await expect(startButton).toBeDisabled()
+
+  // Korrekten Wert eingeben → Fehler verschwindet, Button wird wieder aktiv.
+  await idInput.fill('42')
+  await expect(card.locator('.parameter-error')).toHaveCount(0)
+  await expect(startButton).toBeEnabled()
+})
+
+test('disables the start button when the JSON body does not match the OpenAPI schema', async ({ page }) => {
+  const typedSpec = `openapi: 3.0.3
+info:
+  title: Body API
+  version: "1"
+servers:
+  - url: http://localhost:8286/body
+paths:
+  /items:
+    post:
+      operationId: createItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, price]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                price:
+                  type: number
+                  minimum: 0.01
+      responses:
+        '201': {description: Created}
+`
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'body.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from(typedSpec),
+  })
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Body API/ })).toBeVisible()
+  await expect(page.locator('.operation-card')).toHaveCount(1)
+
+  // POST ist destruktiv → wird nicht auto-selektiert. Manuell auswählen.
+  await page.getByLabel('Endpunkt POST /items auswählen').check()
+
+  const card = page.locator('.operation-card').first()
+  const toggle = card.locator('button.expand-toggle')
+  await toggle.click()
+
+  const bodyInput = page.getByLabel('createItem: JSON Request-Body')
+  const startButton = page.getByRole('button', { name: 'k6-Lasttest starten' })
+
+  // Beispiel wird vom Backend gesetzt: ein gültiges Objekt. Button ist aktiv.
+  await expect(bodyInput).toHaveValue(/.+/)
+  await expect(startButton).toBeEnabled()
+
+  // JSON-Body entfernen → Pflicht-Body fehlt → Button deaktiviert.
+  await bodyInput.fill('')
+  await expect(card.locator('.parameter-error')).toHaveText('Ungültig: Pflicht-Request-Body ist leer.')
+  await expect(startButton).toBeDisabled()
+
+  // Ungültiges JSON.
+  await bodyInput.fill('{invalid}')
+  await expect(card.locator('.parameter-error')).toHaveText('Ungültig: kein gültiges JSON.')
+  await expect(startButton).toBeDisabled()
+
+  // JSON ok, aber Pflichtfeld fehlt.
+  await bodyInput.fill('{"price":1.5}')
+  await expect(card.locator('.parameter-error')).toHaveText('Ungültig: Pflichtfeld „name“ fehlt.')
+  await expect(startButton).toBeDisabled()
+
+  // JSON ok, aber falscher Typ.
+  await bodyInput.fill('{"name":"Luna","price":"viel"}')
+  await expect(card.locator('.parameter-error')).toContainText('erwartet eine Zahl (double)')
+  await expect(startButton).toBeDisabled()
+
+  // Unter minimum.
+  await bodyInput.fill('{"name":"Luna","price":0}')
+  await expect(card.locator('.parameter-error')).toContainText('Wert muss ≥ 0.01 sein')
+  await expect(startButton).toBeDisabled()
+
+  // Gültiger Body.
+  await bodyInput.fill('{"name":"Luna","price":1.5}')
+  await expect(card.locator('.parameter-error')).toHaveCount(0)
+  await expect(startButton).toBeEnabled()
+})
+
+test('revalidates when the user switches the selected endpoint', async ({ page }) => {
+  const twoEndpointsSpec = `openapi: 3.0.3
+info:
+  title: Two Endpoints
+  version: "1"
+servers:
+  - url: http://localhost:8286/two
+paths:
+  /alpha:
+    get:
+      operationId: getAlpha
+      parameters:
+        - name: id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200': {description: OK}
+  /beta:
+    get:
+      operationId: getBeta
+      parameters:
+        - name: flag
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [a, b, c]
+      responses:
+        '200': {description: OK}
+`
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'two.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from(twoEndpointsSpec),
+  })
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Two Endpoints/ })).toBeVisible()
+  await expect(page.locator('.operation-card')).toHaveCount(2)
+
+  // getAlpha ist initial ausgewählt. Wir machen es ungültig.
+  const alphaCard = page.locator('.operation-card', { has: page.locator('.operation-id', { hasText: 'getAlpha' }) })
+  const betaCard = page.locator('.operation-card', { has: page.locator('.operation-id', { hasText: 'getBeta' }) })
+  await alphaCard.locator('button.expand-toggle').click()
+  await page.getByLabel('getAlpha: id').fill('abc')
+  const startButton = page.getByRole('button', { name: 'k6-Lasttest starten' })
+  await expect(startButton).toBeDisabled()
+
+  // Wechsel zu getBeta: alpha-Wert bleibt ungültig, aber die ausgewählte Operation ist neu.
+  // Beta hat einen gültigen Beispielwert (erster enum-Wert "a") → Button wird wieder aktiv.
+  await page.getByLabel('Endpunkt GET /alpha auswählen').uncheck()
+  await page.getByLabel('Endpunkt GET /beta auswählen').check()
+  await expect(startButton).toBeEnabled()
+
+  // Beta ungültig machen → Button wird deaktiviert.
+  await betaCard.locator('button.expand-toggle').click()
+  await page.getByLabel('getBeta: flag').fill('toys')
+  await expect(startButton).toBeDisabled()
+
+  // Zurück zu Alpha: alpha hat immer noch den ungültigen Wert → Button bleibt deaktiviert.
+  await page.getByLabel('Endpunkt GET /beta auswählen').uncheck()
+  await page.getByLabel('Endpunkt GET /alpha auswählen').check()
+  await expect(startButton).toBeDisabled()
+
+  // Alpha wieder gültig machen → Button wird wieder aktiv.
+  await page.getByLabel('getAlpha: id').fill('5')
+  await expect(startButton).toBeEnabled()
+})

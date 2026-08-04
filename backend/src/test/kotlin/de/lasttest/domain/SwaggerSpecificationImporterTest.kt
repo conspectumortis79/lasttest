@@ -33,6 +33,85 @@ class SwaggerSpecificationImporterTest {
     }
 
     @Test
+    fun `extracts request body schema with required properties and nested property types`() {
+        val imported = importer.import(SPECIFICATION_WITH_REQUEST_BODY_SCHEMA)
+
+        val operation = imported.operations.single { it.operationId == "createItem" }
+        val schema = operation.requestBodySchema
+        assertEquals("object", schema?.type)
+        assertEquals(listOf("name", "price"), schema?.required)
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "string", minLength = 1, maxLength = 200),
+            schema?.properties?.get("name"),
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "number", format = "double", minimum = 0.01),
+            schema?.properties?.get("price"),
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "boolean"),
+            schema?.properties?.get("available"),
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "string", enum = listOf("books", "hardware")),
+            schema?.properties?.get("category"),
+        )
+        assertTrue(operation.hasRequestBody)
+        assertTrue(operation.requestBodyRequired)
+    }
+
+    @Test
+    fun `omits request body schema when the schema is missing or has no object properties`() {
+        val noSchema = importer.import(REQUEST_BODY_WITHOUT_SCHEMA)
+        assertEquals(null, noSchema.operations.single().requestBodySchema)
+
+        val nonObject = importer.import(REQUEST_BODY_NON_OBJECT_SCHEMA)
+        assertEquals(null, nonObject.operations.single().requestBodySchema)
+    }
+
+    @Test
+    fun `extracts parameter schema for type format enum and bounds`() {
+        val imported = importer.import(SPECIFICATION_WITH_SCHEMA)
+
+        val parameters =
+            imported.operations
+                .single { it.operationId == "mixed" }
+                .parameters
+                .associateBy { it.name }
+
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(
+                type = "integer",
+                format = "int64",
+                minimum = 1.0,
+                maximum = 100.0,
+            ),
+            parameters["count"]?.schema,
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "number", format = "double", minimum = 0.01, maximum = 9999.99),
+            parameters["price"]?.schema,
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "string", format = "email", minLength = 3, maxLength = 254, pattern = "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"),
+            parameters["email"]?.schema,
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "string", enum = listOf("red", "green", "blue")),
+            parameters["color"]?.schema,
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "boolean"),
+            parameters["flag"]?.schema,
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "custom"),
+            parameters["raw"]?.schema,
+        )
+        assertEquals(null, parameters["missing"]?.schema)
+    }
+
+    @Test
     fun `imports and converts Swagger 2 documentation`() {
         val imported = importer.import(SWAGGER_2_SPECIFICATION)
 
@@ -209,6 +288,39 @@ class SwaggerSpecificationImporterTest {
     fun `creates operation ids for normal and empty parser inputs`() {
         assertEquals("getpets_id", importer.operationId("GET", "/pets/{id}"))
         assertEquals("", importer.operationId("", ""))
+    }
+
+    @Test
+    fun `toParameterSchema handles blank type blank format blank pattern and empty enum`() {
+        assertEquals(null, importer.toParameterSchema(Schema<Any>().type("")))
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "string"),
+            importer.toParameterSchema(Schema<Any>().type("string").format("")),
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "string"),
+            importer.toParameterSchema(Schema<Any>().type("string").pattern("")),
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "string", enum = listOf("a", "b")),
+            importer.toParameterSchema(Schema<Any>().type("string")._enum(listOf<Any>("a", "b"))),
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "string"),
+            importer.toParameterSchema(Schema<Any>().type("string")._enum(listOf(""))),
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "integer", minimum = 1.0),
+            importer.toParameterSchema(Schema<Any>().type("integer").minimum(BigDecimal.ONE)),
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "integer", minimum = 1.0, maximum = 9.0),
+            importer.toParameterSchema(Schema<Any>().type("integer").minimum(BigDecimal.ONE).maximum(BigDecimal.valueOf(9))),
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "string", minLength = 2, maxLength = 8),
+            importer.toParameterSchema(Schema<Any>().type("string").minLength(2).maxLength(8)),
+        )
     }
 
     @Test
@@ -542,6 +654,142 @@ class SwaggerSpecificationImporterTest {
                   type: http
                   scheme: bearer
                   bearerFormat: JWT
+            """.trimIndent()
+
+        val SPECIFICATION_WITH_SCHEMA =
+            """
+            openapi: 3.0.3
+            info:
+              title: Schema API
+              version: "1.0"
+            servers:
+              - url: https://schema.example.test
+            paths:
+              /items:
+                get:
+                  operationId: mixed
+                  parameters:
+                    - name: count
+                      in: query
+                      required: false
+                      schema:
+                        type: integer
+                        format: int64
+                        minimum: 1
+                        maximum: 100
+                    - name: price
+                      in: query
+                      required: false
+                      schema:
+                        type: number
+                        format: double
+                        minimum: 0.01
+                        maximum: 9999.99
+                    - name: email
+                      in: query
+                      required: false
+                      schema:
+                        type: string
+                        format: email
+                        minLength: 3
+                        maxLength: 254
+                        pattern: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+                    - name: color
+                      in: query
+                      required: false
+                      schema:
+                        type: string
+                        enum: [red, green, blue]
+                    - name: flag
+                      in: query
+                      required: false
+                      schema:
+                        type: boolean
+                    - name: raw
+                      in: query
+                      required: false
+                      schema:
+                        type: custom
+                    - name: missing
+                      in: query
+                      required: false
+                  responses:
+                    '200': {description: OK}
+            """.trimIndent()
+
+        val SPECIFICATION_WITH_REQUEST_BODY_SCHEMA =
+            """
+            openapi: 3.0.3
+            info:
+              title: Body Schema API
+              version: "1.0"
+            servers:
+              - url: https://body.example.test
+            paths:
+              /items:
+                post:
+                  operationId: createItem
+                  requestBody:
+                    required: true
+                    content:
+                      application/json:
+                        schema:
+                          type: object
+                          required: [name, price]
+                          properties:
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 200
+                            price:
+                              type: number
+                              format: double
+                              minimum: 0.01
+                            available:
+                              type: boolean
+                            category:
+                              type: string
+                              enum: [books, hardware]
+                  responses:
+                    '201': {description: Created}
+            """.trimIndent()
+
+        val REQUEST_BODY_WITHOUT_SCHEMA =
+            """
+            openapi: 3.0.3
+            info:
+              title: Plain Body API
+              version: "1.0"
+            paths:
+              /notes:
+                post:
+                  operationId: createNote
+                  requestBody:
+                    required: true
+                    content:
+                      application/json: {}
+                  responses:
+                    '201': {description: Created}
+            """.trimIndent()
+
+        val REQUEST_BODY_NON_OBJECT_SCHEMA =
+            """
+            openapi: 3.0.3
+            info:
+              title: Array Body API
+              version: "1.0"
+            paths:
+              /bulk:
+                post:
+                  operationId: createBulk
+                  requestBody:
+                    content:
+                      application/json:
+                        schema:
+                          type: array
+                          items: {type: string}
+                  responses:
+                    '201': {description: Created}
             """.trimIndent()
     }
 }

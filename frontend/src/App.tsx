@@ -7,10 +7,16 @@ import {
   buildOperationConfigurations,
   createOperationSettings,
   hasMultipleServers,
+  isOperationValid,
   parameterKey,
+  validateOperationSettings,
+  validateParameterValue,
+  validateRequestBody,
   type ImportedSpecification,
   type Operation,
   type OperationSettings,
+  type ParameterSchema,
+  type RequestBodySchema,
 } from './operationConfiguration.ts'
 
 type ImportResponse = ImportedSpecification & { message?: string }
@@ -252,7 +258,25 @@ function LoadTestApp() {
           <label>Virtual Users<input type="number" min="1" max={MAX_VIRTUAL_USERS} step="1" value={vus} aria-describedby="virtual-users-hint" onChange={event => setVus(Number(event.target.value))} /><small id="virtual-users-hint">1 bis {MAX_VIRTUAL_USERS}</small></label>
           <label>Dauer (Sekunden)<input type="number" min="1" max={MAX_DURATION_SECONDS} step="1" value={duration} aria-describedby="duration-hint" onChange={event => setDuration(Number(event.target.value))} /><small id="duration-hint">1 bis {MAX_DURATION_SECONDS} Sekunden</small></label>
         </div>
-        <button className="start" onClick={startTest} disabled={busy || selected.size === 0}>k6-Lasttest starten</button>
+        {(() => {
+          const selectedOperation = imported.operations.find(operation => selected.has(operation.operationId))
+          const selectedValidation = selectedOperation
+            ? validateOperationSettings(selectedOperation, operationSettings[selectedOperation.operationId])
+            : undefined
+          const hasValidationErrors = selectedValidation !== undefined && !isOperationValid(selectedValidation)
+          const hint = !selectedOperation
+            ? undefined
+            : hasValidationErrors
+              ? 'Bitte korrigiere die rot markierten Eingaben, bevor der Lasttest startet.'
+              : selectedOperation.hasRequestBody
+                ? 'JSON-Body und Parameter werden gegen die OpenAPI-Spezifikation geprüft.'
+                : 'Parameter werden gegen die OpenAPI-Spezifikation geprüft.'
+          return <>
+            {hasValidationErrors && <div className="error validation-summary" role="alert">{hint}</div>}
+            {!hasValidationErrors && hint && <p className="validation-hint">{hint}</p>}
+            <button className="start" onClick={startTest} disabled={busy || selected.size === 0 || hasValidationErrors}>k6-Lasttest starten</button>
+          </>
+        })()}
       </section>
     </>}
 
@@ -324,34 +348,51 @@ function OperationEditor({
     {expanded && <div className="configuration-grid">
       {operation.parameters.map(parameter => {
         const key = parameterKey(parameter)
-        return <label className="parameter-box" key={key}>
+        const value = settings.parameterValues[key] ?? ''
+        const validation = validateParameterValue(value, parameter.schema)
+        const errorMessage = validation.valid ? undefined : validation.message
+        const errorId = errorMessage ? `${operation.operationId}-${parameter.name}-error` : undefined
+        return <label className={`parameter-box ${errorMessage ? 'has-error' : ''}`} key={key}>
           <span className="field-heading">
             <strong>{parameter.name}</strong>
             <code>{parameter.location}</code>
+            {parameter.schema && <span className="type-hint">{formatParameterType(parameter.schema)}</span>}
             {parameter.required && <em>Pflicht</em>}
           </span>
+          {errorMessage && <div className="parameter-error" role="alert" id={errorId}>{errorMessage}</div>}
           <input
             aria-label={`${operation.operationId}: ${parameter.name}`}
-            value={settings.parameterValues[key] ?? ''}
+            aria-invalid={errorMessage ? true : undefined}
+            aria-describedby={errorId}
+            value={value}
             onChange={event => onParameterChange(key, event.target.value)}
           />
         </label>
       })}
 
-      {operation.hasRequestBody && <label className="parameter-box body-box">
-        <span className="field-heading">
-          <strong>JSON Request-Body</strong>
-          <code>body</code>
-          {operation.requestBodyRequired && <em>Pflicht</em>}
-        </span>
-        <textarea
-          className="request-body"
-          aria-label={`${operation.operationId}: JSON Request-Body`}
-          value={settings.requestBodyJson}
-          onChange={event => onRequestBodyChange(event.target.value)}
-          spellCheck={false}
-        />
-      </label>}
+      {operation.hasRequestBody && (() => {
+        const bodyResult = validateRequestBody(settings.requestBodyJson, operation.requestBodySchema, operation.requestBodyRequired)
+        const bodyError = bodyResult.valid ? undefined : bodyResult.message
+        const bodyErrorId = bodyError ? `${operation.operationId}-body-error` : undefined
+        return <label className={`parameter-box body-box ${bodyError ? 'has-error' : ''}`}>
+          <span className="field-heading">
+            <strong>JSON Request-Body</strong>
+            <code>body</code>
+            {operation.requestBodySchema && <span className="type-hint">{formatRequestBodyType(operation.requestBodySchema)}</span>}
+            {operation.requestBodyRequired && <em>Pflicht</em>}
+          </span>
+          {bodyError && <div className="parameter-error" role="alert" id={bodyErrorId}>{bodyError}</div>}
+          <textarea
+            className="request-body"
+            aria-label={`${operation.operationId}: JSON Request-Body`}
+            aria-invalid={bodyError ? true : undefined}
+            aria-describedby={bodyErrorId}
+            value={settings.requestBodyJson}
+            onChange={event => onRequestBodyChange(event.target.value)}
+            spellCheck={false}
+          />
+        </label>
+      })()}
 
       <label className={`parameter-box auth-box ${operation.bearerAuth ? 'documented-auth' : ''}`}>
         <span className="field-heading">
@@ -370,6 +411,18 @@ function OperationEditor({
       </label>
     </div>}
   </article>
+}
+
+function formatParameterType(schema: ParameterSchema): string {
+  if (schema.enum) return `${schema.type} enum`
+  if (schema.format) return schema.format
+  return schema.type
+}
+
+function formatRequestBodyType(schema: RequestBodySchema): string {
+  const requiredCount = schema.required?.length ?? 0
+  if (requiredCount === 0) return 'object'
+  return `object · ${requiredCount} Pflicht`
 }
 
 export default App

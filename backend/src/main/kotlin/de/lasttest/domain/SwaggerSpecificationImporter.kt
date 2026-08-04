@@ -3,8 +3,10 @@ package de.lasttest.domain
 import com.fasterxml.jackson.databind.ObjectMapper
 import de.lasttest.api.ApiOperation
 import de.lasttest.api.ApiParameter
+import de.lasttest.api.ApiParameterSchema
 import de.lasttest.api.ApiServer
 import de.lasttest.api.ImportedSpecification
+import de.lasttest.api.RequestBodySchema
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.media.ArraySchema
 import io.swagger.v3.oas.models.media.Schema
@@ -46,27 +48,29 @@ class SwaggerSpecificationImporter : SpecificationImporter {
             api.paths.orEmpty().flatMap { (path, pathItem) ->
                 pathItem.readOperationsMap().map { (method, operation) ->
                     val parameters = combineParameters(pathItem.parameters, operation.parameters)
+                    val primaryMedia =
+                        operation.requestBody
+                            ?.content
+                            ?.values
+                            ?.firstOrNull()
                     ApiOperation(
                         operationId = operation.operationId ?: operationId(method.name, path),
                         method = method.name,
                         path = path,
                         summary = operation.summary.orEmpty(),
                         destructive = method.name in DESTRUCTIVE_METHODS,
-                        parameters = parameters.map(::toParameter),
+                        parameters = parameters.mapNotNull(::toParameter),
                         requestBodyExample =
-                            operation.requestBody
-                                ?.content
-                                ?.values
-                                ?.firstOrNull()
-                                ?.let { media ->
-                                    media.example?.let(::normalizeExample)
-                                        ?: media.examples
-                                            ?.values
-                                            ?.firstOrNull()
-                                            ?.value
-                                            ?.let(::normalizeExample)
-                                        ?: media.schema?.let(::exampleFor)
-                                },
+                            primaryMedia?.let { media ->
+                                media.example?.let(::normalizeExample)
+                                    ?: media.examples
+                                        ?.values
+                                        ?.firstOrNull()
+                                        ?.value
+                                        ?.let(::normalizeExample)
+                                    ?: media.schema?.let(::exampleFor)
+                            },
+                        requestBodySchema = primaryMedia?.schema?.let(::toRequestBodySchema),
                         hasRequestBody = operation.requestBody != null,
                         requestBodyRequired = operation.requestBody?.required == true,
                         bearerAuth = usesBearerAuthentication(operation.security, api.security, bearerSecuritySchemes),
@@ -138,13 +142,53 @@ class SwaggerSpecificationImporter : SpecificationImporter {
         return requirements.any { requirement -> requirement.keys.any(bearerSecuritySchemes::contains) }
     }
 
-    private fun toParameter(parameter: Parameter): ApiParameter =
-        ApiParameter(
-            name = parameter.name,
+    private fun toParameter(parameter: Parameter): ApiParameter? {
+        val name = parameter.name?.takeIf { it.isNotBlank() } ?: return null
+        return ApiParameter(
+            name = name,
             location = parameter.`in`,
             required = parameter.required == true || parameter.`in` == "path",
             example = parameter.example ?: parameter.schema?.let(::exampleFor),
+            schema = parameter.schema?.let(::toParameterSchema),
         )
+    }
+
+    internal fun toParameterSchema(schema: Schema<*>): ApiParameterSchema? {
+        val type = schema.type?.takeIf { it.isNotBlank() } ?: return null
+        val format = schema.format?.takeIf { it.isNotBlank() }
+        val enum =
+            schema.enum
+                ?.map { it?.toString() ?: "" }
+                ?.filter { it.isNotEmpty() }
+                ?.takeIf { it.isNotEmpty() }
+        return ApiParameterSchema(
+            type = type,
+            format = format,
+            enum = enum,
+            minimum = schema.minimum?.toString()?.toDoubleOrNull(),
+            maximum = schema.maximum?.toString()?.toDoubleOrNull(),
+            exclusiveMinimum = null,
+            exclusiveMaximum = null,
+            minLength = schema.minLength,
+            maxLength = schema.maxLength,
+            pattern = schema.pattern?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    internal fun toRequestBodySchema(schema: Schema<*>): RequestBodySchema? {
+        val properties =
+            schema.properties
+                .orEmpty()
+                .mapNotNull { (name, child) ->
+                    toParameterSchema(child)?.let { name to it }
+                }.toMap()
+        if (properties.isEmpty() && schema.type != "object") return null
+        return RequestBodySchema(
+            type = schema.type?.takeIf { it.isNotBlank() } ?: "object",
+            properties = properties,
+            required = schema.required.orEmpty(),
+        )
+    }
 
     internal fun normalizeExample(value: Any): Any? = objectMapper.convertValue(value, Any::class.java)
 

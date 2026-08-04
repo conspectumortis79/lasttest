@@ -1,5 +1,7 @@
 package de.lasttest.api
 
+import com.fasterxml.jackson.annotation.JsonInclude
+
 data class ImportSpecificationRequest(
     val specification: String,
 )
@@ -25,9 +27,17 @@ data class ApiOperation(
     val destructive: Boolean,
     val parameters: List<ApiParameter>,
     val requestBodyExample: Any?,
-    val hasRequestBody: Boolean = requestBodyExample != null,
+    val requestBodySchema: RequestBodySchema? = null,
+    val hasRequestBody: Boolean = requestBodyExample != null || requestBodySchema != null,
     val requestBodyRequired: Boolean = false,
     val bearerAuth: Boolean = false,
+)
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class RequestBodySchema(
+    val type: String,
+    val properties: Map<String, ApiParameterSchema> = emptyMap(),
+    val required: List<String> = emptyList(),
 )
 
 data class ApiParameter(
@@ -35,6 +45,21 @@ data class ApiParameter(
     val location: String,
     val required: Boolean,
     val example: Any?,
+    val schema: ApiParameterSchema? = null,
+)
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class ApiParameterSchema(
+    val type: String,
+    val format: String? = null,
+    val enum: List<String>? = null,
+    val minimum: Double? = null,
+    val maximum: Double? = null,
+    val exclusiveMinimum: Double? = null,
+    val exclusiveMaximum: Double? = null,
+    val minLength: Int? = null,
+    val maxLength: Int? = null,
+    val pattern: String? = null,
 )
 
 data class ParameterValue(
