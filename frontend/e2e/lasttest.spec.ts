@@ -379,7 +379,6 @@ paths:
 })
 
 test('runs the selected destructive endpoint with bearer token and downloads the k6 script', async ({ page }) => {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
   await expect(specification).toContainText('Lasttest Demo API')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
@@ -403,11 +402,12 @@ test('runs the selected destructive endpoint with bearer token and downloads the
   await report.waitForLoadState('networkidle')
   await expect(report.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
 
-  const copyButton = report.getByRole('button', { name: /k6-Testskript in die Zwischenablage kopieren/ })
-  await expect(copyButton).toBeVisible()
-  await copyButton.click()
-  await expect(report.getByRole('button', { name: /Skript in die Zwischenablage kopiert/ })).toBeVisible()
-  const clipboardContents = await page.evaluate(() => navigator.clipboard.readText())
-  expect(clipboardContents).toContain('import http from \'k6/http\'')
-  expect(clipboardContents).toBe(await report.getByTestId('generated-k6-script').textContent())
+  await report.getByText('Generiertes k6-Testskript', { exact: true }).click()
+  const downloadLink = report.getByRole('link', { name: /k6-Testskript herunterladen/ })
+  await expect(downloadLink).toBeVisible()
+  const [download] = await Promise.all([
+    report.waitForEvent('download'),
+    downloadLink.click(),
+  ])
+  expect(download.suggestedFilename()).toMatch(/^lasttest-.*\.js$/)
 })

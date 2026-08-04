@@ -318,10 +318,8 @@ function GeneratedK6Script({
   generatedScript?: string
   scriptError: string
 }) {
+  const command = manualK6Command(run.configuration, run.id)
   return <>
-    <div className="script-actions-top">
-      {generatedScript && <CopyScriptButton text={generatedScript} />}
-    </div>
     <details className="report-script">
       <summary>Generiertes k6-Testskript</summary>
       {scriptError && <div className="report-alert failure">{scriptError}</div>}
@@ -337,8 +335,17 @@ function GeneratedK6Script({
           >k6-Testskript herunterladen (.js) ↓</a>
         </div>
         <div className="script-command">
-          <span>Manueller Start</span>
-          <code>{manualK6Command(run.configuration, run.id)}</code>
+          <div className="script-command-header">
+            <span>Manueller Start</span>
+            <CopyButton
+              text={command}
+              label="Befehl kopieren"
+              copiedLabel="Kopiert ✓"
+              ariaLabel="Manuellen k6-Startbefehl in die Zwischenablage kopieren"
+              copiedAriaLabel="k6-Startbefehl in die Zwischenablage kopiert"
+            />
+          </div>
+          <code>{command}</code>
         </div>
       </>}
     </details>
@@ -374,7 +381,15 @@ function formatJson(raw: string): string {
 }
 
 
-function CopyScriptButton({ text }: { text: string }) {
+type CopyButtonProps = {
+  text: string
+  label: string
+  copiedLabel: string
+  ariaLabel: string
+  copiedAriaLabel: string
+}
+
+function CopyButton({ text, label, copiedLabel, ariaLabel, copiedAriaLabel }: CopyButtonProps) {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -391,10 +406,10 @@ function CopyScriptButton({ text }: { text: string }) {
     <button
       type="button"
       className={copied ? 'script-copy copied' : 'script-copy'}
-      aria-label={copied ? 'Skript in die Zwischenablage kopiert' : 'k6-Testskript in die Zwischenablage kopieren'}
+      aria-label={copied ? copiedAriaLabel : ariaLabel}
       onClick={handleClick}
     >
-      {copied ? 'Kopiert ✓' : 'In Zwischenablage kopieren'}
+      {copied ? copiedLabel : label}
     </button>
   )
 }
