@@ -1,6 +1,8 @@
 import { deepEqual, equal } from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  checkSuccessRate,
+  completedRequestCount,
   formatBytes,
   formatInteger,
   formatNumber,
@@ -34,6 +36,20 @@ test('parses the k6 summary metrics', () => {
 
   deepEqual(summary?.metrics.checks, { passes: 10, fails: 0, value: 1 })
   deepEqual(summary?.metrics.http_reqs, { count: 20, rate: 2 })
+})
+
+test('calculates completed requests and check success rates', () => {
+  const summary = parseK6Summary(run)!
+
+  equal(completedRequestCount(summary), 20)
+  equal(checkSuccessRate(summary), 100)
+  equal(checkSuccessRate({ metrics: { checks: { passes: 3, fails: 1 } } }), 75)
+  equal(checkSuccessRate({ metrics: { checks: { passes: 1 } } }), 100)
+  equal(checkSuccessRate({ metrics: { checks: { fails: 1 } } }), 0)
+  equal(completedRequestCount({ metrics: { http_reqs: { count: Number.NaN } } }), undefined)
+  equal(completedRequestCount({ metrics: {} }), undefined)
+  equal(checkSuccessRate({ metrics: { checks: { passes: 0, fails: 0 } } }), undefined)
+  equal(checkSuccessRate({ metrics: {} }), undefined)
 })
 
 test('rejects a malformed or incomplete k6 summary', () => {

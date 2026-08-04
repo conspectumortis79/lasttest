@@ -55,6 +55,7 @@ class DefaultK6ScriptGeneratorTest {
 
         assertTrue(script.contains("vus: 2"))
         assertTrue(script.contains("duration: '15s'"))
+        assertTrue(script.contains("gracefulStop: '0s'"))
         assertTrue(script.contains("/pets/42?expand=owner"))
         assertTrue(script.contains("\"operationId\":\"getPet\""))
         assertTrue(!script.contains("deletePet"))

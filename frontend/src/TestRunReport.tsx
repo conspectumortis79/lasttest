@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
+  checkSuccessRate,
+  completedRequestCount,
   formatBytes,
   formatInteger,
   formatNumber,
@@ -134,18 +136,21 @@ function CompletedReport({
   const failed = metric(summary, 'http_req_failed')
   const duration = metric(summary, 'http_req_duration')
   const iterations = metric(summary, 'iterations')
-  const checksTotal = (checks.passes ?? 0) + (checks.fails ?? 0)
-  const checkRate = checksTotal > 0 ? (checks.passes ?? 0) / checksTotal * 100 : 0
-  const failureRate = (failed.value ?? 0) * 100
+  const requestCount = completedRequestCount(summary)
+  const checkRate = checkSuccessRate(summary)
+  const failureRate = failed.value == null ? undefined : failed.value * 100
   const durationThresholdPassed = (duration['p(95)'] ?? Number.POSITIVE_INFINITY) < 1000
   const failureThresholdPassed = (failed.value ?? Number.POSITIVE_INFINITY) < 0.05
 
   return <>
     <section className="report-section">
       <h2>Zusammenfassung</h2>
+      {requestCount == null || requestCount === 0
+        ? <div className="report-alert failure">Keine HTTP-Anfrage wurde abgeschlossen. Das Ziel war aus dem k6-Container nicht erreichbar oder antwortete nicht rechtzeitig. Prüfe DNS, Firewall, Proxy und den Zugriff aus dem Container.</div>
+        : null}
       <div className="report-cards">
-        <ReportCard label="Checks erfolgreich" value={`${formatNumber(checkRate)} %`} detail={`${formatInteger(checks.passes)} bestanden, ${formatInteger(checks.fails)} fehlgeschlagen`} success={checkRate === 100} />
-        <ReportCard label="HTTP-Fehlerrate" value={`${formatNumber(failureRate)} %`} detail={`${formatInteger(requests.count)} Requests insgesamt`} success={failureRate < 5} />
+        <ReportCard label="Checks erfolgreich" value={formatPercentage(checkRate)} detail={`${formatInteger(checks.passes)} bestanden, ${formatInteger(checks.fails)} fehlgeschlagen`} success={checkRate === 100} />
+        <ReportCard label="HTTP-Fehlerrate" value={formatPercentage(failureRate)} detail={`${formatInteger(requestCount)} Requests insgesamt`} success={failureRate != null && failureRate < 5} />
         <ReportCard label="p(95) Antwortzeit" value={`${formatNumber(duration['p(95)'])} ms`} detail="Grenzwert: < 1.000 ms" success={durationThresholdPassed} />
         <ReportCard label="HTTP Requests" value={formatInteger(requests.count)} detail={`${formatNumber(requests.rate)} Requests/s`} />
         <ReportCard label="Iterationen" value={formatInteger(iterations.count)} detail={`${formatNumber(iterations.rate)} Iterationen/s`} />
@@ -155,7 +160,7 @@ function CompletedReport({
       <h3>Thresholds</h3>
       <div className="report-thresholds">
         <Threshold passed={durationThresholdPassed} name="http_req_duration">p(95) = {formatNumber(duration['p(95)'])} ms &lt; 1.000 ms</Threshold>
-        <Threshold passed={failureThresholdPassed} name="http_req_failed">Rate = {formatNumber(failureRate)} % &lt; 5 %</Threshold>
+        <Threshold passed={failureThresholdPassed} name="http_req_failed">Rate = {formatPercentage(failureRate)} &lt; 5 %</Threshold>
       </div>
 
       <h3>Laufdaten</h3>
@@ -173,6 +178,10 @@ function CompletedReport({
     <DetailedMetrics summary={summary} />
     <RawResults run={run} generatedScript={generatedScript} scriptError={scriptError} />
   </>
+}
+
+function formatPercentage(value: number | undefined): string {
+  return value == null ? '–' : `${formatNumber(value)} %`
 }
 
 function ReportCard({ label, value, detail, success = false }: { label: string, value: string, detail: string, success?: boolean }) {

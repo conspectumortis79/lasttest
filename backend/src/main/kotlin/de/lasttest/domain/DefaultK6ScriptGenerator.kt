@@ -50,6 +50,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
             export const options = {
               vus: $virtualUsers,
               duration: '${durationSeconds}s',
+              gracefulStop: '0s',
               thresholds: {
                 http_req_failed: ['rate<0.05'],
                 http_req_duration: ['p(95)<1000'],

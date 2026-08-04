@@ -72,6 +72,17 @@ export function metric(summary: K6Summary, name: string): K6Metric {
   return summary.metrics[name] ?? {}
 }
 
+export function completedRequestCount(summary: K6Summary): number | undefined {
+  const count = metric(summary, 'http_reqs').count
+  return count != null && Number.isFinite(count) ? count : undefined
+}
+
+export function checkSuccessRate(summary: K6Summary): number | undefined {
+  const checks = metric(summary, 'checks')
+  const total = (checks.passes ?? 0) + (checks.fails ?? 0)
+  return total > 0 ? (checks.passes ?? 0) / total * 100 : undefined
+}
+
 export function formatNumber(value: number | undefined, digits = 2): string {
   if (value == null || !Number.isFinite(value)) return '–'
   return new Intl.NumberFormat('de-DE', {
