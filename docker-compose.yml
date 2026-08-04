@@ -1,8 +1,15 @@
 services:
   lasttest:
+    container_name: lasttest
     build: .
     ports:
       - "8286:8286"
     environment:
       LASTTEST_PUBLIC_URL: http://localhost:8286/
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8286/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
     restart: unless-stopped
