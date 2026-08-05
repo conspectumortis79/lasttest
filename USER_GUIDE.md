@@ -236,6 +236,18 @@ both:
 ./start-linux.sh
 ```
 
+> ⚠️  **`start-linux.sh` starts the project in dev mode.**
+> Two URLs are exposed; they are **not** interchangeable:
+>
+> | URL | What it serves |
+> | --- | --- |
+> | <http://localhost:5173> | **Web-UI** (Vite dev-server with hot-reload) — open this in your browser |
+> | <http://localhost:8286> | **API only** (Spring Boot, JSON) — returns Whitelabel 404 on `/` because the frontend bundle is not built in dev mode |
+>
+> For a single-URL deployment where the backend serves both the API and
+> the UI on port 8286, use `./docker-start.sh` (or `docker compose up --build`)
+> instead.
+
 ---
 
 ## 4. First run and the demo API

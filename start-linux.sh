@@ -5,6 +5,13 @@ cd "$(dirname "$0")"
 BACKEND_PORT=8286
 FRONTEND_PORT=5173
 BACKEND_URL="http://localhost:${BACKEND_PORT}/"
+# Health-Check zielt auf eine echte API-Route, NICHT auf den Root-Pfad.
+# Der Root-Pfad liefert im Dev-Modus absichtlich 404 (Whitelabel), weil
+# das gebaute Frontend-Bundle (../frontend/dist) hier fehlt — der Vite-
+# Dev-Server auf $FRONTEND_URL liefert stattdessen die React-UI aus.
+# Eine 200-Antwort auf /api/demo-specification beweist, dass Spring
+# läuft, ohne dass der Health-Check selbst in den 5-Min-Timeout läuft.
+BACKEND_HEALTHCHECK_URL="http://localhost:${BACKEND_PORT}/api/demo-specification"
 FRONTEND_URL="http://localhost:${FRONTEND_PORT}/"
 READY_TIMEOUT=300   # Sekunden
 
@@ -211,8 +218,8 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Polling: warten bis beide URLs antworten
-echo "Warte auf Backend  (${BACKEND_URL})"
-echo "Warte auf Frontend (${FRONTEND_URL})"
+echo "Warte auf Backend  (API-Health-Check: ${BACKEND_HEALTHCHECK_URL})"
+echo "Warte auf Frontend (Vite Dev-Server: ${FRONTEND_URL})"
 echo
 
 backend_ok=0
@@ -220,7 +227,7 @@ frontend_ok=0
 elapsed=0
 while true; do
   if (( backend_ok == 0 )); then
-    if curl -sf -o /dev/null --max-time 2 "${BACKEND_URL}"; then
+    if curl -sf -o /dev/null --max-time 2 "${BACKEND_HEALTHCHECK_URL}"; then
       echo "Backend  ist erreichbar (nach ${elapsed}s)."
       backend_ok=1
     fi
@@ -244,11 +251,20 @@ done
 
 echo
 echo "============================================================"
-echo "lasttest wurde erfolgreich gestartet."
-echo "  Frontend (Vite Dev-Server):  ${FRONTEND_URL}"
-echo "  Backend  (Spring-Boot API):  ${BACKEND_URL}"
-echo "  Demo-API  zum Testen:        http://localhost:${BACKEND_PORT}/demo-api/products"
-echo "Im Browser das Frontend öffnen: ${FRONTEND_URL}"
+echo "lasttest wurde erfolgreich gestartet (DEV-MODUS)."
+echo
+echo "  Web-UI   (Vite Dev-Server, Hot-Reload):  ${FRONTEND_URL}"
+echo "  API      (Spring-Boot, nur JSON):       ${BACKEND_URL}"
+echo "  Demo-API (zum Testen gegen die UI):     http://localhost:${BACKEND_PORT}/demo-api/products"
+echo
+echo "Im Browser öffnen: ${FRONTEND_URL}"
+echo
+echo "ACHTUNG:  ${BACKEND_URL} liefert im Dev-Modus KEINE UI,"
+echo "          sondern die Whitelabel-404-Seite von Spring — das"
+echo "          Frontend-Bundle (../frontend/dist) fehlt hier."
+echo "          Für eine Single-Container-UI unter ${BACKEND_URL}"
+echo "          siehe ./docker-start.sh."
+echo
 echo "Zum Beenden: Strg+C drücken."
 echo "============================================================"
 

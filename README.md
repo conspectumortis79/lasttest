@@ -147,6 +147,21 @@ both services:
 ./start-linux.sh
 ```
 
+The script starts the project in **dev mode**: the Vite dev-server serves
+the React UI with hot-reload on **http://localhost:5173**, and Spring
+Boot runs the JSON API on **http://localhost:8286**. The backend URL
+does **not** serve a UI in dev mode (it returns Spring's Whitelabel 404
+page, because `../frontend/dist/` is not built). Always open the dev-UI
+URL in your browser:
+
+- Dev-UI (Vite, hot-reload): <http://localhost:5173>
+- API (Spring Boot, JSON only): <http://localhost:8286>
+
+If you want a single-URL deployment where the backend serves both the
+API and the UI on port 8286, use `./docker-start.sh` (or `docker compose up --build`)
+instead — the Dockerfile builds `frontend/dist/` and the Spring app
+serves it as static files.
+
 To try the demo, import `demo/openapi-demo.yaml` via “Datei öffnen”
 (“Open file”). The write operations POST, PUT, and DELETE must be enabled
 explicitly.
