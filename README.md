@@ -186,7 +186,7 @@ cd frontend && npm run lint && npm run build
 
 ## Security boundaries of the MVP
 
-- Maximum 1000 VUs and 3600 seconds per run.
+- Maximum 30000 VUs and 3600 seconds per run.
 - Destructive operations are deactivated in the UI by default.
 - Only HTTP(S) targets are accepted.
 - For a productive, multi-tenant deployment k6 must additionally run in

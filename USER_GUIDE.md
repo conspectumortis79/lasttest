@@ -219,8 +219,10 @@ dependency.
    the repository.
 3. Click **Validieren & importieren**.
 
-You should see a card with six operations, four of which are
-pre-selected (the read-only ones).
+You should see a card with six operations (two read-only GETs and four
+destructive writes). The first read-only operation is pre-selected
+as a safe starting point — every other endpoint, including the
+remaining read-only one, has to be ticked explicitly.
 
 ---
 
@@ -335,10 +337,18 @@ spot them at a glance without opening the card.
 
 ### 7.1 Selection and destructive operations
 
-By default, only the read-only operations are pre-selected. Write
-operations (POST, PUT, DELETE, PATCH) start **unchecked** and must be
-enabled explicitly. This protects against accidental writes to a real
-API.
+By default, the **first** read-only operation is pre-selected as a
+safe starting point. All other operations — including the remaining
+read-only ones and every write operation (POST, PUT, DELETE, PATCH) —
+start **unchecked** and must be enabled explicitly. This protects
+against accidental writes to a real API and against firing multiple
+endpoints in parallel when you are still exploring the spec.
+
+> 💡 The UI uses a **single-selection** model: ticking another
+> operation's checkbox replaces the current selection rather than
+> adding to it. Each k6 run therefore exercises exactly one
+> endpoint. To load-test a different endpoint, tick its checkbox
+> and start a new run.
 
 > ⚠️ Be careful when pointing lasttest at a real environment. The
 > generated k6 script will hit every selected endpoint with the
@@ -437,9 +447,27 @@ own spec.
 | --- | --- | --- |
 | Virtual Users (`vus`) | 1 | concurrent virtual users |
 | Duration (seconds) | 10 | total test wall time |
+| Iterations-Modus | off | ersetzt die Dauer durch „N Anfragen, so schnell wie möglich“ |
 
-The k6 script uses the `constant-vus` executor with these values, so
-all VUs start together and the test runs for the full duration.
+#### Constant-VUs-Modus (Standard)
+
+Without the iterations toggle, the k6 script uses the
+`constant-vus` executor with the values above: all VUs start together
+and the test runs for the full duration.
+
+#### Iterations-Modus
+
+Ticking **„Statt Dauer: N Anfragen, so schnell wie möglich“** flips
+the script to k6’s `shared-iterations` executor. In this mode every
+Virtual User fires **exactly one** request, and the run finishes as
+soon as the last response comes back. The `Virtual Users` field is
+reused as the iteration count, and the `Dauer (Sekunden)` field is
+greyed out.
+
+Pick this mode when you want a reproducible *number of requests*
+(e.g. to compare latency between releases) rather than a fixed wall
+clock duration. The thresholds, parameters, Bearer token, and request
+body behave exactly as in the constant-VUs mode.
 
 ### 8.3 Limits
 
