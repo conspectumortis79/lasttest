@@ -68,6 +68,30 @@ class DefaultK6ScriptGeneratorTest {
     }
 
     @Test
+    fun `wraps load options in a k6 v2 scenario block with the right executor`() {
+        val durationScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 2, 15)
+        val iterationsScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 250, 10, useIterations = true)
+
+        // k6 v1+ requires scenarios; the top-level vus/duration shortcuts
+        // were removed in v2 alongside gracefulStop. Make sure we emit the
+        // canonical scenario-based form so k6 does not warn about unknown
+        // top-level fields.
+        for (script in listOf(durationScript, iterationsScript)) {
+            assertTrue(script.contains("scenarios:"))
+            assertTrue(script.contains("default:"))
+            assertTrue(script.contains("gracefulStop: '0s'"))
+        }
+
+        assertTrue(durationScript.contains("executor: 'constant-vus'"))
+        assertTrue(durationScript.contains("duration: '15s'"))
+        assertTrue(!durationScript.contains("executor: 'shared-iterations'"))
+
+        assertTrue(iterationsScript.contains("executor: 'shared-iterations'"))
+        assertTrue(iterationsScript.contains("iterations: 250"))
+        assertTrue(!iterationsScript.contains("executor: 'constant-vus'"))
+    }
+
+    @Test
     fun `generates selected operation with tags and thresholds`() {
         val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 2, 15)
 

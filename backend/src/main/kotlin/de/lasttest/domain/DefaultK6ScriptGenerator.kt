@@ -45,20 +45,27 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         require(configurations.keys.all(selectedOperationIds::contains)) { "Die Konfiguration enthält einen nicht ausgewählten oder unbekannten Endpunkt." }
 
         val calls = selected.joinToString("\n") { operation -> requestCode(operation, configurations[operation.operationId]) }
-        val durationOrIterations =
+        // k6 v1+ removed the top-level `gracefulStop` option; graceful stop
+        // is now a scenario-level setting. The `vus` and `duration`/`iterations`
+        // top-level shortcuts still work for backward compatibility, but
+        // putting everything in a scenario is the canonical k6 v2 layout.
+        val scenarioConfig =
             if (useIterations) {
-                "iterations: $virtualUsers,"
+                "executor: 'shared-iterations', vus: $virtualUsers, iterations: $virtualUsers,"
             } else {
-                "duration: '${durationSeconds}s',"
+                "executor: 'constant-vus', vus: $virtualUsers, duration: '${durationSeconds}s',"
             }
         return """
             import http from 'k6/http';
             import { check, sleep } from 'k6';
 
             export const options = {
-              vus: $virtualUsers,
-              $durationOrIterations
-              gracefulStop: '0s',
+              scenarios: {
+                default: {
+                  $scenarioConfig
+                  gracefulStop: '0s',
+                },
+              },
               thresholds: {
                 http_req_failed: ['rate<0.05'],
                 http_req_duration: ['p(95)<1000'],

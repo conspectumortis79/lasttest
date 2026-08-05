@@ -102,3 +102,19 @@ test-results/
 # Projekt-eigene lokale Artefakte
 # =========================================================================
 *.local
+
+# =========================================================================
+# TrustStores / lokale CA-Zertifikate
+# Niemals committen — enthalten firmeninterne CAs oder Private Keys.
+# USER_GUIDE.md §13.1 beschreibt, wie sie im Container gemountet werden.
+# =========================================================================
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+*.pem
+*.cer
+*.crt
+*.key
+certs/

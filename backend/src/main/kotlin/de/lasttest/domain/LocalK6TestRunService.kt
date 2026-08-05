@@ -142,19 +142,38 @@ class LocalK6TestRunService(
             val output = process.inputStream.readAllBytes().toString(Charsets.UTF_8)
             val exitCode = process.waitFor()
             val summary = if (Files.exists(summaryFile)) mapOf("raw" to Files.readString(summaryFile)) else null
+            val succeeded = exitCode == 0
             runs[run.id] =
                 run.copy(
-                    status = if (exitCode == 0) TestRunStatus.COMPLETED else TestRunStatus.FAILED,
+                    status = if (succeeded) TestRunStatus.COMPLETED else TestRunStatus.FAILED,
                     startedAt = started,
                     finishedAt = Instant.now().toString(),
                     exitCode = exitCode,
                     summary = summary,
-                    error = output.takeLast(MAX_ERROR_LENGTH).ifBlank { null },
+                    // Only surface the captured k6 output when the run failed;
+                    // a successful run has no error to report. The tail of the
+                    // output is shown because k6 prints diagnostics at the end.
+                    error = if (succeeded) null else truncateForError(output),
                 )
         } catch (exception: java.io.IOException) {
             runs[run.id] = run.copy(status = TestRunStatus.FAILED, startedAt = started, finishedAt = Instant.now().toString(), error = exception.message)
         } finally {
             directory.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * Truncates the captured k6 output for the `error` field. Keeps the
+     * tail (where k6 prints its failure diagnostics) and, if the head
+     * would otherwise be dropped, prepends an ellipsis-marked prefix so
+     * the banner / scenario summary stays visible too.
+     */
+    private fun truncateForError(output: String): String? {
+        if (output.isBlank()) return null
+        return if (output.length <= MAX_ERROR_LENGTH) {
+            output
+        } else {
+            "…[${output.length - MAX_ERROR_LENGTH} Zeichen übersprungen]…\n" + output.takeLast(MAX_ERROR_LENGTH)
         }
     }
 

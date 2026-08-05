@@ -4,8 +4,22 @@ services:
     build: .
     ports:
       - "8286:8286"
+    volumes:
+      # Custom CA / TrustStore for the target API (see USER_GUIDE.md §13.1).
+      # Place your company's internal root CA at this path before starting
+      # the container; the file itself is .gitignore'd.
+      - ./certs/custom-ca.pem:/etc/lasttest/custom-ca.pem:ro
     environment:
       LASTTEST_PUBLIC_URL: http://localhost:8286/
+      # TrustStore for the target API's TLS certificate. Leave PASSWORD
+      # empty for PEM files; set it for PKCS12 / JKS.
+      LASTTEST_TRUSTSTORE_PATH: /etc/lasttest/custom-ca.pem
+      LASTTEST_TRUSTSTORE_PASSWORD: ""
+      # k6 (Go) does not read the Java TrustStore. Point it at the same
+      # PEM so the load-test phase trusts the target API's cert too.
+      # NOTE: SSL_CERT_FILE replaces the system CA bundle for k6 — only
+      # use it if all targets are signed by the custom CA above.
+      SSL_CERT_FILE: /etc/lasttest/custom-ca.pem
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8286/ || exit 1"]
       interval: 5s
