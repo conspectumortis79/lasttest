@@ -59,9 +59,10 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
             selected
                 .joinToString("\n") { operation ->
                     val safe = safeIdentifier(operation.operationId)
-                    val tracked = TRACKED_STATUS_CODES.joinToString("\n") { code ->
-                        "const lt_status_${code}_$safe = new Counter('lt_status_${code}_$safe');"
-                    }
+                    val tracked =
+                        TRACKED_STATUS_CODES.joinToString("\n") { code ->
+                            "const lt_status_${code}_$safe = new Counter('lt_status_${code}_$safe');"
+                        }
                     val fallback =
                         "const lt_status_err_$safe = new Counter('lt_status_err_$safe');\n" +
                             "const lt_status_other_$safe = new Counter('lt_status_other_$safe');"
@@ -151,15 +152,16 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         // switch keeps the generated code linear in the number of codes
         // (instead of a 20-step if/else-if ladder) and the k6 engine
         // can fast-path consecutive identical status values better.
-        val statusIncrement = buildString {
-            appendLine("switch (response.status) {")
-            appendLine("  case 0: lt_status_err_$safe.add(1); break;")
-            for (code in TRACKED_STATUS_CODES) {
-                appendLine("  case $code: lt_status_${code}_$safe.add(1); break;")
+        val statusIncrement =
+            buildString {
+                appendLine("switch (response.status) {")
+                appendLine("  case 0: lt_status_err_$safe.add(1); break;")
+                for (code in TRACKED_STATUS_CODES) {
+                    appendLine("  case $code: lt_status_${code}_$safe.add(1); break;")
+                }
+                appendLine("  default: lt_status_other_$safe.add(1);")
+                append("}")
             }
-            appendLine("  default: lt_status_other_$safe.add(1);")
-            append("}")
-        }
         return "  { const response = $request; $statusIncrement check(response, { ${toJson("${operation.operationId} succeeds")}: (r) => r.status >= 200 && r.status < 400 }); }"
     }
 
@@ -288,16 +290,32 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         const val CONTROL_CHARACTER_LIMIT = 0x20
         const val DEFAULT_PARAMETER_VALUE = "test"
         const val BEARER_PREFIX = "Bearer "
+
         // Exact HTTP status codes that get a dedicated Counter per
         // operation. Anything not in this list falls into the `other`
         // Counter for that operation so unexpected responses are still
         // visible in the report. `err` (status === 0, e.g. connection
         // refused) is handled separately and is not part of this list.
-        val TRACKED_STATUS_CODES = listOf(
-            200, 201, 202, 204, // 2xx success
-            301, 302, 304, // 3xx redirect
-            400, 401, 403, 404, 409, 422, 429, // 4xx client error
-            500, 502, 503, 504, // 5xx server error
-        )
+        val TRACKED_STATUS_CODES =
+            listOf(
+                200,
+                201,
+                202,
+                204, // 2xx success
+                301,
+                302,
+                304, // 3xx redirect
+                400,
+                401,
+                403,
+                404,
+                409,
+                422,
+                429, // 4xx client error
+                500,
+                502,
+                503,
+                504, // 5xx server error
+            )
     }
 }

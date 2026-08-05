@@ -508,13 +508,39 @@ The status badge cycles through:
 The UI polls `/api/test-runs/{id}` every second while the run is
 `QUEUED` or `RUNNING`, so the badge updates without a page reload.
 
-### 9.2 Console output and raw JSON
+### 9.2 Diagnosis, metrics, console output and raw JSON
 
-If the run failed, the k6 stderr/stdout is captured and shown in a
-collapsible **k6-Konsolenausgabe** block. For completed runs, the
-**k6-JSON-Rohdaten** block contains the full summary as printed by
-`k6 run --summary-export=/dev/stdout`, including every metric, every
-threshold, and every sub-metric.
+The status row always shows the badge plus a short hint while the run is
+still in flight ("läuft seit X s", "wartet auf Executor"). When the run
+settles, the card expands with three additional blocks:
+
+1. **Diagnosis + Detail** — a one-line classification of what went wrong
+   and the concrete value the user can act on. lasttest recognises the
+   following categories from `run.error` and `run.summary`:
+
+   | Diagnosis | Triggered by | Hint |
+   |---|---|---|
+   | Ziel nicht erreichbar | `ERR_CONNECTION_REFUSED`, "connection refused" | TCP-Target lehnt ab — Port offen? Container-Egress? |
+   | DNS-Auflösung fehlgeschlagen | `ENOTFOUND`, `EAI_AGAIN` | DNS-Forwarder im Container-Netz vorhanden? |
+   | TLS-Handshake fehlgeschlagen | `CERT_AUTHORITY_INVALID`, `x509`, `PKIX` | TrustStore über `LASTTEST_TRUSTSTORE_PATH` setzen (siehe §13.1) |
+   | Antwortzeit zu hoch | p(95) > 1000 ms oder k6-Timeout | Server antwortet langsam — siehe §13 |
+   | Viele Server-Fehler (5xx) | ≥ 5 % aller Antworten sind 5xx | Backend liefert 502/503/504 — siehe Backend-Logs |
+   | Hohe Client-Fehlerrate (4xx) | ≥ 5 % aller Antworten sind 4xx | Bearer-Token / Berechtigungen prüfen |
+   | k6-Skriptfehler | `ReferenceError`, `GoError`, "script exception" | OpenAPI-Definition enthält ein Feld, das lasttest nicht mappt |
+   | k6 konnte nicht gestartet werden | `Cannot run program "k6"` | k6-Binary im Container / auf dem PATH vorhanden? |
+
+2. **Metrik-Zeile** — `Requests`, `p(95)`, `Fehlerquote`, ggf.
+   `Status 0 (Netzwerkfehler)`, `5xx` / `2xx` / `4xx`, sowie
+   `Durchsatz` und `Daten empfangen` bei vollständig erfassten Läufen.
+   Problematische Werte werden rot hervorgehoben.
+
+3. **Bullet-Liste** — 2–4 konkrete Belege aus dem k6-Summary, z. B.
+   "Endpunkt `searchProducts` antwortete 480× mit HTTP 401 — Bearer-Token
+   prüfen."
+
+Darunter bleiben die ausklappbaren Blöcke **k6-Konsolenausgabe** (volle
+k6-stdout/stderr) und **k6-JSON-Rohdaten** (Summary-JSON) für die
+volle Fehlersuche.
 
 ### 9.3 Re-running
 

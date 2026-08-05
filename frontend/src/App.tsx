@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { TestRunReportPage } from './TestRunReport.tsx'
-import { type TestRun } from './k6Report.ts'
+import {
+  buildMetricRow,
+  parseK6Summary,
+  progressHint,
+  summarizeFailure,
+  type TestRun,
+} from './k6Report.ts'
 import { MAX_DURATION_SECONDS, MAX_VIRTUAL_USERS, validateLoadProfile } from './loadProfile.ts'
 import {
   buildOperationConfigurations,
@@ -19,7 +25,6 @@ import {
   type RequestBodySchema,
 } from './operationConfiguration.ts'
 import { type FetchedSpecification, validateSpecificationUrl } from './specificationSource.ts'
-import { firstErrorLine } from './errorPreview.ts'
 import { fetchWithRetry } from './retryFetch.ts'
 
 type ImportResponse = ImportedSpecification & { message?: string }
@@ -355,18 +360,54 @@ function LoadTestApp() {
     {run && <section className="card result">
       <div className="step">4</div>
       <h2>Testlauf</h2>
-      <div className="status-row">
-        <div className={`status ${run.status.toLowerCase()}`}>{run.status}</div>
-        {run.status === 'FAILED' && run.error && (
-          <span className="status-error" title={run.error}>{firstErrorLine(run.error)}</span>
-        )}
-      </div>
+      <TestRunSummary run={run} />
       <p>Run-ID: <code>{run.id}</code></p>
       <a className="report-link" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">Ausführlichen k6-Testbericht in neuem Tab öffnen ↗</a>
       {run.error && <details><summary>k6-Konsolenausgabe</summary><pre>{run.error}</pre></details>}
       {run.summary && <details><summary>k6-JSON-Rohdaten</summary><pre>{run.summary.raw}</pre></details>}
     </section>}
   </main>
+}
+
+type TestRunSummaryProps = {
+  run: TestRun
+}
+
+function TestRunSummary({ run }: TestRunSummaryProps) {
+  const summary = parseK6Summary(run)
+  const failure = summarizeFailure(run)
+  const hint = progressHint(run)
+  const metricItems = buildMetricRow(run, summary, failure)
+
+  return (
+    <>
+      <div className="status-row">
+        <div className={`status ${run.status.toLowerCase()}`}>{run.status}</div>
+        {hint && <span className="status-hint">{hint}</span>}
+        {run.status === 'FAILED' && (
+          <>
+            <span className="status-diagnosis">{failure.diagnosis}</span>
+            <span className="status-detail">{failure.detail}</span>
+          </>
+        )}
+      </div>
+      {metricItems.length > 0 && (
+        <ul className="metric-row">
+          {metricItems.map(item => (
+            <li key={item.label} className={`metric-item metric-${item.severity}`}>
+              <span className="metric-label">{item.label}</span>
+              <span className="metric-value">{item.value}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {run.status === 'FAILED' && failure.reasons.length > 0 && (
+        <ul className="failure-reasons">
+          {failure.reasons.map(reason => <li key={reason}>{reason}</li>)}
+        </ul>
+      )}
+    </>
+  )
 }
 
 type OperationEditorProps = {
