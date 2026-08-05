@@ -109,7 +109,6 @@ class HttpClientConfiguration {
         file: File,
         merged: KeyStore,
     ) {
-        val factory = CertificateFactory.getInstance("X.509")
         FileInputStream(file).use { input -> importCertificates(input, merged) }
     }
 

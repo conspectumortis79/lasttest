@@ -14,6 +14,7 @@ import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class LocalK6TestRunExecutionTest {
     @TempDir
@@ -44,7 +45,10 @@ class LocalK6TestRunExecutionTest {
         assertEquals(TestRunStatus.COMPLETED, completed.status)
         assertEquals(0, completed.exitCode)
         assertContains(completed.summary?.get("raw").toString(), "checks")
-        assertEquals("successful k6 output", completed.error)
+        // Successful runs do not surface the captured k6 output as an error.
+        // The summary JSON is the authoritative result; see USER_GUIDE §9.2
+        // and the implementation comment in LocalK6TestRunService.execute().
+        assertNull(completed.error)
         assertNotNull(completed.startedAt)
         assertNotNull(completed.finishedAt)
         assertNull(service.find("missing"))
@@ -92,6 +96,67 @@ class LocalK6TestRunExecutionTest {
         assertEquals(TestRunStatus.FAILED, failed.status)
         assertNotNull(failed.error)
         assertNotNull(failed.finishedAt)
+    }
+
+    @Test
+    fun `stores no error when a failed run produces only blank output`() {
+        // A run that exits non-zero but writes no usable output must
+        // surface an empty error — otherwise the UI would render an
+        // empty „k6-Konsolenausgabe" box. truncateForError returns null
+        // for blank input and execute() copies that null into the run.
+        val command =
+            executable(
+                "blank-failure.sh",
+                """
+                #!/bin/sh
+                printf '   '
+                exit 1
+                """.trimIndent(),
+            )
+        val service = service(command)
+
+        val failed = assertNotNull(service.find(service.create(request()).id))
+
+        assertEquals(TestRunStatus.FAILED, failed.status)
+        assertEquals(1, failed.exitCode)
+        assertNull(failed.error)
+    }
+
+    @Test
+    fun `truncates failed run output that exceeds the maximum error length`() {
+        // MAX_ERROR_LENGTH is 4_000. We emit 5_000 chars so the tail
+        // truncation branch of truncateForError is exercised; the
+        // head-of-output branch is unreachable for any captured k6 run.
+        val length = 5_000
+        val expectedPrefix = "…[${length - MAX_ERROR_LENGTH} Zeichen übersprungen]…\n"
+        val command =
+            executable(
+                "long-failure.sh",
+                """
+                #!/bin/sh
+                head -c $length /dev/zero | tr '\0' 'x'
+                exit 1
+                """.trimIndent(),
+            )
+        val service = service(command)
+
+        val failed = assertNotNull(service.find(service.create(request()).id))
+
+        assertEquals(TestRunStatus.FAILED, failed.status)
+        val error = assertNotNull(failed.error)
+        assertTrue(
+            error.startsWith(expectedPrefix),
+            "truncated output must announce the skipped prefix",
+        )
+        assertEquals(MAX_ERROR_LENGTH + expectedPrefix.length, error.length)
+        // The retained tail is the LAST `MAX_ERROR_LENGTH` characters of
+        // the captured k6 output, so the final byte of `error` must be
+        // 'x' (the padding character emitted by the stub script).
+        assertEquals('x', error.last())
+    }
+
+    private companion object {
+        const val MAX_ERROR_LENGTH: Int = 4_000
     }
 
     private fun service(command: String): LocalK6TestRunService =

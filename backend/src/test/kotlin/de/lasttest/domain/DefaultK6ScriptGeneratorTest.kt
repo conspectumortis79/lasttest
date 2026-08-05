@@ -345,12 +345,27 @@ class DefaultK6ScriptGeneratorTest {
         val script = generator.generate(specification, "https://example.test", setOf("getPet", "createPet"), emptyList(), 1, 10)
 
         // 19 tracked codes + err + other = 21 Counter declarations per operation.
-        val trackedCodes = listOf(
-            200, 201, 202, 204,
-            301, 302, 304,
-            400, 401, 403, 404, 409, 422, 429,
-            500, 502, 503, 504,
-        )
+        val trackedCodes =
+            listOf(
+                200,
+                201,
+                202,
+                204,
+                301,
+                302,
+                304,
+                400,
+                401,
+                403,
+                404,
+                409,
+                422,
+                429,
+                500,
+                502,
+                503,
+                504,
+            )
         for (operationId in listOf("getPet", "createPet")) {
             for (code in trackedCodes) {
                 val metricName = "lt_status_${code}_$operationId"
@@ -391,6 +406,43 @@ class DefaultK6ScriptGeneratorTest {
         assertContains(script, "new Counter('lt_status_429_get_pet_v2')")
         assertContains(script, "lt_status_err_get_pet_v2.add(1)")
         assertContains(script, "lt_status_other_get_pet_v2.add(1)")
+    }
+
+    @Test
+    fun `prefixes sanitised operation ids that start with a digit so they stay valid identifiers`() {
+        // JavaScript identifiers may not start with a digit; the script
+        // generator prefixes the sanitised name with an underscore in
+        // that case so the generated Counter declarations and
+        // switch-case statements remain syntactically valid k6 code.
+        val leadingDigitOperation =
+            ApiOperation("1Pet", "GET", "/pets", "", false, emptyList(), null)
+        val leadingDigitSpecification = specification.copy(operations = listOf(leadingDigitOperation))
+
+        val script = generator.generate(leadingDigitSpecification, "https://example.test", setOf("1Pet"), emptyList(), 1, 10)
+
+        assertContains(script, "new Counter('lt_status_200__1Pet')")
+        assertContains(script, "new Counter('lt_status_429__1Pet')")
+        assertContains(script, "lt_status_err__1Pet.add(1)")
+        assertContains(script, "lt_status_other__1Pet.add(1)")
+        // The request line still uses the original operationId in tags.
+        assertContains(script, "\"operationId\":\"1Pet\"")
+    }
+
+    @Test
+    fun `handles an empty operation id by emitting a single-underscore identifier`() {
+        // The first conjunct of the safeIdentifier guard (`sanitized.isEmpty()`)
+        // is exercised by an explicitly empty operationId; the resulting
+        // metric names are still valid because the underscore prefix keeps
+        // them legal JavaScript identifiers.
+        val emptyIdOperation =
+            ApiOperation("", "GET", "/pets", "", false, emptyList(), null)
+        val emptyIdSpecification = specification.copy(operations = listOf(emptyIdOperation))
+
+        val script = generator.generate(emptyIdSpecification, "https://example.test", setOf(""), emptyList(), 1, 10)
+
+        assertContains(script, "new Counter('lt_status_200__')")
+        assertContains(script, "lt_status_err__.add(1)")
+        assertContains(script, "lt_status_other__.add(1)")
     }
 
     @Test
