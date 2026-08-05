@@ -50,6 +50,24 @@ class DefaultK6ScriptGeneratorTest {
         )
 
     @Test
+    fun `generates iterations and omits duration when useIterations is true`() {
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 250, 10, useIterations = true)
+
+        assertTrue(script.contains("vus: 250"))
+        assertTrue(script.contains("iterations: 250"))
+        assertTrue(!script.contains("duration: '10s'"))
+        assertTrue(script.contains("/pets/42?expand=owner"))
+    }
+
+    @Test
+    fun `defaults useIterations to false and keeps the duration block`() {
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 2, 15)
+
+        assertTrue(script.contains("duration: '15s'"))
+        assertTrue(!script.contains("iterations:"))
+    }
+
+    @Test
     fun `generates selected operation with tags and thresholds`() {
         val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 2, 15)
 
@@ -62,20 +80,20 @@ class DefaultK6ScriptGeneratorTest {
     }
 
     @Test
-    fun `accepts one thousand virtual users`() {
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 1000, 10)
+    fun `accepts thirty thousand virtual users`() {
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 30000, 10)
 
-        assertTrue(script.contains("vus: 1000"))
+        assertTrue(script.contains("vus: 30000"))
     }
 
     @Test
-    fun `rejects virtual users above one thousand with the documented message`() {
+    fun `rejects virtual users above thirty thousand with the documented message`() {
         val exception =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 1001, 10)
+                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 30001, 10)
             }
 
-        assertTrue(exception.message!!.contains("zwischen 1 und 1000"))
+        assertTrue(exception.message!!.contains("zwischen 1 und 30000"))
     }
 
     @Test

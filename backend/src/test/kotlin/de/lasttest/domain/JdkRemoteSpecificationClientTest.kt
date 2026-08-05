@@ -94,6 +94,28 @@ class JdkRemoteSpecificationClientTest {
         assertTrue(exception.message!!.contains("zu große"))
     }
 
+    @Test
+    fun `secondary constructor with a custom SSL context uses that context for the request`() {
+        // We don't connect to an HTTPS server in this test (the loopback server is plain HTTP);
+        // we just need the secondary constructor to wire the SSL context through to the HttpClient
+        // and still successfully issue a request to the local server.
+        val customContext =
+            javax.net.ssl.SSLContext
+                .getDefault()
+        val client = JdkRemoteSpecificationClient(customContext)
+        server.createContext("/json") { exchange ->
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            val body = """{"openapi":"3.0.3"}"""
+            exchange.sendResponseHeaders(200, body.toByteArray().size.toLong())
+            exchange.responseBody.use { it.write(body.toByteArray()) }
+        }
+
+        val response = client.get("$baseUrl/json")
+
+        assertEquals(200, response.statusCode)
+        assertEquals("""{"openapi":"3.0.3"}""", response.body)
+    }
+
     private companion object {
         // The production cap is 5 MiB; we send one byte more to trigger the overflow branch.
         // Declared as Int so the literal arithmetic stays in Int range and the call sites are unambiguous.

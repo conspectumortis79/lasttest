@@ -89,7 +89,7 @@ test('builds safe script download metadata and manual k6 commands', () => {
   equal(k6ScriptDownloadName('run-1'), 'lasttest-run-1.js')
   equal(manualK6Command(undefined, 'run-1'), 'k6 run -e BASE_URL="https://target.example" lasttest-run-1.js')
   equal(
-    manualK6Command({ apiTitle: 'API', apiVersion: '1', baseUrl: 'https://example.test/path', virtualUsers: 1, durationSeconds: 1, operations: [] }, 'run-2'),
+    manualK6Command({ apiTitle: 'API', apiVersion: '1', baseUrl: 'https://example.test/path', virtualUsers: 1, durationSeconds: 1, useIterations: false, operations: [] }, 'run-2'),
     'k6 run -e BASE_URL="https://example.test/path" lasttest-run-2.js',
   )
 })

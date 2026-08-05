@@ -1,4 +1,4 @@
-export const MAX_VIRTUAL_USERS = 1000
+export const MAX_VIRTUAL_USERS = 30000
 export const MAX_DURATION_SECONDS = 3600
 
 export function validateLoadProfile(virtualUsers: number, durationSeconds: number): string | undefined {

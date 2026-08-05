@@ -24,7 +24,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/')
 })
 
-test('validates imports, load profiles, parameters, bodies, and target URLs', async ({ page }) => {
+test('rejects empty specifications and OpenAPI documents without operations', async ({ page }) => {
   const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
 
   await expect(specification).toContainText('Lasttest Demo API')
@@ -43,8 +43,10 @@ test('imports a specification from a Swagger UI URL via the URL field', async ({
   expect(swaggerResponse.ok()).toBeTruthy()
   expect(await swaggerResponse.text()).toContain('SwaggerUIBundle')
 
+  // The fetcher on the backend only accepts absolute URLs, so the field must contain
+  // the full origin (request fixture resolves the path against the Playwright baseURL).
   const specUrl = page.getByLabel('URL zur Swagger-UI oder OpenAPI-Spezifikation')
-  await specUrl.fill('/demo-swagger-ui')
+  await specUrl.fill('http://localhost:8286/demo-swagger-ui')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
 
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
@@ -85,10 +87,10 @@ test('validates imports, load profiles, parameters, bodies, and target URLs', as
   await page.getByLabel('getProduct: Bearer-Token').fill('optional-token')
 
   const virtualUsers = page.getByLabel('Virtual Users')
-  await expect(virtualUsers).toHaveAttribute('max', '1000')
-  await virtualUsers.fill('1001')
+  await expect(virtualUsers).toHaveAttribute('max', '30000')
+  await virtualUsers.fill('30001')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
-  await expect(page.getByRole('alert')).toHaveText('Virtual Users müssen zwischen 1 und 1000 liegen.')
+  await expect(page.getByRole('alert')).toHaveText('Virtual Users müssen zwischen 1 und 30000 liegen.')
 
   await virtualUsers.fill('1')
   await page.getByLabel('Dauer (Sekunden)').fill('0')

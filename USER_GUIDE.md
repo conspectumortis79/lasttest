@@ -48,6 +48,7 @@
     - 12.1 [`start-linux.sh`](#121-start-linuxsh)
     - 12.2 [`docker-start.sh`](#122-docker-startsh)
 13. [Troubleshooting](#13-troubleshooting)
+    - 13.1 [Trusting custom TLS certificates](#131-trusting-custom-tls-certificates)
 14. [Glossary](#14-glossary)
 
 ---
@@ -445,7 +446,7 @@ all VUs start together and the test runs for the full duration.
 The MVP hard-caps both knobs to keep runaway tests from melting your
 target:
 
-- `vus`: 1 – **1000**
+- `vus`: 1 – **30000**
 - `durationSeconds`: 1 – **3600**
 
 The form will refuse to start a run outside this range and display a
@@ -630,6 +631,46 @@ local iteration fast and safe.
 | Report opens but shows “unbekannte Report-ID” | The lasttest process was restarted since the run finished | Test runs are in-memory only; re-run the test to get a fresh report |
 | Bearer-authenticated requests come back as `401` | The placeholder misled you into including the `Bearer ` prefix | Strip the prefix; lasttest adds it for you |
 | CORS error in the browser console when calling the target API | The target does not allow cross-origin requests from the frontend | lasttest runs the test from the backend, not the browser — open the report and check the k6 output; the CORS error is from the browser, not from the test |
+| `PKIX path building failed: unable to find valid certification path to requested target` | The target API uses a TLS certificate that is not trusted by the JVM (self-signed, internal CA, missing intermediate) | See [Section 13.1 — Trusting custom TLS certificates](#131-trusting-custom-tls-certificates) |
+
+### 13.1 Trusting custom TLS certificates
+
+When the target API uses a TLS certificate that is not signed by a public CA — for example a self-signed certificate in a staging environment, or a certificate issued by a corporate / internal CA — the JVM refuses the TLS handshake and lasttest reports `PKIX path building failed: unable to find valid certification path to requested target`.
+
+Configure lasttest with an additional TrustStore that contains the missing certificate(s) or CA chain. The Java system TrustStore is still used, so public CAs keep working — only the additional certificates are layered on top.
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `LASTTEST_TRUSTSTORE_PATH` | yes | Absolute path to a file containing the certificate(s). Supported formats: `PKCS12` (`.p12`, `.pfx`), `JKS` (`.jks`), or PEM (`.pem`, `.crt`, `.cer` — one or more CERTIFICATE blocks). |
+| `LASTTEST_TRUSTSTORE_PASSWORD` | only for PKCS12 / JKS | Password for the TrustStore. Empty string is allowed for PEM files. |
+
+Examples:
+
+```bash
+# PEM file with one or more CERTIFICATE blocks
+export LASTTEST_TRUSTSTORE_PATH=/etc/lasttest/staging-ca.pem
+export LASTTEST_TRUSTSTORE_PASSWORD=
+
+# PKCS12 TrustStore created with keytool
+export LASTTEST_TRUSTSTORE_PATH=/etc/lasttest/staging.p12
+export LASTTEST_TRUSTSTORE_PASSWORD=changeit
+```
+
+Generate a PEM file from a target host with OpenSSL:
+
+```bash
+openssl s_client -showcerts -connect api.example.com:443 </dev/null 2>/dev/null \
+  | openssl x509 -outform PEM > staging-ca.pem
+```
+
+Or build a PKCS12 TrustStore from a downloaded certificate:
+
+```bash
+keytool -importcert -alias staging -file staging-ca.pem \
+  -keystore staging.p12 -storetype PKCS12 -storepass changeit -noprompt
+```
+
+The variables only have to be set in the environment that runs the lasttest backend (Docker container, systemd unit, terminal, …). Restart lasttest after changing them.
 
 ---
 

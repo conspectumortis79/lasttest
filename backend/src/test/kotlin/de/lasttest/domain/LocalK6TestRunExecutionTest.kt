@@ -109,6 +109,7 @@ class LocalK6TestRunExecutionTest {
                         operationConfigurations: List<OperationConfiguration>,
                         virtualUsers: Int,
                         durationSeconds: Int,
+                        useIterations: Boolean,
                     ): String = "export default function () {}"
                 },
             executor = Executor(Runnable::run),

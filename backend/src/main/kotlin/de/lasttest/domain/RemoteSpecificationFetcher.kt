@@ -7,6 +7,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import javax.net.ssl.SSLContext
 
 class RemoteSpecificationFetchException(
     val problems: List<String>,
@@ -41,7 +42,7 @@ class HttpRemoteSpecificationFetcher(
         }
         val contentType = response.contentType.orEmpty().lowercase()
         return when {
-            isHtmlContentType(contentType) -> resolveSwaggerUiSpecification(response)
+            isHtmlContentType(contentType) -> resolveSwaggerUiSpecification(response, hopsRemaining = MAX_SWAGGER_UI_HOPS)
             isJsonContentType(contentType) || isYamlContentType(contentType) ->
                 FetchedSpecification(
                     content = response.body,
@@ -52,7 +53,19 @@ class HttpRemoteSpecificationFetcher(
         }
     }
 
-    private fun resolveSwaggerUiSpecification(initialResponse: RemoteSpecificationResponse): FetchedSpecification {
+    private fun resolveSwaggerUiSpecification(
+        initialResponse: RemoteSpecificationResponse,
+        hopsRemaining: Int,
+    ): FetchedSpecification {
+        if (hopsRemaining <= 0) {
+            throw RemoteSpecificationFetchException(
+                listOf(
+                    "Die Swagger-UI-Auflösung hat nach $MAX_SWAGGER_UI_HOPS Schritten keine Spezifikation gefunden. " +
+                        "Bitte gib die URL zur Spezifikations-Datei direkt an " +
+                        "(z. B. /v3/api-docs, /swagger.json, /openapi.json).",
+                ),
+            )
+        }
         val specUrl =
             extractSpecUrlFromHtml(initialResponse.body, initialResponse.finalUrl)
                 ?: throw RemoteSpecificationFetchException(
@@ -82,6 +95,14 @@ class HttpRemoteSpecificationFetcher(
             throw RemoteSpecificationFetchException(
                 listOf("Die Spezifikations-URL $resolvedSpecUrl liefert eine leere Antwort."),
             )
+        }
+        if (isHtmlContentType(specResponse.contentType.orEmpty().lowercase())) {
+            return resolveSwaggerUiSpecification(specResponse, hopsRemaining = hopsRemaining - 1)
+        }
+        if (!isJsonContentType(specResponse.contentType.orEmpty().lowercase()) &&
+            !isYamlContentType(specResponse.contentType.orEmpty().lowercase())
+        ) {
+            return detectByContent(specResponse)
         }
         return FetchedSpecification(
             content = specResponse.body,
@@ -157,17 +178,25 @@ class HttpRemoteSpecificationFetcher(
     }
 
     private fun parseSwaggerUiConfig(html: String): String? {
+        val searchWindow = locateSwaggerUiWindow(html)
+        if (searchWindow != null) {
+            val urlsBlock = matchUrlsArray(searchWindow)
+            if (urlsBlock != null) {
+                val firstUrl = matchFirstUrl(urlsBlock)
+                if (firstUrl != null) return firstUrl
+            }
+            matchSingleUrl(searchWindow)?.let { return it }
+            matchSpringdocConfigUrl(searchWindow)?.let { return it }
+        }
+        return matchHtmlAttributeUrl(html)
+    }
+
+    private fun locateSwaggerUiWindow(html: String): String? {
         val bundleStart = html.indexOf(SWAGGER_UI_BUNDLE_MARKER)
         if (bundleStart < 0) {
             return null
         }
-        val searchWindow = html.substring(bundleStart, minOf(html.length, bundleStart + MAX_CONFIG_WINDOW))
-        val urlsBlock = matchUrlsArray(searchWindow)
-        if (urlsBlock != null) {
-            val firstUrl = matchFirstUrl(urlsBlock)
-            if (firstUrl != null) return firstUrl
-        }
-        return matchSingleUrl(searchWindow)
+        return html.substring(bundleStart, minOf(html.length, bundleStart + MAX_CONFIG_WINDOW))
     }
 
     private fun matchUrlsArray(text: String): String? = URLS_ARRAY_PATTERN.find(text)?.groupValues?.get(1)
@@ -190,12 +219,33 @@ class HttpRemoteSpecificationFetcher(
 
     private fun guessCommonSpecificationEndpoint(pageUrl: String): String? {
         val base = baseUrlOf(pageUrl) ?: return null
+        val probed = LinkedHashSet<String>()
         val path = URI.create(pageUrl).path
         val pathWithoutPage = path.substringBeforeLast('/')
         val hashedPage = pathWithoutPage.takeIf { it.isNotEmpty() }.orEmpty()
         for (suffix in CANDIDATE_SUFFIXES) {
-            val candidate = base + hashedPage + suffix
+            probed.add(base + hashedPage + suffix)
+        }
+        for (suffix in CANDIDATE_SUFFIXES) {
+            probed.add(base + suffix)
+        }
+        for (candidate in probed) {
             if (candidateExists(candidate)) return candidate
+        }
+        return null
+    }
+
+    private fun matchSpringdocConfigUrl(text: String): String? {
+        val match = SPRINGDOC_CONFIG_PATTERN.find(text) ?: return null
+        val url = match.groupValues[1]
+        return if (isPlausibleSpecUrl(url)) url else null
+    }
+
+    private fun matchHtmlAttributeUrl(html: String): String? {
+        for (pattern in HTML_URL_ATTRIBUTE_PATTERNS) {
+            val match = pattern.find(html) ?: continue
+            val url = match.groupValues[1]
+            if (isPlausibleSpecUrl(url)) return url
         }
         return null
     }
@@ -203,7 +253,16 @@ class HttpRemoteSpecificationFetcher(
     private fun candidateExists(url: String): Boolean {
         val response = runCatching { client.get(url) }.getOrNull() ?: return false
         if (response.statusCode !in 200..299) return false
-        return !response.body.isBlank()
+        if (response.body.isBlank()) return false
+        val contentType = response.contentType.orEmpty().lowercase()
+        if (isHtmlContentType(contentType)) return false
+        if (contentType.isNotEmpty() &&
+            !isJsonContentType(contentType) &&
+            !isYamlContentType(contentType)
+        ) {
+            return false
+        }
+        return true
     }
 
     internal fun resolveAgainst(
@@ -248,11 +307,19 @@ class HttpRemoteSpecificationFetcher(
     internal companion object {
         const val MAX_URL_LENGTH = 2048
         const val MAX_CONFIG_WINDOW = 32_000
+        const val MAX_SWAGGER_UI_HOPS = 4
         const val SWAGGER_UI_BUNDLE_MARKER = "SwaggerUIBundle"
         const val FETCH_SOURCE_DIRECT = "direct"
         const val FETCH_SOURCE_SWAGGER_UI = "swagger-ui"
         val URLS_ARRAY_PATTERN = Regex("""urls\s*:\s*\[([^\]]*)\]""", RegexOption.DOT_MATCHES_ALL)
         val URL_PATTERN = Regex("""url\s*:\s*["']([^"']+)["']""")
+        val SPRINGDOC_CONFIG_PATTERN = Regex("""["']([^"']*swagger-config[^"']*)["']""")
+        val HTML_URL_ATTRIBUTE_PATTERNS =
+            listOf(
+                Regex("""data-url\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE),
+                Regex("""<swagger-ui[^>]*\burl\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE),
+                Regex("""configUrl\s*[:=]\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE),
+            )
         val CANDIDATE_SUFFIXES =
             listOf(
                 "/v3/api-docs",
@@ -270,6 +337,8 @@ class HttpRemoteSpecificationFetcher(
 class JdkRemoteSpecificationClient(
     private val delegate: HttpClient = defaultClient(),
 ) : RemoteSpecificationClient {
+    constructor(sslContext: SSLContext?) : this(defaultClient(sslContext))
+
     override fun get(url: String): RemoteSpecificationResponse {
         val request =
             HttpRequest
@@ -304,9 +373,14 @@ class JdkRemoteSpecificationClient(
     }
 }
 
-private fun defaultClient(): HttpClient =
-    HttpClient
-        .newBuilder()
-        .connectTimeout(Duration.ofSeconds(5))
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .build()
+private fun defaultClient(sslContext: SSLContext? = null): HttpClient {
+    val builder =
+        HttpClient
+            .newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+    if (sslContext != null) {
+        builder.sslContext(sslContext)
+    }
+    return builder.build()
+}

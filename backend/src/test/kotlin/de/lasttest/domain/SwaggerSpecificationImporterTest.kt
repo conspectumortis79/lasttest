@@ -461,6 +461,229 @@ class SwaggerSpecificationImporterTest {
         }
     }
 
+    @Test
+    fun `toParameter covers required explicit and the example-priority and schema-derived example paths`() {
+        // parameter.example takes priority over parameter.schema.exampleFor(...) — both branches matter.
+        val withExample =
+            Parameter().apply {
+                name = "id"
+                `in` = "query"
+                required = true
+                example = "from-example"
+                schema = null
+            }
+        val withSchema =
+            Parameter().apply {
+                name = "id"
+                `in` = "query"
+                required = false
+                example = null
+                schema =
+                    Schema<Any>().apply {
+                        type = "string"
+                        example = "from-schema"
+                    }
+            }
+        val first = importer.toParameter(withExample)
+        val second = importer.toParameter(withSchema)
+        assertEquals("from-example", first?.example)
+        assertEquals(true, first?.required)
+        assertEquals("from-schema", second?.example)
+        assertEquals(false, second?.required)
+    }
+
+    @Test
+    fun `toParameterSchema preserves a non-blank format and null enum`() {
+        val schema =
+            Schema<Any>().apply {
+                type = "string"
+                format = "uuid"
+                enum = null
+            }
+        val result = importer.toParameterSchema(schema)
+        assertEquals("uuid", result?.format)
+        assertEquals(null, result?.enum)
+    }
+
+    @Test
+    fun `toParameterSchema returns null when type is missing or blank`() {
+        val missingType =
+            Schema<Any>().apply {
+                type = null
+            }
+        val blankType =
+            Schema<Any>().apply {
+                type = "   "
+            }
+        assertEquals(null, importer.toParameterSchema(missingType))
+        assertEquals(null, importer.toParameterSchema(blankType))
+    }
+
+    @Test
+    fun `toRequestBodySchema returns null for non-object schemas without properties`() {
+        val arraySchema =
+            Schema<Any>().apply {
+                type = "array"
+                properties = null
+            }
+        assertEquals(null, importer.toRequestBodySchema(arraySchema))
+    }
+
+    @Test
+    fun `toRequestBodySchema defaults to object when type is blank but a property is present`() {
+        // type="   " forces schema.type?.takeIf { it.isNotBlank() } to null on line 187,
+        // so the Elvis branch assigns "object" as the resulting type.
+        val schema =
+            Schema<Any>().apply {
+                type = "   "
+                properties =
+                    mapOf(
+                        "name" to
+                            Schema<Any>().apply {
+                                type = "string"
+                            },
+                    )
+            }
+        val result = importer.toRequestBodySchema(schema)
+        assertEquals("object", result?.type)
+        assertEquals(setOf("name"), result?.properties?.keys)
+    }
+
+    @Test
+    fun `toRequestBodySchema tolerates null required even when properties and a real type are present`() {
+        val schema =
+            Schema<Any>().apply {
+                type = "object"
+                properties =
+                    mapOf(
+                        "name" to
+                            Schema<Any>().apply {
+                                type = "string"
+                            },
+                    )
+                required = null
+            }
+        val result = importer.toRequestBodySchema(schema)
+        assertEquals(emptyList(), result?.required)
+    }
+
+    @Test
+    fun `toParameterSchema tolerates null enum entries by filtering them out`() {
+        // The enum mapping turns null into "" via the Elvis branch on line 161
+        // and the filter discards empty strings. Only the surviving values stay.
+        val schema =
+            Schema<Any>().apply {
+                type = "string"
+                enum =
+                    listOf(
+                        null,
+                        "real",
+                    )
+            }
+        val result = importer.toParameterSchema(schema)
+        assertEquals(listOf("real"), result?.enum)
+    }
+
+    @Test
+    fun `toRequestBodySchema skips properties whose child schema has no usable type`() {
+        // mapNotNull calls toParameterSchema(child)?.let { name to it }: when the
+        // child schema has no type, toParameterSchema returns null and the entry
+        // is filtered out. We mix one valid and one invalid property to exercise
+        // both branches of the safe-call on line 183.
+        val schema =
+            Schema<Any>().apply {
+                type = "object"
+                properties =
+                    mapOf(
+                        "good" to
+                            Schema<Any>().apply {
+                                type = "string"
+                            },
+                        "bad" to
+                            Schema<Any>().apply {
+                                type = null
+                            },
+                    )
+            }
+        val result = importer.toRequestBodySchema(schema)
+        assertEquals(setOf("good"), result?.properties?.keys)
+    }
+
+    @Test
+    fun `toParameterSchema returns null when type is set but enum is null and the rest is uninteresting`() {
+        // This guarantees the `schema.enum == null` short-circuit at line 160 is exercised.
+        val schema =
+            Schema<Any>().apply {
+                type = "integer"
+                minimum = BigDecimal.ZERO
+                maximum = BigDecimal.TEN
+                pattern = null
+                minLength = null
+                maxLength = null
+            }
+        val result = importer.toParameterSchema(schema)
+        assertEquals("integer", result?.type)
+        assertEquals(null, result?.enum)
+    }
+
+    @Test
+    fun `toParameter covers an explicit path-in required parameter with both example sources`() {
+        // parameter.`in` = "path" forces required = true via the second half of the
+        // || on line 149, while parameter.example is set so the first half of the ?:
+        // on line 150 is taken.
+        val parameter =
+            Parameter().apply {
+                name = "id"
+                `in` = "path"
+                required = false
+                example = "explicit"
+                schema =
+                    Schema<Any>().apply {
+                        type = "string"
+                        example = "schema"
+                    }
+            }
+        val result = importer.toParameter(parameter)
+        assertEquals(true, result?.required)
+        assertEquals("explicit", result?.example)
+    }
+
+    @Test
+    fun `toParameter returns null when the parameter name is null`() {
+        val parameter =
+            Parameter().apply {
+                name = null
+                `in` = "query"
+            }
+        assertEquals(null, importer.toParameter(parameter))
+    }
+
+    @Test
+    fun `toParameter returns null when the parameter name is blank`() {
+        val parameter =
+            Parameter().apply {
+                name = "   "
+                `in` = "query"
+            }
+        assertEquals(null, importer.toParameter(parameter))
+    }
+
+    @Test
+    fun `toParameter derives example from the schema when no explicit example is set`() {
+        val parameter =
+            Parameter().apply {
+                name = "id"
+                `in` = "query"
+                example = null
+                schema =
+                    Schema<Any>().apply {
+                        type = "string"
+                        example = "from-schema"
+                    }
+            }
+        assertEquals("from-schema", importer.toParameter(parameter)?.example)
+    }
+
     private companion object {
         val NON_BEARER_SECURITY =
             """

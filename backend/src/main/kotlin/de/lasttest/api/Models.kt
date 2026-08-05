@@ -92,6 +92,7 @@ data class CreateTestRunRequest(
     val operationConfigurations: List<OperationConfiguration> = emptyList(),
     val virtualUsers: Int = 1,
     val durationSeconds: Int = 10,
+    val useIterations: Boolean = false,
 )
 
 data class TestRunConfiguration(
@@ -100,6 +101,7 @@ data class TestRunConfiguration(
     val baseUrl: String,
     val virtualUsers: Int,
     val durationSeconds: Int,
+    val useIterations: Boolean,
     val operations: List<TestRunOperationConfiguration>,
 )
 

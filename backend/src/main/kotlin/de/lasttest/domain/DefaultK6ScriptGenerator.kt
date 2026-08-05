@@ -18,6 +18,7 @@ interface K6ScriptGenerator {
         operationConfigurations: List<OperationConfiguration>,
         virtualUsers: Int,
         durationSeconds: Int,
+        useIterations: Boolean = false,
     ): String
 }
 
@@ -32,6 +33,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         operationConfigurations: List<OperationConfiguration>,
         virtualUsers: Int,
         durationSeconds: Int,
+        useIterations: Boolean,
     ): String {
         require(baseUrl.startsWith("http://") || baseUrl.startsWith("https://")) { "Die Base-URL muss mit http:// oder https:// beginnen." }
         require(virtualUsers in 1..MAX_VIRTUAL_USERS) { "Virtual Users müssen zwischen 1 und $MAX_VIRTUAL_USERS liegen." }
@@ -43,13 +45,19 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         require(configurations.keys.all(selectedOperationIds::contains)) { "Die Konfiguration enthält einen nicht ausgewählten oder unbekannten Endpunkt." }
 
         val calls = selected.joinToString("\n") { operation -> requestCode(operation, configurations[operation.operationId]) }
+        val durationOrIterations =
+            if (useIterations) {
+                "iterations: $virtualUsers,"
+            } else {
+                "duration: '${durationSeconds}s',"
+            }
         return """
             import http from 'k6/http';
             import { check, sleep } from 'k6';
 
             export const options = {
               vus: $virtualUsers,
-              duration: '${durationSeconds}s',
+              $durationOrIterations
               gracefulStop: '0s',
               thresholds: {
                 http_req_failed: ['rate<0.05'],
@@ -221,7 +229,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
     )
 
     private companion object {
-        const val MAX_VIRTUAL_USERS = 1000
+        const val MAX_VIRTUAL_USERS = 30000
         const val MAX_DURATION_SECONDS = 3600
         const val CONTROL_CHARACTER_LIMIT = 0x20
         const val DEFAULT_PARAMETER_VALUE = "test"
