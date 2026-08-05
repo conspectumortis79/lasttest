@@ -45,6 +45,28 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         require(configurations.keys.all(selectedOperationIds::contains)) { "Die Konfiguration enthält einen nicht ausgewählten oder unbekannten Endpunkt." }
 
         val calls = selected.joinToString("\n") { operation -> requestCode(operation, configurations[operation.operationId]) }
+        // Per-operation status-code Counters. k6's --summary-export does
+        // NOT expose tagged sub-metrics, so we declare one Counter per
+        // (operation, status-code) tuple. The report then reads the
+        // aggregate `count` for each metric from summary.metrics.
+        //
+        // We pre-declare the most common HTTP status codes. Anything we
+        // did not anticipate lands in `lt_status_other_<opId>` so the
+        // user still sees the unexpected bucket instead of silently
+        // dropping responses. `err` is separate so network errors
+        // (status === 0) cannot be confused with a real HTTP 0.
+        val counterDeclarations =
+            selected
+                .joinToString("\n") { operation ->
+                    val safe = safeIdentifier(operation.operationId)
+                    val tracked = TRACKED_STATUS_CODES.joinToString("\n") { code ->
+                        "const lt_status_${code}_$safe = new Counter('lt_status_${code}_$safe');"
+                    }
+                    val fallback =
+                        "const lt_status_err_$safe = new Counter('lt_status_err_$safe');\n" +
+                            "const lt_status_other_$safe = new Counter('lt_status_other_$safe');"
+                    "$tracked\n$fallback"
+                }
         // k6 v1+ removed the top-level `gracefulStop` option; graceful stop
         // is now a scenario-level setting. The `vus` and `duration`/`iterations`
         // top-level shortcuts still work for backward compatibility, but
@@ -58,6 +80,9 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         return """
             import http from 'k6/http';
             import { check, sleep } from 'k6';
+            import { Counter } from 'k6/metrics';
+
+            $counterDeclarations
 
             export const options = {
               scenarios: {
@@ -122,7 +147,29 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                 "DELETE" -> "http.del(BASE_URL + ${toJson(url)}, null, ${toJson(requestOptions)})"
                 else -> "http.request(${toJson(operation.method)}, BASE_URL + ${toJson(url)}, ${requestBody?.let { "JSON.stringify(${toJson(it)})" } ?: "null"}, ${toJson(requestOptions)})"
             }
-        return "  { const response = $request; check(response, { ${toJson("${operation.operationId} succeeds")}: (r) => r.status >= 200 && r.status < 400 }); }"
+        val safe = safeIdentifier(operation.operationId)
+        // switch keeps the generated code linear in the number of codes
+        // (instead of a 20-step if/else-if ladder) and the k6 engine
+        // can fast-path consecutive identical status values better.
+        val statusIncrement = buildString {
+            appendLine("switch (response.status) {")
+            appendLine("  case 0: lt_status_err_$safe.add(1); break;")
+            for (code in TRACKED_STATUS_CODES) {
+                appendLine("  case $code: lt_status_${code}_$safe.add(1); break;")
+            }
+            appendLine("  default: lt_status_other_$safe.add(1);")
+            append("}")
+        }
+        return "  { const response = $request; $statusIncrement check(response, { ${toJson("${operation.operationId} succeeds")}: (r) => r.status >= 200 && r.status < 400 }); }"
+    }
+
+    private fun safeIdentifier(name: String): String {
+        // Make sure the operationId is a valid JavaScript identifier
+        // before we splice it into counter / variable names. k6 metric
+        // names share the same restriction, so the sanitisation also
+        // keeps the report-side parser happy.
+        val sanitized = name.replace(Regex("[^A-Za-z0-9_$]"), "_")
+        return if (sanitized.isEmpty() || sanitized[0].isDigit()) "_$sanitized" else sanitized
     }
 
     private fun resolveParameters(
@@ -241,5 +288,16 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         const val CONTROL_CHARACTER_LIMIT = 0x20
         const val DEFAULT_PARAMETER_VALUE = "test"
         const val BEARER_PREFIX = "Bearer "
+        // Exact HTTP status codes that get a dedicated Counter per
+        // operation. Anything not in this list falls into the `other`
+        // Counter for that operation so unexpected responses are still
+        // visible in the report. `err` (status === 0, e.g. connection
+        // refused) is handled separately and is not part of this list.
+        val TRACKED_STATUS_CODES = listOf(
+            200, 201, 202, 204, // 2xx success
+            301, 302, 304, // 3xx redirect
+            400, 401, 403, 404, 409, 422, 429, // 4xx client error
+            500, 502, 503, 504, // 5xx server error
+        )
     }
 }

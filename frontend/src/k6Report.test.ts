@@ -1,6 +1,7 @@
 import { deepEqual, equal } from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  activeStatusCodes,
   checkSuccessRate,
   completedRequestCount,
   copyTextToClipboard,
@@ -8,12 +9,15 @@ import {
   formatInteger,
   formatNumber,
   formatTimestamp,
+  FALLBACK_CODES,
   k6ScriptDownloadName,
   k6ScriptUrl,
   manualK6Command,
   metric,
   operationDisplayPath,
   parseK6Summary,
+  statusDistribution,
+  TRACKED_STATUS_CODES,
   type ReportOperation,
   type TestRun,
 } from './k6Report.ts'
@@ -192,5 +196,73 @@ test('copyTextToClipboard returns false when navigator.clipboard is unavailable'
       delete (globalThis as { navigator?: unknown }).navigator
     }
   }
+})
+
+test('statusDistribution extracts per-operation exact status code counts and totals them', () => {
+  const summary = {
+    metrics: {
+      lt_status_200_getThing: { count: 192 },
+      lt_status_503_getThing: { count: 8 },
+      lt_status_200_otherOp: { count: 50 },
+      lt_status_401_otherOp: { count: 12 },
+      lt_status_err_otherOp: { count: 7 },
+      lt_status_other_weirdOp: { count: 3 },
+    } as Record<string, { count: number }>,
+  }
+
+  const rows = statusDistribution(summary, ['getThing', 'otherOp', 'weirdOp', 'neverSelected'])
+
+  // Every tracked code plus the fallback codes must be present on each
+  // row, defaulting to 0, so the table layout is predictable.
+  equal(rows[0].operationId, 'getThing')
+  equal(rows[0].counts['200'], 192)
+  equal(rows[0].counts['503'], 8)
+  equal(rows[0].counts['401'], 0)
+  equal(rows[0].total, 200)
+  equal(rows[1].counts['200'], 50)
+  equal(rows[1].counts['401'], 12)
+  equal(rows[1].counts['err'], 7)
+  equal(rows[1].total, 69)
+  equal(rows[2].counts['other'], 3)
+  // Operations without any counter still get a fully-zeroed row so the
+  // table stays aligned with the run configuration.
+  equal(rows[3].operationId, 'neverSelected')
+  equal(rows[3].total, 0)
+  for (const code of [...TRACKED_STATUS_CODES, ...FALLBACK_CODES]) {
+    equal(rows[3].counts[String(code)], 0)
+  }
+})
+
+test('statusDistribution ignores malformed count values', () => {
+  const summary = {
+    metrics: {
+      lt_status_200_op: { count: Number.NaN },
+      lt_status_429_op: { count: Number.POSITIVE_INFINITY },
+    } as Record<string, { count: number }>,
+  }
+
+  const [row] = statusDistribution(summary, ['op'])
+  equal(row.counts['200'], 0)
+  equal(row.counts['429'], 0)
+  equal(row.total, 0)
+})
+
+test('activeStatusCodes keeps the tracked order, omits codes that never fired, and always shows fallback columns', () => {
+  const rows = [
+    { operationId: 'a', counts: { '200': 5, '401': 0, '429': 3 }, total: 8 },
+    { operationId: 'b', counts: { '200': 0, '401': 1, '429': 0 }, total: 1 },
+  ]
+
+  const codes = activeStatusCodes(rows)
+
+  // 200, 401, 429 are all in TRACKED_STATUS_CODES, so they appear in
+  // canonical order. The two fallback codes are always appended.
+  deepEqual(codes, [200, 401, 429, 'err', 'other'])
+})
+
+test('activeStatusCodes returns only the fallback columns when nothing fired', () => {
+  const rows = [{ operationId: 'a', counts: { '200': 0 }, total: 0 }]
+
+  deepEqual(activeStatusCodes(rows), ['err', 'other'])
 })
 

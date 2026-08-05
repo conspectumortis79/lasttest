@@ -262,6 +262,16 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .report-table th, .report-table td { padding: .65rem; border: 1px solid #d0d5dd; text-align: right; white-space: nowrap; }
 .report-table th { color: #344054; background: #f2f4f7; }
 .report-table th:first-child { text-align: left; }
+.report-section-intro { margin: 0 0 1rem; color: #475467; font-size: .82rem; }
+.report-table.status-distribution th[scope="row"] { text-align: left; font-weight: 600; }
+.report-table.status-distribution tfoot th, .report-table.status-distribution tfoot td { background: #f9fafb; }
+.report-table .status-4xx { color: #b42318; background: #fef3f2; font-weight: 600; }
+.report-table .status-5xx { color: #b42318; background: #fef3f2; font-weight: 600; }
+.report-table .status-err { color: #93370d; background: #fffaeb; font-weight: 600; }
+.report-table .status-other { color: #93370d; background: #fffaeb; font-weight: 600; }
+.report-table .status-empty { color: #98a2b3; }
+.report-table .status-header-4xx, .report-table .status-header-5xx { color: #b42318; background: #fef3f2; }
+.report-table .status-header-err, .report-table .status-header-other { color: #93370d; background: #fffaeb; }
 .report-alert, .report-loading { padding: 1rem; border: 1px solid #fedf89; border-radius: 10px; color: #93370d; background: #fffaeb; }
 .report-alert.failure { border-color: #fecdca; color: #b42318; background: #fef3f2; }
 

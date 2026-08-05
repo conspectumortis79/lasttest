@@ -339,4 +339,70 @@ class DefaultK6ScriptGeneratorTest {
     fun `rejects empty selection`() {
         assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("missing"), emptyList(), 1, 10) }
     }
+
+    @Test
+    fun `declares one counter per tracked status code plus err and other per selected operation`() {
+        val script = generator.generate(specification, "https://example.test", setOf("getPet", "createPet"), emptyList(), 1, 10)
+
+        // 19 tracked codes + err + other = 21 Counter declarations per operation.
+        val trackedCodes = listOf(
+            200, 201, 202, 204,
+            301, 302, 304,
+            400, 401, 403, 404, 409, 422, 429,
+            500, 502, 503, 504,
+        )
+        for (operationId in listOf("getPet", "createPet")) {
+            for (code in trackedCodes) {
+                val metricName = "lt_status_${code}_$operationId"
+                assertContains(script, "new Counter('$metricName')")
+            }
+            assertContains(script, "new Counter('lt_status_err_$operationId')")
+            assertContains(script, "new Counter('lt_status_other_$operationId')")
+        }
+    }
+
+    @Test
+    fun `uses a switch statement to dispatch the response status to the right counter`() {
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 1, 10)
+
+        // The status dispatch must be a switch so the generated code
+        // stays linear in the number of codes and so the k6 engine can
+        // fast-path consecutive identical status values.
+        assertContains(script, "switch (response.status) {")
+        assertContains(script, "  case 0: lt_status_err_getPet.add(1); break;")
+        assertContains(script, "  case 200: lt_status_200_getPet.add(1); break;")
+        assertContains(script, "  case 401: lt_status_401_getPet.add(1); break;")
+        assertContains(script, "  case 429: lt_status_429_getPet.add(1); break;")
+        assertContains(script, "  case 504: lt_status_504_getPet.add(1); break;")
+        assertContains(script, "  default: lt_status_other_getPet.add(1);")
+    }
+
+    @Test
+    fun `sanitises operation ids with invalid identifier characters in counter names`() {
+        val weirdOperation =
+            ApiOperation("get-pet:v2", "GET", "/pets", "", false, emptyList(), null)
+        val weirdSpecification = specification.copy(operations = listOf(weirdOperation))
+
+        val script = generator.generate(weirdSpecification, "https://example.test", setOf("get-pet:v2"), emptyList(), 1, 10)
+
+        // Hyphens and colons must be replaced with underscores so the
+        // metric name stays a valid JavaScript identifier.
+        assertContains(script, "new Counter('lt_status_200_get_pet_v2')")
+        assertContains(script, "new Counter('lt_status_429_get_pet_v2')")
+        assertContains(script, "lt_status_err_get_pet_v2.add(1)")
+        assertContains(script, "lt_status_other_get_pet_v2.add(1)")
+    }
+
+    @Test
+    fun `omits status counters for unselected operations`() {
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 1, 10)
+
+        // `createPet` and `deletePet` are not in the selected set, so
+        // their counters must not be generated.
+        assertTrue(!script.contains("lt_status_200_createPet"))
+        assertTrue(!script.contains("lt_status_500_deletePet"))
+        assertTrue(!script.contains("lt_status_err_createPet"))
+        assertTrue(script.contains("lt_status_200_getPet"))
+        assertTrue(script.contains("lt_status_err_getPet"))
+    }
 }

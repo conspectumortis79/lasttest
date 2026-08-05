@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
+  activeStatusCodes,
   checkSuccessRate,
   completedRequestCount,
   copyTextToClipboard,
+  FALLBACK_CODES,
   formatBytes,
   formatInteger,
   formatNumber,
@@ -13,6 +15,7 @@ import {
   metric,
   operationDisplayPath,
   parseK6Summary,
+  statusDistribution,
   type K6Metric,
   type K6Summary,
   type ReportOperation,
@@ -176,6 +179,7 @@ function CompletedReport({
     </section>
 
     <TestConfiguration run={run} />
+    <StatusCodeDistribution summary={summary} run={run} />
     <DetailedMetrics summary={summary} />
     <RawResults run={run} generatedScript={generatedScript} scriptError={scriptError} />
   </>
@@ -246,6 +250,83 @@ function ReportOperationCard({ operation }: { operation: ReportOperation }) {
     <p>Bearer-Token: <strong>{operation.bearerTokenConfigured ? 'konfiguriert (aus Sicherheitsgründen ausgeblendet)' : 'nicht konfiguriert'}</strong></p>
     {operation.requestBodyJson != null && <details><summary>JSON Request-Body</summary><pre>{operation.requestBodyJson || 'Kein Request-Body gesendet'}</pre></details>}
   </article>
+}
+
+function StatusCodeDistribution({ summary, run }: { summary: K6Summary, run: TestRun }) {
+  const operationIds = run.configuration?.operations.map(operation => operation.operationId) ?? []
+  if (operationIds.length === 0) return null
+  const rows = statusDistribution(summary, operationIds)
+  // Only show status codes that actually fired. Fallback columns
+  // (`err`, `other`) are always rendered so the user sees network
+  // errors and unexpected codes even when they never appeared.
+  const columns = activeStatusCodes(rows)
+  if (columns.length === 0) return null
+  const totals: Record<string, number> = {}
+  for (const code of columns) totals[String(code)] = 0
+  let grandTotal = 0
+  for (const row of rows) {
+    for (const code of columns) {
+      totals[String(code)] += row.counts[String(code)] ?? 0
+    }
+    grandTotal += row.total
+  }
+  return <section className="report-section">
+    <h2>Statuscode-Verteilung</h2>
+    <p className="report-section-intro">
+      Exakte HTTP-Antwortcodes pro Endpunkt. „err" steht für Netzwerk- oder Verbindungsfehler
+      (Status 0, z. B. Verbindungsabbruch, DNS-Fehler oder TLS-Handshake fehlgeschlagen).
+      „other" sammelt Antworten mit Statuscodes, die nicht in der vordefinierten Liste enthalten sind.
+    </p>
+    <div className="report-table-scroll">
+      <table className="report-table status-distribution">
+        <thead>
+          <tr>
+            <th>Endpunkt</th>
+            {columns.map(code => <th key={String(code)} className={headerClassForCode(String(code))}>{renderCodeHeader(String(code))}</th>)}
+            <th>Summe</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => <tr key={row.operationId}>
+            <th scope="row"><code>{row.operationId}</code></th>
+            {columns.map(code => {
+              const key = String(code)
+              const count = row.counts[key] ?? 0
+              return <td key={key} className={cellClassForCode(key, count)}>{formatInteger(count)}</td>
+            })}
+            <td><strong>{formatInteger(row.total)}</strong></td>
+          </tr>)}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th scope="row">Gesamt</th>
+            {columns.map(code => <td key={String(code)}><strong>{formatInteger(totals[String(code)])}</strong></td>)}
+            <td><strong>{formatInteger(grandTotal)}</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+}
+
+// Header label: numeric codes stay numeric; `err` and `other` keep
+// their symbolic names so the user can spot them at a glance.
+function renderCodeHeader(code: string): string {
+  return code
+}
+
+function headerClassForCode(code: string): string {
+  if (FALLBACK_CODES.includes(code as typeof FALLBACK_CODES[number])) return `status-header-${code}`
+  if (code.startsWith('4') || code.startsWith('5')) return `status-header-${code[0]}xx`
+  return ''
+}
+
+function cellClassForCode(code: string, count: number): string {
+  if (count === 0) return 'status-empty'
+  if (FALLBACK_CODES.includes(code as typeof FALLBACK_CODES[number])) return `status-${code}`
+  const firstDigit = code[0]
+  if (firstDigit === '4' || firstDigit === '5') return `status-${firstDigit}xx`
+  return ''
 }
 
 const durationMetrics: Array<[string, string]> = [
