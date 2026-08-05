@@ -19,8 +19,9 @@
 5. [The main workflow at a glance](#5-the-main-workflow-at-a-glance)
 6. [Step 1 — Importing a specification](#6-step-1--importing-a-specification)
    - 6.1 [Accepted formats](#61-accepted-formats)
-   - 6.2 [What is *not* an importable document](#62-what-is-not-an-importable-document)
-   - 6.3 [Importing Swagger 2.0](#63-importing-swagger-20)
+   - 6.2 [Swagger UI URLs](#62-swagger-ui-urls)
+   - 6.3 [What is *not* an importable document](#63-what-is-not-an-importable-document)
+   - 6.4 [Importing Swagger 2.0](#64-importing-swagger-20)
 7. [Step 2 — Selecting and configuring endpoints](#7-step-2--selecting-and-configuring-endpoints)
    - 7.1 [Selection and destructive operations](#71-selection-and-destructive-operations)
    - 7.2 [Endpoint card anatomy](#72-endpoint-card-anatomy)
@@ -47,6 +48,7 @@
     - 12.1 [`start-linux.sh`](#121-start-linuxsh)
     - 12.2 [`docker-start.sh`](#122-docker-startsh)
 13. [Troubleshooting](#13-troubleshooting)
+    - 13.1 [Trusting custom TLS certificates](#131-trusting-custom-tls-certificates)
 14. [Glossary](#14-glossary)
 
 ---
@@ -239,11 +241,26 @@ without losing the others.
 
 ## 6. Step 1 — Importing a specification
 
+The first card accepts three input modes that share the same target:
+
+1. **URL** — point lasttest at a Swagger UI page or a direct OpenAPI
+   document. The backend fetches the URL, resolves the spec (extracting
+   `url` / `urls` from a Swagger UI bundle if necessary), and imports
+   the result.
+2. **Datei** — pick a `.yaml`, `.yml`, or `.json` file from disk.
+3. **Textarea** — paste raw YAML or JSON directly.
+
+When the URL field is filled, clicking **Validieren &amp; importieren**
+first calls `POST /api/specifications/fetch-url` and then transparently
+validates the fetched content through the normal import endpoint. The
+textarea is updated with the resolved spec so you can tweak it before
+starting a test run.
+
 ### 6.1 Accepted formats
 
 | Field | Value |
 | --- | --- |
-| Format | YAML or JSON |
+| Format | YAML or JSON (in the textarea or fetched automatically) |
 | Swagger version | 2.0 |
 | OpenAPI version | 3.0.x, 3.1.x |
 | Encoding | UTF-8 |
@@ -253,21 +270,45 @@ lasttest sends the raw text to `POST /api/specifications/import`. The
 server returns a normalised representation that the UI uses to render
 endpoint cards.
 
-### 6.2 What is *not* an importable document
+### 6.2 Swagger UI URLs
 
-- A rendered Swagger UI HTML page (`/swagger-ui/index.html`).
+Pointing lasttest at a Swagger UI HTML page is fully supported. The
+fetcher:
+
+- downloads the HTML,
+- looks for the `url` (or first `urls[]`) entry in the
+  `SwaggerUIBundle({...})` configuration,
+- follows the same-origin `url` heuristic to common endpoints such as
+  `/v3/api-docs`, `/v3/api-docs.yaml`, `/v2/api-docs`, `/swagger.json`,
+  `/swagger.yaml`, `/openapi.json`, `/openapi.yaml` if no config is
+  found,
+- refuses to follow cross-origin redirects (basic SSRF protection),
+- enforces a 10 s timeout and a 5 MB response cap.
+
+The response payload includes the resolved URL and a `source` flag so
+the UI can show whether the document came directly from the URL or
+via a Swagger UI page.
+
+A bundled demo Swagger UI lives at
+`http://localhost:8286/demo-swagger-ui` once lasttest is running. It
+serves the same `demo/openapi-demo.yaml` document so the URL feature
+can be exercised end-to-end without any external system.
+
+### 6.3 What is *not* an importable document
+
 - A Swagger UI JSON blob with `swaggerUrl` / `urls` references but no
   inline definition.
 - A Postman collection. (Postman can export OpenAPI; use that.)
 
-If you only have a Swagger UI URL, download the raw document from one
-of these endpoints instead:
+If a Swagger UI URL serves neither a spec URL nor a Swagger UI bundle,
+lasttest prints the missing URL convention and asks you to point at one
+of the well-known endpoints instead:
 
 - `/swagger.json` or `/swagger.yaml`
 - `/v3/api-docs` (Springdoc) or `/v3/api-docs.yaml`
 - `/openapi.json` (FastAPI, NestJS, and similar)
 
-### 6.3 Importing Swagger 2.0
+### 6.4 Importing Swagger 2.0
 
 Swagger 2.0 is accepted on the wire and converted internally to OpenAPI
 3 so that the rest of lasttest only has to deal with one model. You do
@@ -405,7 +446,7 @@ all VUs start together and the test runs for the full duration.
 The MVP hard-caps both knobs to keep runaway tests from melting your
 target:
 
-- `vus`: 1 – **1000**
+- `vus`: 1 – **30000**
 - `durationSeconds`: 1 – **3600**
 
 The form will refuse to start a run outside this range and display a
@@ -590,6 +631,46 @@ local iteration fast and safe.
 | Report opens but shows “unbekannte Report-ID” | The lasttest process was restarted since the run finished | Test runs are in-memory only; re-run the test to get a fresh report |
 | Bearer-authenticated requests come back as `401` | The placeholder misled you into including the `Bearer ` prefix | Strip the prefix; lasttest adds it for you |
 | CORS error in the browser console when calling the target API | The target does not allow cross-origin requests from the frontend | lasttest runs the test from the backend, not the browser — open the report and check the k6 output; the CORS error is from the browser, not from the test |
+| `PKIX path building failed: unable to find valid certification path to requested target` | The target API uses a TLS certificate that is not trusted by the JVM (self-signed, internal CA, missing intermediate) | See [Section 13.1 — Trusting custom TLS certificates](#131-trusting-custom-tls-certificates) |
+
+### 13.1 Trusting custom TLS certificates
+
+When the target API uses a TLS certificate that is not signed by a public CA — for example a self-signed certificate in a staging environment, or a certificate issued by a corporate / internal CA — the JVM refuses the TLS handshake and lasttest reports `PKIX path building failed: unable to find valid certification path to requested target`.
+
+Configure lasttest with an additional TrustStore that contains the missing certificate(s) or CA chain. The Java system TrustStore is still used, so public CAs keep working — only the additional certificates are layered on top.
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `LASTTEST_TRUSTSTORE_PATH` | yes | Absolute path to a file containing the certificate(s). Supported formats: `PKCS12` (`.p12`, `.pfx`), `JKS` (`.jks`), or PEM (`.pem`, `.crt`, `.cer` — one or more CERTIFICATE blocks). |
+| `LASTTEST_TRUSTSTORE_PASSWORD` | only for PKCS12 / JKS | Password for the TrustStore. Empty string is allowed for PEM files. |
+
+Examples:
+
+```bash
+# PEM file with one or more CERTIFICATE blocks
+export LASTTEST_TRUSTSTORE_PATH=/etc/lasttest/staging-ca.pem
+export LASTTEST_TRUSTSTORE_PASSWORD=
+
+# PKCS12 TrustStore created with keytool
+export LASTTEST_TRUSTSTORE_PATH=/etc/lasttest/staging.p12
+export LASTTEST_TRUSTSTORE_PASSWORD=changeit
+```
+
+Generate a PEM file from a target host with OpenSSL:
+
+```bash
+openssl s_client -showcerts -connect api.example.com:443 </dev/null 2>/dev/null \
+  | openssl x509 -outform PEM > staging-ca.pem
+```
+
+Or build a PKCS12 TrustStore from a downloaded certificate:
+
+```bash
+keytool -importcert -alias staging -file staging-ca.pem \
+  -keystore staging.p12 -storetype PKCS12 -storepass changeit -noprompt
+```
+
+The variables only have to be set in the environment that runs the lasttest backend (Docker container, systemd unit, terminal, …). Restart lasttest after changing them.
 
 ---
 

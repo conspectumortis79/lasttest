@@ -56,7 +56,10 @@ val coverageIncludes =
         "de/lasttest/config/StartupMessageLogger.class",
         "de/lasttest/demo/DemoProductController.class",
         "de/lasttest/demo/DemoSpecificationProvider.class",
+        "de/lasttest/demo/DemoSwaggerUiController.class",
         "de/lasttest/domain/DefaultK6ScriptGenerator.class",
+        "de/lasttest/domain/HttpRemoteSpecificationFetcher.class",
+        "de/lasttest/domain/JdkRemoteSpecificationClient.class",
         "de/lasttest/domain/LocalK6TestRunService.class",
         "de/lasttest/domain/SwaggerSpecificationImporter.class",
     )

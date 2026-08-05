@@ -216,8 +216,11 @@ function TestConfiguration({ run }: { run: TestRun }) {
         <ReportInfo label="API-Titel" value={configuration.apiTitle} />
         <ReportInfo label="API-Version" value={configuration.apiVersion || '–'} />
         <ReportInfo label="Base URL" value={configuration.baseUrl} code />
+        <ReportInfo label="Modus" value={configuration.useIterations ? `${configuration.virtualUsers} parallele Anfragen (so schnell wie möglich)` : 'Virtuelle Benutzer über Zeit'} />
         <ReportInfo label="Virtuelle Benutzer" value={configuration.virtualUsers.toString()} />
-        <ReportInfo label="Testdauer" value={`${configuration.durationSeconds} Sekunden`} />
+        {configuration.useIterations
+          ? <ReportInfo label="Geplante Anfragen" value={configuration.virtualUsers.toString()} />
+          : <ReportInfo label="Testdauer" value={`${configuration.durationSeconds} Sekunden`} />}
         <ReportInfo label="Ausgewählte Operationen" value={configuration.operations.length.toString()} />
       </div>
       <h3>Getestete Endpunkte</h3>

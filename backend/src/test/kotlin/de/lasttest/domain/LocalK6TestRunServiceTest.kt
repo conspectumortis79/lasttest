@@ -101,6 +101,7 @@ class LocalK6TestRunServiceTest {
         assertEquals("https://target.test", configuration.baseUrl)
         assertEquals(12, configuration.virtualUsers)
         assertEquals(30, configuration.durationSeconds)
+        assertEquals(false, configuration.useIterations)
         val operation = configuration.operations.single()
         assertEquals("getPet", operation.operationId)
         assertEquals(listOf("42", "details", "{\"active\":true}", "[\"one\",\"two\"]", "[1,2]", "test"), operation.parameterValues.map(ParameterValue::value))
@@ -123,6 +124,27 @@ class LocalK6TestRunServiceTest {
         assertEquals("createPet", operation.operationId)
         assertEquals("{\"name\":\"Fido\"}", operation.requestBodyJson)
         assertFalse(operation.bearerTokenConfigured)
+    }
+
+    @Test
+    fun `forwards useIterations to the stored configuration when requested`() {
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    virtualUsers = 25,
+                    durationSeconds = 10,
+                    useIterations = true,
+                ),
+            )
+
+        val configuration = assertNotNull(run.configuration)
+        assertEquals(true, configuration.useIterations)
+        assertEquals(25, configuration.virtualUsers)
+        // durationSeconds bleibt im Record erhalten, das Skript ignoriert ihn im Iterations-Modus.
+        assertEquals(10, configuration.durationSeconds)
     }
 
     @Test
@@ -159,6 +181,7 @@ class LocalK6TestRunServiceTest {
             operationConfigurations: List<OperationConfiguration>,
             virtualUsers: Int,
             durationSeconds: Int,
+            useIterations: Boolean,
         ): String = "export default function () {}"
     }
 }

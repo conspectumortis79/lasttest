@@ -2,6 +2,7 @@ package de.lasttest.api
 
 import de.lasttest.demo.DemoSpecificationProvider
 import de.lasttest.domain.InvalidSpecificationException
+import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
 import de.lasttest.domain.TestRunService
 import jakarta.validation.Valid
@@ -26,6 +27,7 @@ class LastTestController(
     private val importer: SpecificationImporter,
     private val testRuns: TestRunService,
     private val demoSpecificationProvider: DemoSpecificationProvider,
+    private val remoteFetcher: RemoteSpecificationFetcher,
 ) {
     @GetMapping("/demo-specification", produces = [DEMO_SPECIFICATION_MEDIA_TYPE])
     fun demoSpecification(): String = demoSpecificationProvider.load()
@@ -34,6 +36,11 @@ class LastTestController(
     fun import(
         @RequestBody request: ImportSpecificationRequest,
     ): ImportedSpecification = importer.import(request.specification)
+
+    @PostMapping("/specifications/fetch-url")
+    fun fetchFromUrl(
+        @RequestBody request: FetchSpecificationRequest,
+    ): FetchedSpecification = remoteFetcher.fetch(request.url)
 
     @PostMapping("/test-runs")
     fun create(

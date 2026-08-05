@@ -142,7 +142,7 @@ class SwaggerSpecificationImporter : SpecificationImporter {
         return requirements.any { requirement -> requirement.keys.any(bearerSecuritySchemes::contains) }
     }
 
-    private fun toParameter(parameter: Parameter): ApiParameter? {
+    internal fun toParameter(parameter: Parameter): ApiParameter? {
         val name = parameter.name?.takeIf { it.isNotBlank() } ?: return null
         return ApiParameter(
             name = name,

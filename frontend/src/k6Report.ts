@@ -20,6 +20,7 @@ export type TestRunConfiguration = {
   baseUrl: string
   virtualUsers: number
   durationSeconds: number
+  useIterations: boolean
   operations: ReportOperation[]
 }
 

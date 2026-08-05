@@ -48,6 +48,7 @@ class LocalK6TestRunService(
                 request.operationConfigurations,
                 request.virtualUsers,
                 request.durationSeconds,
+                request.useIterations,
             )
         val run =
             TestRun(
@@ -78,6 +79,7 @@ class LocalK6TestRunService(
             baseUrl = request.baseUrl,
             virtualUsers = request.virtualUsers,
             durationSeconds = request.durationSeconds,
+            useIterations = request.useIterations,
             operations = selectedOperations.map { operation -> operation.toRunConfiguration(configurations[operation.operationId]) },
         )
     }

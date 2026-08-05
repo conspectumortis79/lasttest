@@ -6,12 +6,22 @@ data class ImportSpecificationRequest(
     val specification: String,
 )
 
+data class FetchSpecificationRequest(
+    val url: String,
+)
+
 data class ImportedSpecification(
     val title: String,
     val version: String,
     val baseUrl: String,
     val operations: List<ApiOperation>,
     val servers: List<ApiServer> = emptyList(),
+)
+
+data class FetchedSpecification(
+    val content: String,
+    val resolvedUrl: String,
+    val source: String,
 )
 
 data class ApiServer(
@@ -82,6 +92,7 @@ data class CreateTestRunRequest(
     val operationConfigurations: List<OperationConfiguration> = emptyList(),
     val virtualUsers: Int = 1,
     val durationSeconds: Int = 10,
+    val useIterations: Boolean = false,
 )
 
 data class TestRunConfiguration(
@@ -90,6 +101,7 @@ data class TestRunConfiguration(
     val baseUrl: String,
     val virtualUsers: Int,
     val durationSeconds: Int,
+    val useIterations: Boolean,
     val operations: List<TestRunOperationConfiguration>,
 )
 
