@@ -60,6 +60,40 @@ export type TestRun = {
   error?: string
 }
 
+// Failure categories surfaced by summarizeFailure. The ordering is
+// significant: each predicate runs in order so that a more specific
+// signal (e.g. a k6-binary problem) wins over a more generic one
+// (e.g. unknown error text) when both could match.
+export type FailureCategory =
+  | 'k6-missing' // H. Java IOException: "Cannot run program \"k6\""
+  | 'tls' // B. CERT_AUTHORITY_INVALID, x509, PKIX, certificate verify failed
+  | 'unreachable' // A. ERR_CONNECTION_REFUSED, "connection refused"
+  | 'dns' // A-variant. ENOTFOUND, EAI_AGAIN — distinguished from above
+  | 'timeout' // C. context deadline exceeded, i/o timeout
+  | 'script' // G. ReferenceError, GoError, "script exception"
+  | 'server5xx' // D. summary shows a majority of 5xx responses
+  | 'threshold-latency' // E. http_req_duration p(95) > 1000 ms
+  | 'threshold-failure-rate' // F. http_req_failed.value > 0.05
+  | 'unknown' // I. fallback when nothing else matches
+
+export type FailureSummary = {
+  category: FailureCategory
+  // Short headline shown next to the status badge, e.g. "Ziel nicht erreichbar".
+  diagnosis: string
+  // Concrete value the user can act on, e.g. "Connection refused auf http://127.0.0.1:1".
+  detail: string
+  // Bullet points explaining the conclusion with concrete evidence drawn
+  // from run.error and run.summary. Empty when there is nothing useful.
+  reasons: string[]
+}
+
+// One labelled value in the metric row beneath the status badge.
+export type MetricItem = {
+  label: string
+  value: string
+  severity: 'normal' | 'error' | 'warn' | 'muted'
+}
+
 export type K6Metric = {
   avg?: number
   min?: number
@@ -642,4 +676,396 @@ export function operationDisplayPath(operation: ReportOperation): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// Failure-rate threshold above which a run is reported as failed.
+const FAILURE_RATE_THRESHOLD = 0.05
+// Latency threshold (in ms) above which a run is reported as failed.
+const LATENCY_THRESHOLD_MS = 1000
+// Share of 5xx responses above which the failure is classified as a
+// server-error run rather than a generic threshold failure.
+const SERVER_ERROR_SHARE = 0.05
+
+// Aggregated per-operation counts of all status codes plus the network
+// (`err`) and unexpected (`other`) buckets. Used to summarise the
+// run's failure shape in a few words.
+type AggregateBucket = { code: string; count: number; operationId: string }
+
+function aggregateStatusCodes(summary: K6Summary): AggregateBucket[] {
+  const buckets: AggregateBucket[] = []
+  for (const metricName of Object.keys(summary.metrics)) {
+    const match = /^lt_status_(.+?)_(.+)$/.exec(metricName)
+    if (!match) continue
+    const code = match[1]
+    const operationId = match[2]
+    const value = summary.metrics[metricName].count
+    if (value == null || !Number.isFinite(value) || value <= 0) continue
+    buckets.push({ code, operationId, count: value })
+  }
+  return buckets
+}
+
+function countByStatusFamily(buckets: AggregateBucket[], familyPrefix: string): number {
+  return buckets
+    .filter(bucket => bucket.code.startsWith(familyPrefix))
+    .reduce((sum, bucket) => sum + bucket.count, 0)
+}
+
+function networkErrorCount(buckets: AggregateBucket[]): number {
+  return buckets
+    .filter(bucket => bucket.code === 'err')
+    .reduce((sum, bucket) => sum + bucket.count, 0)
+}
+
+// Largest single bucket of a given code family. Returns undefined when
+// the family never fired.
+function dominantBucket(buckets: AggregateBucket[], code: string): AggregateBucket | undefined {
+  let best: AggregateBucket | undefined
+  for (const bucket of buckets) {
+    if (bucket.code !== code) continue
+    if (!best || bucket.count > best.count) best = bucket
+  }
+  return best
+}
+
+// Most frequent error code across all per-operation buckets. Skips 2xx
+// success codes so the headline reflects what actually failed.
+function dominantErrorCode(buckets: AggregateBucket[]): AggregateBucket | undefined {
+  let best: AggregateBucket | undefined
+  for (const bucket of buckets) {
+    if (bucket.code === '200' || bucket.code === '201' || bucket.code === '202' || bucket.code === '204') continue
+    if (!best || bucket.count > best.count) best = bucket
+  }
+  return best
+}
+
+function hostnameFromUrl(value: string): string | undefined {
+  try {
+    return new URL(value).hostname
+  } catch {
+    return undefined
+  }
+}
+
+// First non-empty line of the k6 output, truncated to keep the detail row
+// on a single line in the UI. Returns undefined only when the input is empty
+// or whitespace-only, which cannot happen for real k6 failures.
+function shortErrorExcerpt(errorText: string): string | undefined {
+  // split() always returns at least one element, so firstLine is always a string.
+  const firstLine = errorText.split(/\r?\n/, 1)[0].trim()
+  if (firstLine.length === 0) return undefined
+  // 160 chars is roughly the width of a line in the UI; longer excerpts get
+  // truncated to keep the detail row on a single line.
+  if (firstLine.length <= 160) return firstLine
+  return `${firstLine.slice(0, 159)}…`
+}
+
+// Classifies a failed run into a FailureCategory. The order of the
+// predicates is significant — see FailureCategory.
+function failureCategory(run: TestRun, summary: K6Summary | undefined): FailureCategory {
+  const errorText = run.error ?? ''
+
+  if (/Cannot run program/i.test(errorText)) {
+    return 'k6-missing'
+  }
+  if (/CERT_|x509|PKIX|certificate verify failed|ERR_TLS/i.test(errorText)) {
+    return 'tls'
+  }
+  if (/ERR_CONNECTION_REFUSED|connection refused/i.test(errorText)) {
+    return 'unreachable'
+  }
+  if (/ENOTFOUND|EAI_AGAIN/i.test(errorText)) {
+    return 'dns'
+  }
+  if (/deadline exceeded|i\/o timeout|context deadline/i.test(errorText)) {
+    return 'timeout'
+  }
+  if (/script exception|ReferenceError|GoError/i.test(errorText)) {
+    return 'script'
+  }
+
+  // No parseable error text → fall back to summary-driven categories.
+  if (summary) {
+    const totalRequests = completedRequestCount(summary) ?? 0
+    if (totalRequests > 0) {
+      const buckets = aggregateStatusCodes(summary)
+      const fiveXxCount = countByStatusFamily(buckets, '5')
+      const failureRate = metric(summary, 'http_req_failed').value ?? 0
+      const p95 = metric(summary, 'http_req_duration')['p(95)'] ?? 0
+
+      if (fiveXxCount / totalRequests > SERVER_ERROR_SHARE) {
+        return 'server5xx'
+      }
+      if (p95 > LATENCY_THRESHOLD_MS) {
+        return 'threshold-latency'
+      }
+      if (failureRate > FAILURE_RATE_THRESHOLD) {
+        return 'threshold-failure-rate'
+      }
+    }
+  }
+
+  return 'unknown'
+}
+
+// Human-readable diagnosis + detail + bullet list for a given run.
+export function summarizeFailure(run: TestRun): FailureSummary {
+  const summary = parseK6Summary(run)
+  const category = failureCategory(run, summary)
+  const baseUrl = run.configuration?.baseUrl
+  const errorText = run.error ?? ''
+  const buckets = summary ? aggregateStatusCodes(summary) : []
+  const totalRequests = summary ? completedRequestCount(summary) ?? 0 : 0
+  const networkErrors = networkErrorCount(buckets)
+  const failureRate = summary ? metric(summary, 'http_req_failed').value ?? 0 : 0
+  const failureRatePercent = failureRate * 100
+  const p95 = summary ? metric(summary, 'http_req_duration')['p(95)'] : undefined
+  const excerpt = shortErrorExcerpt(errorText)
+
+  switch (category) {
+    case 'k6-missing':
+      return {
+        category,
+        diagnosis: 'k6 konnte nicht gestartet werden',
+        detail: 'Cannot run program „k6“ — Binary fehlt im Container',
+        reasons: [
+          'Java-ProcessBuilder hat das k6-Binary nicht gefunden.',
+          'Prüfe, ob das Docker-Image korrekt gebaut wurde (k6 muss aus grafana/k6:latest stagen).',
+          'Im Selbst-Setup: ist k6 auf dem PATH?',
+        ],
+      }
+    case 'tls': {
+      const target = baseUrl ?? 'Ziel'
+      return {
+        category,
+        diagnosis: 'TLS-Handshake fehlgeschlagen',
+        detail: 'Zertifikat wird nicht vertraut (self-signed oder interne CA)',
+        reasons: [
+          `${target} liefert ein Zertifikat, dem die JVM (und damit Go's crypto/tls) nicht vertraut.`,
+          'Hint: TrustStore über LASTTEST_TRUSTSTORE_PATH setzen (siehe USER_GUIDE §13.1). Für k6 zusätzlich SSL_CERT_FILE.',
+          'Bereits der erste Request schlug fehl — kein einziger Statuscode erreicht.',
+        ],
+      }
+    }
+    case 'unreachable': {
+      const reasonsList: string[] = []
+      if (baseUrl) reasonsList.push(`${baseUrl} lehnt TCP-Verbindungen ab (Connection refused).`)
+      if (networkErrors > 0) reasonsList.push(`Alle ${totalRequests || networkErrors} Requests schlugen fehl — Status 0 (kein HTTP-Response erhalten).`)
+      reasonsList.push(`Threshold http_req_failed (5 %) gerissen — tatsächlich ${failureRatePercent.toFixed(0)} %.`)
+      return {
+        category,
+        diagnosis: 'Ziel nicht erreichbar',
+        detail: baseUrl ? `Connection refused auf ${baseUrl}` : 'Connection refused',
+        reasons: reasonsList,
+      }
+    }
+    case 'dns': {
+      const hostnameFromBaseUrl = baseUrl ? hostnameFromUrl(baseUrl) : undefined
+      const hostFromError = (() => {
+        const match = /ENOTFOUND\s+(\S+)/.exec(errorText)
+        return match?.[1]
+      })()
+      const host = hostFromError ?? hostnameFromBaseUrl ?? 'Zielhost'
+      const reasonsList: string[] = [
+        `Host ${host} konnte nicht via DNS aufgelöst werden.`,
+        'Container-Egress: läuft docker compose in einem Netzwerk ohne DNS-Forwarder?',
+      ]
+      if (networkErrors > 0) reasonsList.push(`Alle ${totalRequests || networkErrors} Requests schlugen fehl — Status 0 (kein HTTP-Response).`)
+      return {
+        category,
+        diagnosis: 'DNS-Auflösung fehlgeschlagen',
+        detail: `${host} nicht gefunden (ENOTFOUND)`,
+        reasons: reasonsList,
+      }
+    }
+    case 'timeout': {
+      const p95Text = `${formatNumber(p95, 0)} ms`
+      const reasonsList: string[] = []
+      reasonsList.push(`Threshold http_req_duration p(95) < ${LATENCY_THRESHOLD_MS} ms gerissen — gemessen ${p95Text}.`)
+      const fiveXx = countByStatusFamily(buckets, '5')
+      if (fiveXx > 0) reasonsList.push(`${fiveXx} von ${totalRequests} Requests mit HTTP 5xx (Gateway Timeout).`)
+      reasonsList.push(`Threshold http_req_failed (5 %) ${fiveXx > 0 ? 'knapp gehalten — ' + formatNumber(failureRatePercent, 1) + ' %' : 'gerissen — ' + formatNumber(failureRatePercent, 1) + ' %'}.`)
+      return {
+        category,
+        diagnosis: 'Antwortzeit zu hoch',
+        detail: `p(95) ${p95Text} über Threshold (${formatNumber(LATENCY_THRESHOLD_MS / 1000, 1)} s) — 30 s Timeout gerissen`,
+        reasons: reasonsList,
+      }
+    }
+    case 'server5xx': {
+      const dominant = dominantBucket(buckets, '502') ?? dominantBucket(buckets, '500') ?? dominantErrorCode(buckets)!
+      const fiveXxBuckets = buckets
+        .filter(b => b.code.startsWith('5'))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3)
+      const reasonsList: string[] = []
+      reasonsList.push(`Threshold http_req_failed (5 %) gerissen — tatsächlich ${failureRatePercent.toFixed(0)} %.`)
+      for (const bucket of fiveXxBuckets) {
+        reasonsList.push(`Endpunkt ${bucket.operationId} antwortete ${bucket.count}× mit HTTP ${bucket.code}.`)
+      }
+      if (p95 != null && Number.isFinite(p95)) reasonsList.push(`Latenz unauff\u00e4llig (p(95) ${Math.round(p95)} ms) — der Server ist erreichbar und antwortet, nur nicht korrekt.`)
+      return {
+        category,
+        diagnosis: 'Viele Server-Fehler (5xx)',
+        detail: `Häufigster Fehlercode: ${dominant.code} — ${dominant.count}\u00d7 von ${totalRequests} Requests`,
+        reasons: reasonsList,
+      }
+    }
+    case 'threshold-failure-rate': {
+      const dominant = dominantErrorCode(buckets)!
+      const fourXx = countByStatusFamily(buckets, '4')
+      const reasonsList: string[] = []
+      reasonsList.push(`Threshold http_req_failed (5 %) gerissen — tatsächlich ${failureRatePercent.toFixed(0)} %.`)
+      if (dominant.code === '401') {
+        reasonsList.push(`Endpunkt ${dominant.operationId} antwortete ${dominant.count}\u00d7 mit HTTP 401 — Bearer-Token pr\u00fcfen.`)
+        reasonsList.push('Hinweis: 401 trotz konfiguriertem Token deutet auf falsches Pr\u00e4fix oder abgelaufenes Token hin.')
+      } else if (dominant.code === '403') {
+        reasonsList.push(`Endpunkt ${dominant.operationId} antwortete ${dominant.count}\u00d7 mit HTTP 403 — fehlende Berechtigung pr\u00fcfen.`)
+      } else if (fourXx > 0) {
+        reasonsList.push(`Endpunkt ${dominant.operationId} antwortete ${dominant.count}\u00d7 mit HTTP ${dominant.code}.`)
+      }
+      return {
+        category,
+        diagnosis: 'Hohe Client-Fehlerrate (4xx)',
+        detail: `Häufigster Fehlercode: ${dominant.code} — ${dominant.count}\u00d7 von ${totalRequests} Requests`,
+        reasons: reasonsList,
+      }
+    }
+    case 'threshold-latency': {
+      const p95Text = `${formatNumber(p95, 0)} ms`
+      return {
+        category,
+        diagnosis: 'Antwortzeit zu hoch',
+        detail: `p(95) ${p95Text} über Threshold (${formatNumber(LATENCY_THRESHOLD_MS / 1000, 1)} s)`,
+        reasons: [
+          `Threshold http_req_duration p(95) < ${LATENCY_THRESHOLD_MS} ms gerissen — gemessen ${p95Text}.`,
+          `Fehlerrate unauff\u00e4llig (${formatNumber(failureRatePercent, 1)} %).`,
+        ],
+      }
+    }
+    case 'script': {
+      const fileMatch = /at\s+(?:file:\/\/\/)?(\S+\.js):(\d+)/.exec(errorText)
+      const fileRef = fileMatch ? `${fileMatch[1]}:${fileMatch[2]}` : undefined
+      // `excerpt` is always defined for script errors (regex matches require
+      // a non-empty errorText), but TypeScript can't prove this.
+      const detail = fileRef ? `${excerpt!} in ${fileRef}` : excerpt!
+      return {
+        category,
+        diagnosis: 'k6-Skriptfehler',
+        detail,
+        reasons: [
+          'Skript konnte nicht initialisiert werden — keine einzige Iteration wurde ausgeführt.',
+          'Wahrscheinliche Ursache: OpenAPI-Definition enthält ein Feld, das lasttest nicht ins k6-Skript gemappt hat. Spezifikation gegen Demo vergleichen.',
+        ],
+      }
+    }
+    case 'unknown':
+    default:
+      return {
+        category: 'unknown',
+        diagnosis: excerpt ? 'k6-Lauf fehlgeschlagen' : 'Unbekannter Fehler',
+        detail: excerpt ?? 'Siehe k6-Konsolenausgabe für Details.',
+        reasons: excerpt
+          ? [`Erste Fehlerzeile: ${excerpt}`]
+          : ['Der Lauf ist fehlgeschlagen, aber die Diagnose steht nicht in run.error.'],
+      }
+  }
+}
+
+// Builds the row of labelled metric values that sits between the
+// status badge and the run ID. The exact contents vary by failure
+// category because some failure shapes need different highlights
+// (e.g. a network failure cares about request counts but not about
+// p95, a server-error 5xx cares about 2xx vs 5xx counts but not
+// about throughput).
+export function buildMetricRow(
+  run: TestRun,
+  summary: K6Summary | undefined,
+  failure: FailureSummary,
+): MetricItem[] {
+  // RUNNING / QUEUED runs have no settled metrics to show yet, so the
+  // caller skips the entire row.
+  if (run.status === 'RUNNING' || run.status === 'QUEUED') {
+    return []
+  }
+  const totalRequests = summary ? completedRequestCount(summary) : undefined
+  const failureRateValue = summary ? metric(summary, 'http_req_failed').value : undefined
+  const failureRatePercent = failureRateValue != null && Number.isFinite(failureRateValue) ? failureRateValue * 100 : undefined
+  const p95 = summary ? metric(summary, 'http_req_duration')['p(95)'] : undefined
+  const throughput = summary ? metric(summary, 'http_reqs').rate : undefined
+  const dataReceived = summary ? metric(summary, 'data_received').count : undefined
+  const buckets = summary ? aggregateStatusCodes(summary) : []
+  const twoXx = countByStatusFamily(buckets, '2')
+  const fourXx = countByStatusFamily(buckets, '4')
+  const fiveXx = countByStatusFamily(buckets, '5')
+  const networkErrors = networkErrorCount(buckets)
+
+  const items: MetricItem[] = []
+  items.push({ label: 'Requests', value: totalRequests != null ? formatInteger(totalRequests) : '–', severity: 'normal' })
+
+  if (failure.category === 'unreachable' || failure.category === 'dns') {
+    items.push({ label: 'p(95)', value: '–', severity: 'muted' })
+  } else if (p95 != null && Number.isFinite(p95)) {
+    items.push({ label: 'p(95)', value: `${formatNumber(p95, 0)} ms`, severity: p95 > LATENCY_THRESHOLD_MS ? 'error' : 'normal' })
+  } else {
+    items.push({ label: 'p(95)', value: '–', severity: 'muted' })
+  }
+
+  if (failure.category === 'k6-missing' || failure.category === 'script') {
+    items.push({ label: 'Fehlerquote', value: '–', severity: 'muted' })
+    if (failure.category === 'script') {
+      items.push({ label: 'Hinweis', value: 'Skript brach vor dem ersten Request ab', severity: 'warn' })
+    } else {
+      items.push({ label: 'Hinweis', value: 'Skript-Ausführung nicht möglich', severity: 'warn' })
+    }
+    return items
+  }
+
+  if (failureRatePercent != null && Number.isFinite(failureRatePercent)) {
+    items.push({ label: 'Fehlerquote', value: `${formatNumber(failureRatePercent, failureRatePercent % 1 === 0 ? 0 : 1)} %`, severity: failureRatePercent > 5 ? 'error' : 'normal' })
+  } else {
+    items.push({ label: 'Fehlerquote', value: '–', severity: 'muted' })
+  }
+
+  if (failure.category === 'unreachable' || failure.category === 'dns') {
+    if (networkErrors > 0) {
+      items.push({ label: 'Status 0 (Netzwerkfehler)', value: `${formatInteger(networkErrors)}\u00d7`, severity: 'error' })
+    }
+  } else if (failure.category === 'server5xx') {
+    if (fiveXx > 0) items.push({ label: '5xx', value: `${formatInteger(fiveXx)}\u00d7`, severity: 'error' })
+    if (twoXx > 0) items.push({ label: '2xx', value: `${formatInteger(twoXx)}\u00d7`, severity: 'normal' })
+  } else if (failure.category === 'threshold-failure-rate') {
+    if (fourXx > 0) items.push({ label: '4xx', value: `${formatInteger(fourXx)}\u00d7`, severity: 'error' })
+  } else if (failure.category === 'timeout') {
+    if (fiveXx > 0) items.push({ label: 'Status 504', value: `${formatInteger(fiveXx)}\u00d7`, severity: 'error' })
+  }
+
+  if (failure.category !== 'unreachable' && failure.category !== 'dns') {
+    if (throughput != null && Number.isFinite(throughput) && throughput > 0) {
+      items.push({ label: 'Durchsatz', value: `${formatNumber(throughput)} /s`, severity: 'normal' })
+    }
+    if (dataReceived != null && Number.isFinite(dataReceived) && dataReceived > 0) {
+      items.push({ label: 'Daten empfangen', value: formatBytes(dataReceived), severity: 'normal' })
+    }
+  }
+  return items
+}
+
+// Convenience: human-readable status hint used while a run is still
+// running or waiting. Mirrors the wording of the original report card.
+export function progressHint(run: TestRun): string | undefined {
+  if (run.status === 'RUNNING') {
+    const started = run.startedAt ? new Date(run.startedAt).getTime() : undefined
+    const duration = run.configuration?.durationSeconds
+    if (started != null && Number.isFinite(started) && duration != null) {
+      const elapsed = Math.max(0, Math.floor((Date.now() - started) / 1000))
+      const remaining = Math.max(0, duration - elapsed)
+      return `läuft seit ${elapsed} s · voraussichtlich noch ${remaining} s`
+    }
+    return 'läuft'
+  }
+  if (run.status === 'QUEUED') {
+    return 'wartet auf Executor (Pool-Größe: 2)'
+  }
+  return undefined
 }

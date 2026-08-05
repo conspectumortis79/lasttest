@@ -53,7 +53,6 @@ jacoco {
 val coverageIncludes =
     listOf(
         "de/lasttest/api/LastTestController.class",
-        "de/lasttest/config/StartupMessageLogger.class",
         "de/lasttest/demo/DemoProductController.class",
         "de/lasttest/demo/DemoSpecificationProvider.class",
         "de/lasttest/demo/DemoSwaggerUiController.class",

@@ -566,9 +566,14 @@ class DefaultK6ScriptGeneratorTest {
         val leadingDigitOperation =
             ApiOperation("1Pet", "GET", "/pets", "", false, emptyList(), null)
         val leadingDigitSpecification = specification.copy(operations = listOf(leadingDigitOperation))
+<<<<<<< HEAD
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
         val script = generator.generate(leadingDigitSpecification, "https://example.test", setOf("1Pet"), emptyList(), profile)
+=======
+
+        val script = generator.generate(leadingDigitSpecification, "https://example.test", setOf("1Pet"), emptyList(), 1, 10)
+>>>>>>> ffe00f7ec7e0eebe0a0fe17c903fbf09914889be
 
         assertContains(script, "new Counter('lt_status_200__1Pet')")
         assertContains(script, "new Counter('lt_status_429__1Pet')")
@@ -587,9 +592,14 @@ class DefaultK6ScriptGeneratorTest {
         val emptyIdOperation =
             ApiOperation("", "GET", "/pets", "", false, emptyList(), null)
         val emptyIdSpecification = specification.copy(operations = listOf(emptyIdOperation))
+<<<<<<< HEAD
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
         val script = generator.generate(emptyIdSpecification, "https://example.test", setOf(""), emptyList(), profile)
+=======
+
+        val script = generator.generate(emptyIdSpecification, "https://example.test", setOf(""), emptyList(), 1, 10)
+>>>>>>> ffe00f7ec7e0eebe0a0fe17c903fbf09914889be
 
         assertContains(script, "new Counter('lt_status_200__')")
         assertContains(script, "lt_status_err__.add(1)")

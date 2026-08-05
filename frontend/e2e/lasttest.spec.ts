@@ -412,6 +412,12 @@ paths:
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
   await expect(page.locator('.status.failed')).toBeVisible({ timeout: 30_000 })
+  // The new failure-summary UI must classify the run as unreachable and
+  // surface the diagnosis, detail, metric row and failure-reasons list.
+  await expect(page.locator('.status-diagnosis')).toHaveText('Ziel nicht erreichbar')
+  await expect(page.locator('.status-detail')).toContainText('Connection refused auf http://127.0.0.1:1')
+  await expect(page.locator('.metric-row .metric-item').first()).toBeVisible()
+  await expect(page.locator('.failure-reasons li').first()).toContainText('lehnt TCP-Verbindungen ab')
   await expect(page.getByText('k6-Konsolenausgabe')).toBeVisible()
   await expect(page.getByText('k6-JSON-Rohdaten')).toBeVisible()
 })

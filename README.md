@@ -37,6 +37,7 @@ Or with Docker Compose:
 docker compose up --build -d
 ```
 
+<<<<<<< HEAD
 This starts three containers: `lasttest` (the application), `lasttest-influxdb`
 (a Time-Series database for the ramp-grafik), and `lasttest-grafana`
 (optional dashboards). Access them at:
@@ -60,6 +61,11 @@ Jetzt im Browser öffnen: http://localhost:8286/
 
 If a different public host or port is used, the displayed link can be
 overridden via the `LASTTEST_PUBLIC_URL` environment variable.
+=======
+Once Spring Boot has finished starting, the web UI is reachable on the
+configured port (default `8286`). The startup log only contains the
+standard Spring Boot output — no extra banner is emitted by lasttest.
+>>>>>>> ffe00f7ec7e0eebe0a0fe17c903fbf09914889be
 
 Open the application in your browser:
 

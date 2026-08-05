@@ -1,6 +1,6 @@
 import { deepEqual, equal } from 'node:assert/strict'
 import { test } from 'node:test'
-import { looksLikeUrl, validateSpecificationUrl } from './specificationSource.ts'
+import { validateSpecificationUrl } from './specificationSource.ts'
 
 test('validateSpecificationUrl accepts http and https URLs with a host', () => {
   equal(validateSpecificationUrl('https://api.example.com/openapi.json'), undefined)
@@ -46,14 +46,6 @@ test('validateSpecificationUrl rejects URLs that are too long', () => {
   equal(result?.startsWith('Die URL ist zu lang'), true)
 })
 
-test('looksLikeUrl returns true only for valid URLs', () => {
-  equal(looksLikeUrl('https://api.example.com/openapi.json'), true)
-  equal(looksLikeUrl('http://localhost:8286/demo-swagger-ui'), true)
-  equal(looksLikeUrl(''), false)
-  equal(looksLikeUrl('   '), false)
-  equal(looksLikeUrl('not a url'), false)
-  equal(looksLikeUrl('ftp://example.com/spec.json'), false)
-})
 
 test('validateSpecificationUrl uses the deepEqual contract for its return value', () => {
   deepEqual(validateSpecificationUrl(''), undefined)

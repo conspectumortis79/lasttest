@@ -4,8 +4,6 @@ export type FetchedSpecification = {
   source: 'direct' | 'swagger-ui'
 }
 
-export type SpecificationSourceError = { message: string }
-
 export function validateSpecificationUrl(url: string): string | undefined {
   const trimmed = url.trim()
   if (trimmed === '') return undefined
@@ -25,7 +23,3 @@ export function validateSpecificationUrl(url: string): string | undefined {
   return undefined
 }
 
-export function looksLikeUrl(text: string): boolean {
-  if (text.trim() === '') return false
-  return validateSpecificationUrl(text) === undefined
-}
