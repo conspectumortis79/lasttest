@@ -77,9 +77,15 @@ contain configured headers or Bearer tokens, the exported file must be
 stored securely.
 
 The import endpoint accepts raw YAML or JSON content with `swagger: "2.0"`
-or `openapi: 3.x`. A rendered Swagger UI HTML page is **not** a valid
-import; instead, download the raw document from Swagger UI (for example
-`/swagger.json`, `/swagger.yaml`, `/v3/api-docs`, or `/v3/api-docs.yaml`).
+or `openapi: 3.x`. In addition to pasting or uploading a document, the
+UI exposes a **URL field** that fetches the spec from any Swagger UI page
+or direct OpenAPI document URL. The backend inspects the Swagger UI HTML,
+extracts the embedded `url` / `urls` entries, downloads the spec, and
+imports it transparently. Cross-origin targets are rejected, the response
+is capped at 5 MB with a 10 s timeout, and a bundled demo Swagger UI
+is served at `http://localhost:8286/demo-swagger-ui` once lasttest is
+running so the URL flow can be exercised end-to-end without external
+dependencies.
 
 ## Requirements for local development
 

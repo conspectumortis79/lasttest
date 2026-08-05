@@ -6,12 +6,22 @@ data class ImportSpecificationRequest(
     val specification: String,
 )
 
+data class FetchSpecificationRequest(
+    val url: String,
+)
+
 data class ImportedSpecification(
     val title: String,
     val version: String,
     val baseUrl: String,
     val operations: List<ApiOperation>,
     val servers: List<ApiServer> = emptyList(),
+)
+
+data class FetchedSpecification(
+    val content: String,
+    val resolvedUrl: String,
+    val source: String,
 )
 
 data class ApiServer(

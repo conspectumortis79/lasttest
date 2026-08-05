@@ -15,6 +15,13 @@ header p { margin: .25rem 0; color: #93a2b8; }
 .step { position: absolute; top: 1.35rem; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: #22304a; color: #79e6c8; font-weight: 800; }
 textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #33425b; border-radius: 10px; padding: 1rem; color: #d7e2f1; background: #080d14; font-family: "SFMono-Regular", Consolas, monospace; line-height: 1.5; }
 .actions { display: flex; justify-content: space-between; gap: 1rem; margin-top: 1rem; }
+.url-import { display: block; margin-bottom: 1rem; color: #aeb9ca; font-size: .85rem; }
+.url-label { display: block; margin-bottom: .4rem; color: #d7e2f1; font-weight: 700; }
+.url-import input { display: block; width: 100%; padding: .7rem; border: 1px solid #33425b; border-radius: 8px; color: white; background: #080d14; font-family: "SFMono-Regular", Consolas, monospace; font-size: .85rem; }
+.url-import input:focus { outline: 2px solid #7d63ff; outline-offset: 1px; border-color: #7d63ff; }
+.url-import small { display: block; margin-top: .35rem; color: #718198; font-size: .78rem; }
+.fetched-info { margin: .75rem 0 0; padding: .55rem .75rem; border: 1px solid #2c4a3b; border-radius: 8px; color: #b8e7c8; background: #142822; font-size: .85rem; }
+.fetched-info code { color: #d6f4e0; font-family: "SFMono-Regular", Consolas, monospace; }
 .upload { background: #233049; }
 .upload input { display: none; }
 .error { background: #461e2a; color: #ffb5c3; border: 1px solid #893c50; padding: 1rem; border-radius: 10px; }

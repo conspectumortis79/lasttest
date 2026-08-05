@@ -35,6 +35,42 @@ test('validates imports, load profiles, parameters, bodies, and target URLs', as
   await specification.fill('openapi: 3.0.3\ninfo: {title: Empty, version: "1"}\npaths: {}')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('alert')).toContainText('keine REST-Operationen')
+})
+
+test('imports a specification from a Swagger UI URL via the URL field', async ({ page, request }) => {
+  // Sanity check: the demo Swagger UI and spec endpoint are reachable.
+  const swaggerResponse = await request.get('/demo-swagger-ui')
+  expect(swaggerResponse.ok()).toBeTruthy()
+  expect(await swaggerResponse.text()).toContain('SwaggerUIBundle')
+
+  const specUrl = page.getByLabel('URL zur Swagger-UI oder OpenAPI-Spezifikation')
+  await specUrl.fill('/demo-swagger-ui')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+
+  await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
+  await expect(page.locator('.operation-card')).toHaveCount(6)
+  await expect(page.getByText('Geladen aus')).toBeVisible()
+  await expect(page.getByText('(über Swagger-UI)')).toBeVisible()
+})
+
+test('rejects an invalid URL before sending a request', async ({ page }) => {
+  const specUrl = page.getByLabel('URL zur Swagger-UI oder OpenAPI-Spezifikation')
+  await specUrl.fill('not-a-url')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('alert')).toContainText('Die URL ist ungültig.')
+})
+
+test('validates imports, load profiles, parameters, bodies, and target URLs', async ({ page }) => {
+  const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+
+  await expect(specification).toContainText('Lasttest Demo API')
+  await specification.fill(' ')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('alert')).toContainText('Dokumentation ist leer')
+
+  await specification.fill('openapi: 3.0.3\ninfo: {title: Empty, version: "1"}\npaths: {}')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('alert')).toContainText('keine REST-Operationen')
 
   await importDemo(page)
   await expect(page.locator('.operation-card')).toHaveCount(6)

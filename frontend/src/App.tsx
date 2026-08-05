@@ -18,6 +18,7 @@ import {
   type ParameterSchema,
   type RequestBodySchema,
 } from './operationConfiguration.ts'
+import { type FetchedSpecification, validateSpecificationUrl } from './specificationSource.ts'
 
 type ImportResponse = ImportedSpecification & { message?: string }
 
@@ -49,6 +50,7 @@ function App() {
 
 function LoadTestApp() {
   const [specification, setSpecification] = useState(sample)
+  const [specificationUrl, setSpecificationUrl] = useState('')
   const [imported, setImported] = useState<ImportedSpecification>()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -59,6 +61,7 @@ function LoadTestApp() {
   const [run, setRun] = useState<TestRun>()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [lastFetched, setLastFetched] = useState<FetchedSpecification | undefined>()
 
   useEffect(() => {
     let cancelled = false
@@ -87,15 +90,38 @@ function LoadTestApp() {
     return () => window.clearTimeout(timer)
   }, [run])
 
+  async function fetchSpecFromUrl(url: string): Promise<FetchedSpecification> {
+    const response = await fetch('/api/specifications/fetch-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.message ?? 'Abruf fehlgeschlagen')
+    return data as FetchedSpecification
+  }
+
   async function importSpecification() {
     setBusy(true)
     setError('')
     setRun(undefined)
+    const trimmedUrl = specificationUrl.trim()
+    let activeSpecification = specification
     try {
+      if (trimmedUrl !== '') {
+        const urlError = validateSpecificationUrl(trimmedUrl)
+        if (urlError) throw new Error(urlError)
+        const fetched = await fetchSpecFromUrl(trimmedUrl)
+        setSpecification(fetched.content)
+        activeSpecification = fetched.content
+        setLastFetched(fetched)
+      } else {
+        setLastFetched(undefined)
+      }
       const response = await fetch('/api/specifications/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ specification }),
+        body: JSON.stringify({ specification: activeSpecification }),
       })
       const data: ImportResponse = await response.json()
       if (!response.ok) throw new Error(data.message)
@@ -193,6 +219,21 @@ function LoadTestApp() {
     <section className="card">
       <div className="step">1</div>
       <h2>Swagger / OpenAPI-Dokumentation</h2>
+      <label className="url-import">
+        <span className="url-label">URL zur Swagger-UI oder OpenAPI-Spezifikation</span>
+        <input
+          type="url"
+          placeholder="https://api.example.com/swagger-ui oder http://localhost:8286/demo-swagger-ui"
+          aria-label="URL zur Swagger-UI oder OpenAPI-Spezifikation"
+          value={specificationUrl}
+          onChange={event => setSpecificationUrl(event.target.value)}
+          spellCheck={false}
+        />
+        <small>
+          Wird beim „Validieren &amp; importieren“ geladen. Die Spezifikation wird zusätzlich in den Textbereich
+          übernommen und kann vor dem Import noch bearbeitet werden.
+        </small>
+      </label>
       <textarea aria-label="Swagger / OpenAPI-Dokumentation" value={specification} onChange={event => setSpecification(event.target.value)} spellCheck={false} />
       <div className="actions">
         <label className="upload">Datei öffnen<input type="file" accept=".yaml,.yml,.json" onChange={async event => {
@@ -201,6 +242,12 @@ function LoadTestApp() {
         }} /></label>
         <button onClick={importSpecification} disabled={busy}>Validieren & importieren</button>
       </div>
+      {lastFetched && (
+        <p className="fetched-info" aria-live="polite">
+          Geladen aus <code>{lastFetched.resolvedUrl}</code>
+          {lastFetched.source === 'swagger-ui' ? ' (über Swagger-UI)' : ' (direkt)'}.
+        </p>
+      )}
     </section>
 
     {error && <div className="error" role="alert">{error}</div>}

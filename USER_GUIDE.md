@@ -19,8 +19,9 @@
 5. [The main workflow at a glance](#5-the-main-workflow-at-a-glance)
 6. [Step 1 — Importing a specification](#6-step-1--importing-a-specification)
    - 6.1 [Accepted formats](#61-accepted-formats)
-   - 6.2 [What is *not* an importable document](#62-what-is-not-an-importable-document)
-   - 6.3 [Importing Swagger 2.0](#63-importing-swagger-20)
+   - 6.2 [Swagger UI URLs](#62-swagger-ui-urls)
+   - 6.3 [What is *not* an importable document](#63-what-is-not-an-importable-document)
+   - 6.4 [Importing Swagger 2.0](#64-importing-swagger-20)
 7. [Step 2 — Selecting and configuring endpoints](#7-step-2--selecting-and-configuring-endpoints)
    - 7.1 [Selection and destructive operations](#71-selection-and-destructive-operations)
    - 7.2 [Endpoint card anatomy](#72-endpoint-card-anatomy)
@@ -239,11 +240,26 @@ without losing the others.
 
 ## 6. Step 1 — Importing a specification
 
+The first card accepts three input modes that share the same target:
+
+1. **URL** — point lasttest at a Swagger UI page or a direct OpenAPI
+   document. The backend fetches the URL, resolves the spec (extracting
+   `url` / `urls` from a Swagger UI bundle if necessary), and imports
+   the result.
+2. **Datei** — pick a `.yaml`, `.yml`, or `.json` file from disk.
+3. **Textarea** — paste raw YAML or JSON directly.
+
+When the URL field is filled, clicking **Validieren &amp; importieren**
+first calls `POST /api/specifications/fetch-url` and then transparently
+validates the fetched content through the normal import endpoint. The
+textarea is updated with the resolved spec so you can tweak it before
+starting a test run.
+
 ### 6.1 Accepted formats
 
 | Field | Value |
 | --- | --- |
-| Format | YAML or JSON |
+| Format | YAML or JSON (in the textarea or fetched automatically) |
 | Swagger version | 2.0 |
 | OpenAPI version | 3.0.x, 3.1.x |
 | Encoding | UTF-8 |
@@ -253,21 +269,45 @@ lasttest sends the raw text to `POST /api/specifications/import`. The
 server returns a normalised representation that the UI uses to render
 endpoint cards.
 
-### 6.2 What is *not* an importable document
+### 6.2 Swagger UI URLs
 
-- A rendered Swagger UI HTML page (`/swagger-ui/index.html`).
+Pointing lasttest at a Swagger UI HTML page is fully supported. The
+fetcher:
+
+- downloads the HTML,
+- looks for the `url` (or first `urls[]`) entry in the
+  `SwaggerUIBundle({...})` configuration,
+- follows the same-origin `url` heuristic to common endpoints such as
+  `/v3/api-docs`, `/v3/api-docs.yaml`, `/v2/api-docs`, `/swagger.json`,
+  `/swagger.yaml`, `/openapi.json`, `/openapi.yaml` if no config is
+  found,
+- refuses to follow cross-origin redirects (basic SSRF protection),
+- enforces a 10 s timeout and a 5 MB response cap.
+
+The response payload includes the resolved URL and a `source` flag so
+the UI can show whether the document came directly from the URL or
+via a Swagger UI page.
+
+A bundled demo Swagger UI lives at
+`http://localhost:8286/demo-swagger-ui` once lasttest is running. It
+serves the same `demo/openapi-demo.yaml` document so the URL feature
+can be exercised end-to-end without any external system.
+
+### 6.3 What is *not* an importable document
+
 - A Swagger UI JSON blob with `swaggerUrl` / `urls` references but no
   inline definition.
 - A Postman collection. (Postman can export OpenAPI; use that.)
 
-If you only have a Swagger UI URL, download the raw document from one
-of these endpoints instead:
+If a Swagger UI URL serves neither a spec URL nor a Swagger UI bundle,
+lasttest prints the missing URL convention and asks you to point at one
+of the well-known endpoints instead:
 
 - `/swagger.json` or `/swagger.yaml`
 - `/v3/api-docs` (Springdoc) or `/v3/api-docs.yaml`
 - `/openapi.json` (FastAPI, NestJS, and similar)
 
-### 6.3 Importing Swagger 2.0
+### 6.4 Importing Swagger 2.0
 
 Swagger 2.0 is accepted on the wire and converted internally to OpenAPI
 3 so that the rest of lasttest only has to deal with one model. You do

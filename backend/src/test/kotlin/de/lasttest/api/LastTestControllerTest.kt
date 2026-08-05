@@ -1,6 +1,7 @@
 package de.lasttest.api
 
 import de.lasttest.demo.DemoSpecificationProvider
+import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
 import de.lasttest.domain.TestRunService
 import org.springframework.http.HttpHeaders
@@ -13,6 +14,7 @@ class LastTestControllerTest {
     private val existingRun = TestRun("run-1", TestRunStatus.COMPLETED, "2026-01-01T00:00:00Z")
     private val service = RecordingTestRunService(existingRun)
     private val demoSpecificationProvider = DemoSpecificationProvider(resourceName = "/demo/recorded.yaml")
+    private val remoteFetcher = RecordingRemoteSpecificationFetcher()
     private val controller =
         LastTestController(
             importer =
@@ -21,6 +23,7 @@ class LastTestControllerTest {
                 },
             testRuns = service,
             demoSpecificationProvider = demoSpecificationProvider,
+            remoteFetcher = remoteFetcher,
         )
 
     @Test
@@ -33,6 +36,22 @@ class LastTestControllerTest {
     @Test
     fun `imports a specification`() {
         assertEquals(imported, controller.import(ImportSpecificationRequest("openapi document")))
+    }
+
+    @Test
+    fun `fetches a specification from a URL and returns the resolved content`() {
+        val resolved =
+            FetchedSpecification(
+                content = "openapi: 3.0.3\ninfo:\n  title: Fetched\n",
+                resolvedUrl = "https://example.test/v3/api-docs",
+                source = "swagger-ui",
+            )
+        remoteFetcher.fetched = resolved
+
+        val response = controller.fetchFromUrl(FetchSpecificationRequest("https://example.test/swagger-ui"))
+
+        assertEquals(resolved, response)
+        assertEquals("https://example.test/swagger-ui", remoteFetcher.lastUrl)
     }
 
     @Test
@@ -88,5 +107,16 @@ class LastTestControllerTest {
         override fun find(id: String): TestRun? = run.takeIf { id == it.id }
 
         override fun script(id: String): String? = "export default function () {}".takeIf { id == run.id }
+    }
+
+    private class RecordingRemoteSpecificationFetcher : RemoteSpecificationFetcher {
+        var lastUrl: String? = null
+        var fetched: FetchedSpecification =
+            FetchedSpecification(content = "", resolvedUrl = "", source = "direct")
+
+        override fun fetch(url: String): FetchedSpecification {
+            lastUrl = url
+            return fetched
+        }
     }
 }
