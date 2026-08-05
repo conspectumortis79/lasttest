@@ -7,6 +7,23 @@ internal OpenAPI 3 model during import. The application is supported on
 **Linux and macOS**. For a reproducible runtime across both operating systems,
 Docker is the recommended deployment path.
 
+## What lasttest does
+
+For every imported spec lasttest lets you:
+
+1. **Select** one operation and configure its parameters, request body,
+   and optional Bearer token.
+2. **Pick a load profile** that maps to one of four k6 executors —
+   `constant-vus`, `shared-iterations`, `ramping-vus`, or
+   `constant-arrival-rate` — with one-click presets for Smoke, Load,
+   Stress, Spike, Soak, Anfragen, and Arrival-Rate.
+3. **Run the test** and watch the status cycle through `QUEUED` →
+   `RUNNING` → `COMPLETED` (or `FAILED`).
+4. **Open the report** in a new tab. It contains a printable summary, the
+   generated k6 script, and — if InfluxDB is running — a
+   **ramp-grafik** that compares the planned load (Soll) with the
+   measured load (Ist) over time.
+
 ## Quick start with a single container
 
 ```bash
@@ -19,6 +36,17 @@ Or with Docker Compose:
 ```bash
 docker compose up --build -d
 ```
+
+This starts three containers: `lasttest` (the application), `lasttest-influxdb`
+(a Time-Series database for the ramp-grafik), and `lasttest-grafana`
+(optional dashboards). Access them at:
+
+- `http://localhost:8286` — lasttest web UI
+- `http://localhost:8086` — InfluxDB UI (login `admin` / `lasttest-admin-password`)
+- `http://localhost:3000` — Grafana (login `admin` / `admin`)
+
+If you only need lasttest without the time-series parts, start it alone
+with `docker run` and the ramp-grafik will then show only the Soll line.
 
 Once Spring Boot has finished starting, a clearly visible success message with
 a link to the web UI is written to the container log:
@@ -58,9 +86,10 @@ multi-environment spec looks in the UI.
 
 After a test run, the link “Open detailed k6 report in a new tab” opens a
 print-optimised result view. It contains the summary, thresholds, run and
-API configuration, the actually used endpoint parameters, detailed k6
-metrics, and console / JSON raw data. Use “Print / Save as PDF” to archive
-this view directly as a PDF.
+API configuration, the actually used endpoint parameters, the **ramp-grafik**
+with Soll/Ist comparison (when InfluxDB is running), detailed k6 metrics,
+and console / JSON raw data. Use “Print / Save as PDF” to archive this view
+directly as a PDF.
 
 Below the k6 JSON export, “Generated k6 test script” can be expanded. It
 shows the exact script that lasttest executed and offers a download as
@@ -186,7 +215,9 @@ cd frontend && npm run lint && npm run build
 
 ## Security boundaries of the MVP
 
-- Maximum 30000 VUs and 3600 seconds per run.
+- Load profile values are hard-capped per executor (max 30 000 VUs, max
+  3 600 s duration, max 1 000 000 iterations, max 100 000 req/s, etc.)
+  to keep runaway tests from melting your target.
 - Destructive operations are deactivated in the UI by default.
 - Only HTTP(S) targets are accepted.
 - For a productive, multi-tenant deployment k6 must additionally run in

@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   activeStatusCodes,
+  buildIstPath,
+  buildRampPlot,
+  buildSollPath,
   checkSuccessRate,
   completedRequestCount,
   copyTextToClipboard,
@@ -15,12 +18,20 @@ import {
   metric,
   operationDisplayPath,
   parseK6Summary,
+  profileSummary,
+  profileTotalSeconds,
   statusDistribution,
   type K6Metric,
   type K6Summary,
+  type RampPlot,
+  type ReportLoadProfile,
+  type ReportLoadStage,
   type ReportOperation,
   type TestRun,
 } from './k6Report.ts'
+import { EMPTY_TIME_SERIES, fetchTimeSeries, type TimeSeriesResponse } from './timeSeries.ts'
+import { RunStatusView } from './runStatusView.tsx'
+import { useRunClock } from './useRunClock.ts'
 
 type TestRunReportPageProps = {
   runId: string
@@ -31,6 +42,15 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
   const [generatedScript, setGeneratedScript] = useState<string>()
   const [scriptError, setScriptError] = useState('')
   const [error, setError] = useState('')
+  // Time-Series aus InfluxDB. Wird nur einmalig geladen, sobald der Run
+  // COMPLETED ist. EMPTY_TIME_SERIES bedeutet „noch nicht geladen oder
+  // nicht verfügbar" — die RampCard rendert dann nur die Soll-Linie.
+  const [timeSeries, setTimeSeries] = useState<TimeSeriesResponse>(EMPTY_TIME_SERIES)
+  const [timeSeriesLoaded, setTimeSeriesLoaded] = useState(false)
+  // Live-Tick für die Laufzeit-Anzeige bei QUEUED/RUNNING. Liefert
+  // einen millisekunden-präzisen Zeitstempel an <RunStatusView>, damit
+  // „Läuft seit" / „Noch" ohne Polling aktualisieren.
+  const runNow = useRunClock(run)
 
   useEffect(() => {
     const previousTitle = document.title
@@ -84,6 +104,22 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
     return () => { cancelled = true }
   }, [runId])
 
+  // Polling der Time-Series: einmalig nach COMPLETED. Frühere Status
+  // (QUEUED/RUNNING) liefern ohnehin keine sinnvollen Daten aus
+  // InfluxDB; FAILED-Runs sind uninteressant für die Last-Kurve.
+  useEffect(() => {
+    if (!run) return
+    if (run.status !== 'COMPLETED') return
+    if (timeSeriesLoaded) return
+    let cancelled = false
+    fetchTimeSeries(runId).then(data => {
+      if (cancelled) return
+      setTimeSeries(data)
+      setTimeSeriesLoaded(true)
+    })
+    return () => { cancelled = true }
+  }, [run, runId, timeSeriesLoaded])
+
   if (error) return <ReportShell><div className="report-alert failure">{error}</div></ReportShell>
   if (!run) return <ReportShell><div className="report-loading">Testbericht wird geladen …</div></ReportShell>
 
@@ -91,8 +127,8 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
   return <ReportShell>
     <ReportHeader run={run} />
     {summary
-      ? <CompletedReport run={run} summary={summary} generatedScript={generatedScript} scriptError={scriptError} />
-      : <PendingOrFailedReport run={run} generatedScript={generatedScript} scriptError={scriptError} />}
+      ? <CompletedReport run={run} summary={summary} generatedScript={generatedScript} scriptError={scriptError} timeSeries={timeSeries} />
+      : <PendingOrFailedReport run={run} generatedScript={generatedScript} scriptError={scriptError} now={runNow} />}
   </ReportShell>
 }
 
@@ -129,11 +165,13 @@ function CompletedReport({
   summary,
   generatedScript,
   scriptError,
+  timeSeries,
 }: {
   run: TestRun
   summary: K6Summary
   generatedScript?: string
   scriptError: string
+  timeSeries: TimeSeriesResponse
 }) {
   const checks = metric(summary, 'checks')
   const requests = metric(summary, 'http_reqs')
@@ -179,6 +217,7 @@ function CompletedReport({
     </section>
 
     <TestConfiguration run={run} />
+    {run.configuration && <RampSection profile={run.configuration.loadProfile} timeSeries={timeSeries} />}
     <StatusCodeDistribution summary={summary} run={run} />
     <DetailedMetrics summary={summary} />
     <RawResults run={run} generatedScript={generatedScript} scriptError={scriptError} />
@@ -220,11 +259,14 @@ function TestConfiguration({ run }: { run: TestRun }) {
         <ReportInfo label="API-Titel" value={configuration.apiTitle} />
         <ReportInfo label="API-Version" value={configuration.apiVersion || '–'} />
         <ReportInfo label="Base URL" value={configuration.baseUrl} code />
-        <ReportInfo label="Modus" value={configuration.useIterations ? `${configuration.virtualUsers} parallele Anfragen (so schnell wie möglich)` : 'Virtuelle Benutzer über Zeit'} />
-        <ReportInfo label="Virtuelle Benutzer" value={configuration.virtualUsers.toString()} />
-        {configuration.useIterations
-          ? <ReportInfo label="Geplante Anfragen" value={configuration.virtualUsers.toString()} />
-          : <ReportInfo label="Testdauer" value={`${configuration.durationSeconds} Sekunden`} />}
+        <ReportInfo label="Lastprofil" value={profileSummary(configuration.loadProfile)} />
+        <ReportInfo
+          label="Geplante Laufzeit"
+          value={(() => {
+            const total = profileTotalSeconds(configuration.loadProfile)
+            return total == null ? 'Bis zur letzten Antwort' : `${total} Sekunden`
+          })()}
+        />
         <ReportInfo label="Ausgewählte Operationen" value={configuration.operations.length.toString()} />
       </div>
       <h3>Getestete Endpunkte</h3>
@@ -440,16 +482,23 @@ function PendingOrFailedReport({
   run,
   generatedScript,
   scriptError,
+  now,
 }: {
   run: TestRun
   generatedScript?: string
   scriptError: string
+  now: number
 }) {
   return <section className="report-section">
     <h2>Testlauf</h2>
     <div className={`report-alert ${run.status === 'FAILED' ? 'failure' : ''}`}>
-      Status: <strong>{run.status}</strong>. {['QUEUED', 'RUNNING'].includes(run.status) ? 'Die Ansicht aktualisiert sich automatisch.' : 'Es ist kein k6-Summary verfügbar.'}
+      Status: <strong>{run.status}</strong>. {['QUEUED', 'RUNNING'].includes(run.status)
+        ? 'Die Ansicht aktualisiert sich automatisch.'
+        : run.status === 'FAILED'
+          ? 'Die Analyse der Fehlerursache findest du direkt unter diesem Hinweis.'
+          : 'Es ist kein k6-Summary verfügbar.'}
     </div>
+    <RunStatusView run={run} now={now} />
     <TestConfiguration run={run} />
     {run.error && <pre>{run.error}</pre>}
     <GeneratedK6Script run={run} generatedScript={generatedScript} scriptError={scriptError} />
@@ -461,6 +510,163 @@ function formatJson(raw: string): string {
     return JSON.stringify(JSON.parse(raw), null, 2)
   } catch {
     return raw
+  }
+}
+
+// ---- Lastprofil & Ramp-Grafik ---------------------------------------------
+//
+// Soll-Linie (lila) wird deterministisch aus den Stages berechnet.
+// Ist-Linie (orange) kommt aus dem InfluxDB-Stream und ist nur sichtbar,
+// wenn das Backend Time-Series liefern konnte.
+
+function RampSection({ profile, timeSeries }: { profile: ReportLoadProfile, timeSeries: TimeSeriesResponse }) {
+  return <section className="report-section">
+    <h2>Lastprofil &amp; Lastverlauf</h2>
+    <p className="report-section-intro">
+      Diese Sektion zeigt, welches Profil k6 gefahren ist und welche Last dabei aufgebaut wurde.
+      Die Soll-Linie (lila) wird direkt aus deinen konfigurierten Stages abgeleitet. Die Ist-Linie
+      (orange, gestrichelt) stammt aus dem Live-Stream nach InfluxDB.
+    </p>
+    <RampCard profile={profile} timeSeries={timeSeries} />
+    <StagesDetail profile={profile} />
+  </section>
+}
+
+function RampCard({ profile, timeSeries }: { profile: ReportLoadProfile, timeSeries: TimeSeriesResponse }) {
+  const plot = buildRampPlot(profile, timeSeries.vus, { width: 720, height: 200 })
+  const sollPath = buildSollPath(plot)
+  const istPath = buildIstPath(plot)
+  const hasIst = istPath.length > 0
+  const peakSoll = peakFromSoll(profile)
+  const peakIst = hasIst ? timeSeries.vus.reduce((max, point) => Math.max(max, point.value), 0) : undefined
+  return <div className="ramp-card">
+    <div className="ramp-header">
+      <div className="ramp-title">
+        <h3>Geplanter Lastverlauf</h3>
+        <small>· Soll aus Stages, Ist aus InfluxDB</small>
+      </div>
+      <div className="ramp-legend">
+        <span><span className="swatch soll" />Geplant (Soll)</span>
+        <span><span className="swatch ist" />Tatsächlich (Ist)</span>
+      </div>
+    </div>
+    <div className="ramp-svg-wrap">
+      <RampSvg plot={plot} sollPath={sollPath} istPath={istPath} hasIst={hasIst} />
+    </div>
+    <div className="ramp-callout">
+      <div>
+        <span>Geplante Spitze</span>
+        <strong>{formatInteger(peakSoll)} VUs</strong>
+        <small>Aus Stages berechnet</small>
+      </div>
+      <div>
+        <span>Tatsächliche Spitze</span>
+        <strong style={hasIst ? undefined : { color: '#93370d' }}>
+          {hasIst ? `${formatInteger(peakIst)} VUs` : '–'}
+        </strong>
+        <small>{hasIst ? 'Aus InfluxDB (max vus)' : 'Noch keine Daten aus InfluxDB'}</small>
+      </div>
+      <div>
+        <span>Datenpunkte</span>
+        <strong>{formatInteger(timeSeries.vus.length)}</strong>
+        <small>Aus dem k6-Stream</small>
+      </div>
+    </div>
+  </div>
+}
+
+function RampSvg({ plot, sollPath, istPath, hasIst }: { plot: RampPlot, sollPath: string, istPath: string, hasIst: boolean }) {
+  // Wir rendern das SVG in einem festen viewBox und lassen den Browser
+  // es per CSS auf 100 % Breite skalieren. Y-Ticks (5 Stück) und
+  // X-Ticks (5 Stück) werden automatisch beschriftet; die exakte
+  // Skala ist unkritisch, weil der Renderer nur eine qualitative
+  // Visualisierung liefert.
+  const top = 20
+  const bottom = plot.height
+  const left = 0
+  const right = plot.width
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(fraction => ({
+    fraction,
+    value: Math.round(plot.maxValue * fraction),
+  }))
+  const xTicks = [0, 0.25, 0.5, 0.75, 1].map(fraction => ({
+    fraction,
+    seconds: Math.round(plot.maxSeconds * fraction),
+  }))
+  return <svg className="ramp-svg" viewBox={`0 0 ${plot.width} ${plot.height + 40}`} role="img" aria-label="Ramp-Grafik: Soll- und Ist-Verlauf">
+    <rect x="0" y="0" width={plot.width} height={plot.height + 40} fill="#fff" />
+    {yTicks.map(tick => {
+      const y = top + (1 - tick.fraction) * (bottom - top)
+      return <g key={`y-${tick.fraction}`}>
+        <line x1={left} y1={y} x2={right} y2={y} stroke="#eaecf0" strokeDasharray={tick.fraction === 0 ? '0' : '3,3'} />
+        <text x="6" y={y - 4} fontSize="11" fill="#667085">{tick.value}</text>
+      </g>
+    })}
+    {xTicks.map(tick => {
+      const x = tick.fraction * plot.width
+      return <text key={`x-${tick.fraction}`} x={x} y={plot.height + 34} fontSize="11" fill="#667085" textAnchor="middle">
+        {tick.seconds} s
+      </text>
+    })}
+    {sollPath && <g transform={`translate(0, ${top})`}>
+      <path d={sollPath} fill="none" stroke="#7d63ff" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+    </g>}
+    {hasIst && <g transform={`translate(0, ${top})`}>
+      <path d={istPath} fill="none" stroke="#f79009" strokeWidth="2" strokeLinejoin="round" strokeDasharray="5,3" opacity="0.85" />
+    </g>}
+  </svg>
+}
+
+function StagesDetail({ profile }: { profile: ReportLoadProfile }) {
+  if (profile.type.toLowerCase().replace(/_/g, '-') !== 'ramping-vus') return null
+  const stages = profile.stages ?? []
+  return <>
+    <h3>Stages im Detail</h3>
+    <div className="report-table-scroll">
+      <table className="report-table" aria-label="Stages des Lastprofils">
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left' }}>#</th>
+            <th>Ziel-VUs</th>
+            <th>Dauer (s)</th>
+            <th style={{ textAlign: 'left' }}>Beschreibung</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stages.map((stage: ReportLoadStage, index: number) => {
+            const previous = (index === 0 ? profile.startVUs : stages[index - 1]?.target) ?? 0
+            const delta = stage.target - previous
+            const description = delta === 0
+              ? 'Plateau'
+              : delta > 0
+                ? `+${delta} VUs (Rampe auf ${stage.target})`
+                : `${delta} VUs (Rampe auf ${stage.target})`
+            return <tr key={index}>
+              <th scope="row" style={{ textAlign: 'left' }}>{index + 1}</th>
+              <td>{stage.target}</td>
+              <td>{stage.durationSeconds}</td>
+              <td style={{ textAlign: 'left' }}>{description}</td>
+            </tr>
+          })}
+        </tbody>
+      </table>
+    </div>
+  </>
+}
+
+function peakFromSoll(profile: ReportLoadProfile): number {
+  const type = profile.type.toLowerCase().replace(/_/g, '-')
+  switch (type) {
+    case 'ramping-vus':
+      return (profile.stages ?? []).reduce((max, stage) => Math.max(max, stage.target), profile.startVUs ?? 0)
+    case 'constant-vus':
+      return profile.virtualUsers ?? 0
+    case 'constant-arrival-rate':
+      return profile.rate ?? 0
+    case 'shared-iterations':
+      return profile.virtualUsers ?? 0
+    default:
+      return 0
   }
 }
 

@@ -55,9 +55,12 @@ FROM grafana/k6:latest AS k6
 # Stage 4: Finales Runtime-Image
 # ---------------------------------------------------------------------------
 # Alpine-JRE statt Ubuntu-JRE (~140 MB kleiner). `apk` statt `apt-get`.
+# `gcompat` ist nötig, weil k6 als glibc-Binary ausgeliefert wird,
+# Alpine aber musl verwendet. Ohne gcompat bricht der k6-Aufruf mit
+# „Not a valid dynamic program“ ab.
 FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl gcompat
 COPY --from=k6 /usr/bin/k6 /usr/local/bin/k6
 COPY --from=backend-build /workspace/build/libs/*.jar /app/app.jar
 COPY --from=frontend-build /workspace/dist /app/static

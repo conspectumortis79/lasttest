@@ -2,6 +2,87 @@ package de.lasttest.api
 
 import com.fasterxml.jackson.annotation.JsonInclude
 
+// ---- Load profile ----------------------------------------------------------
+//
+// A test run is driven by exactly one LoadProfile. The discriminator `type`
+// matches the k6 executor name so the generated script is self-documenting
+// and the frontend can switch its editor on the same field.
+//
+// All four shapes live behind a single data class so Jackson can serialise
+// the request/response without a custom TypeInfo configuration. Fields that
+// are irrelevant for a given `type` are simply null.
+//
+//   ConstantVUs          → vus + durationSeconds
+//   SharedIterations     → vus + iterations
+//   RampingVUs           → startVUs + stages
+//   ConstantArrivalRate  → rate + timeUnit + durationSeconds + preAllocatedVUs + maxVUs
+//
+// Stages for RampingVUs encode the k6 stages shape directly:
+//   stages[0]: { target: 0,    duration: '30s' }   // 30 s Anlauf / Pause
+//   stages[1]: { target: 200,  duration: '2m'  }   // Rampe auf 200 VUs in 2 m
+//   stages[2]: { target: 200,  duration: '5m'  }   // Plateau
+//   stages[3]: { target: 0,    duration: '30s' }   // sauberer Abbau
+// The frontend presets (smoke, load, stress, spike, soak) translate into
+// exactly such a list of stages so the user can edit any of them.
+
+data class LoadStage(
+    val target: Int,
+    val durationSeconds: Int,
+)
+
+data class LoadProfile(
+    val type: LoadProfileType,
+    // ConstantVUs / SharedIterations / ConstantArrivalRate
+    val virtualUsers: Int? = null,
+    val durationSeconds: Int? = null,
+    val iterations: Int? = null,
+    val useIterations: Boolean? = null,
+    // RampingVUs
+    val startVUs: Int? = null,
+    val stages: List<LoadStage>? = null,
+    // ConstantArrivalRate
+    val rate: Int? = null,
+    val timeUnit: Int? = null,
+    val preAllocatedVUs: Int? = null,
+    val maxVUs: Int? = null,
+)
+
+enum class LoadProfileType {
+    CONSTANT_VUS,
+    SHARED_ITERATIONS,
+    RAMPING_VUS,
+    CONSTANT_ARRIVAL_RATE,
+    ;
+
+    /** Lower-case executor name as used inside the generated k6 script. */
+    fun executorName(): String =
+        when (this) {
+            CONSTANT_VUS -> "constant-vus"
+            SHARED_ITERATIONS -> "shared-iterations"
+            RAMPING_VUS -> "ramping-vus"
+            CONSTANT_ARRIVAL_RATE -> "constant-arrival-rate"
+        }
+
+    companion object {
+        /**
+         * Akzeptiert sowohl `RAMPING_VUS` (Enum-Konstante) als auch
+         * `ramping-vus` (kebab-case, executor-Name aus k6) beim
+         * Deserialisieren. Das Frontend sendet kebab-case, alte Clients
+         * könnten den Enum-Namen senden — beides funktioniert.
+         */
+        @JvmStatic
+        @com.fasterxml.jackson.annotation.JsonCreator
+        fun fromJson(value: String): LoadProfileType =
+            entries.firstOrNull {
+                it.executorName().equals(value, ignoreCase = true) || it.name.equals(value, ignoreCase = true)
+            } ?: throw IllegalArgumentException(
+                "Unbekannter LoadProfileType: $value (erwartet: constant-vus, shared-iterations, ramping-vus, constant-arrival-rate)",
+            )
+    }
+}
+
+// ---- Existing models -------------------------------------------------------
+
 data class ImportSpecificationRequest(
     val specification: String,
 )
@@ -90,18 +171,22 @@ data class CreateTestRunRequest(
     val baseUrl: String,
     val operationIds: Set<String> = emptySet(),
     val operationConfigurations: List<OperationConfiguration> = emptyList(),
-    val virtualUsers: Int = 1,
-    val durationSeconds: Int = 10,
-    val useIterations: Boolean = false,
+    /**
+     * Drives the k6 executor. When `loadProfile` is null we fall back to
+     * the legacy (virtualUsers, durationSeconds, useIterations) triple so
+     * older clients keep working until they migrate.
+     */
+    val loadProfile: LoadProfile? = null,
+    @Deprecated("Use loadProfile instead.") val virtualUsers: Int? = null,
+    @Deprecated("Use loadProfile instead.") val durationSeconds: Int? = null,
+    @Deprecated("Use loadProfile instead.") val useIterations: Boolean? = null,
 )
 
 data class TestRunConfiguration(
     val apiTitle: String,
     val apiVersion: String,
     val baseUrl: String,
-    val virtualUsers: Int,
-    val durationSeconds: Int,
-    val useIterations: Boolean,
+    val loadProfile: LoadProfile,
     val operations: List<TestRunOperationConfiguration>,
 )
 

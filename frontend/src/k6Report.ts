@@ -14,13 +14,37 @@ export type ReportOperation = {
   bearerTokenConfigured: boolean
 }
 
+// Wire shape of a load profile. Mirrors `LoadProfile` from
+// `./loadProfile.ts` but stays a structural type so the report module
+// does not need to depend on the editor-side helper. Adding a new
+// executor only requires extending this union, the serialiser and the
+// renderer — the report only reads the discriminator and the fields it
+// already knows about.
+//
+// Wir akzeptieren beide Schreibweisen für `type`: `RAMPING_VUS` (wie
+// vom Backend serialisiert) und `ramping-vus` (kebab-case, executor-
+// Name). Ein normalisierendes `type` unten sorgt dafür, dass alle
+// nachgelagerten Switch-Statements case-insensitiv arbeiten können.
+export type ReportLoadProfile = {
+  type: 'ramping-vus' | 'RAMPING_VUS' | 'constant-vus' | 'CONSTANT_VUS' | 'shared-iterations' | 'SHARED_ITERATIONS' | 'constant-arrival-rate' | 'CONSTANT_ARRIVAL_RATE'
+  virtualUsers?: number
+  durationSeconds?: number
+  iterations?: number
+  startVUs?: number
+  stages?: ReportLoadStage[]
+  rate?: number
+  timeUnitSeconds?: number
+  preAllocatedVUs?: number
+  maxVUs?: number
+}
+
+export type ReportLoadStage = { target: number, durationSeconds: number }
+
 export type TestRunConfiguration = {
   apiTitle: string
   apiVersion: string
   baseUrl: string
-  virtualUsers: number
-  durationSeconds: number
-  useIterations: boolean
+  loadProfile: ReportLoadProfile
   operations: ReportOperation[]
 }
 
@@ -205,6 +229,392 @@ export function k6ScriptDownloadName(runId: string): string {
 export function manualK6Command(configuration: TestRunConfiguration | undefined, runId: string): string {
   const baseUrl = configuration?.baseUrl ?? 'https://target.example'
   return `k6 run -e BASE_URL=${JSON.stringify(baseUrl)} ${k6ScriptDownloadName(runId)}`
+}
+
+// Total runtime of a load profile, in seconds. Used by the report to show
+// how long the k6 run was actually scheduled for. For constant-vus and
+// arrival-rate this is just the explicit duration; for shared-iterations
+// we return undefined because the test stops as soon as the last iteration
+// completes, which the user already sees via the "beendet am" timestamp.
+//
+// Wir normalisieren den `type` auf kebab-case, damit der Switch
+// case-insensitive funktioniert (`RAMPING_VUS` aus dem Backend wird
+// zu `ramping-vus`).
+function normalizedType(profile: ReportLoadProfile): string {
+  return profile.type.toLowerCase().replace(/_/g, '-')
+}
+
+export function profileTotalSeconds(profile: ReportLoadProfile): number | undefined {
+  switch (normalizedType(profile)) {
+    case 'constant-vus':
+      return profile.durationSeconds ?? 0
+    case 'constant-arrival-rate':
+      return profile.durationSeconds ?? 0
+    case 'ramping-vus':
+      return (profile.stages ?? []).reduce((sum, stage) => sum + stage.durationSeconds, 0)
+    case 'shared-iterations':
+      return undefined
+    default:
+      return undefined
+  }
+}
+
+export function profileSummary(profile: ReportLoadProfile): string {
+  switch (normalizedType(profile)) {
+    case 'constant-vus':
+      return `Konstante Last · ${profile.virtualUsers ?? '?'} VUs über ${profile.durationSeconds ?? '?'} s`
+    case 'shared-iterations':
+      return `${profile.iterations ?? '?'} parallele Anfragen, so schnell wie möglich`
+    case 'ramping-vus': {
+      const stages = profile.stages ?? []
+      const peak = stages.reduce((max, stage) => Math.max(max, stage.target), profile.startVUs ?? 0)
+      return `Ramping-VUs · ${stages.length} Stages, Spitze ${peak} VUs`
+    }
+    case 'constant-arrival-rate':
+      return `Constant-Arrival-Rate · ${profile.rate ?? '?'} Anfragen/${profile.timeUnitSeconds ?? '?'}s über ${profile.durationSeconds ?? '?'} s`
+    default:
+      return 'Unbekanntes Lastprofil'
+  }
+}
+
+// ---- Laufzeit-Anzeige -----------------------------------------------------
+//
+// Reine Helfer, die aus `startedAt`/`finishedAt` und dem Lastprofil die
+// für den Nutzer sichtbare Zeit berechnen. `now` ist ein optionaler
+// Parameter, damit Tests deterministisch laufen können — die UI übergibt
+// einen eigenen Tick-State, damit die Anzeige ohne Polling aktualisiert
+// wird.
+
+const ZERO_SECONDS = 0
+const SECONDS_PER_MINUTE = 60
+const SECONDS_PER_HOUR = 3600
+
+// Sekunden als "MM:SS" oder "H:MM:SS" (z. B. "01:23", "1:02:03").
+// Negative oder NaN-Werte werden als "–" dargestellt.
+export function formatDurationSeconds(seconds: number | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '–'
+  const total = Math.floor(seconds)
+  const hours = Math.floor(total / SECONDS_PER_HOUR)
+  const minutes = Math.floor((total % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)
+  const remainder = total % SECONDS_PER_MINUTE
+  if (hours > 0) return `${hours}:${pad(minutes)}:${pad(remainder)}`
+  return `${pad(minutes)}:${pad(remainder)}`
+}
+
+// Sekunden als "X min Y s" / "Y s" / "H h M min S s". Für die
+// ausgeschriebene Form in Karten und Hinweistexten — kompakter als
+// "MM:SS" und leichter lesbar in längeren Texten. Segmente mit dem
+// Wert 0 werden übersprungen, damit "1 h 0 min 0 s" zu "1 h" wird.
+export function formatDurationHuman(seconds: number | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '–'
+  const total = Math.floor(seconds)
+  if (total < SECONDS_PER_MINUTE) return `${total} s`
+  const hours = Math.floor(total / SECONDS_PER_HOUR)
+  const minutes = Math.floor((total % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)
+  const remainder = total % SECONDS_PER_MINUTE
+  const parts: string[] = []
+  if (hours > 0) parts.push(`${hours} h`)
+  if (minutes > 0) parts.push(`${minutes} min`)
+  if (remainder > 0) parts.push(`${remainder} s`)
+  return parts.join(' ')
+}
+
+function pad(value: number): string {
+  return value.toString().padStart(2, '0')
+}
+
+function parseTimestamp(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const milliseconds = new Date(value).getTime()
+  return Number.isFinite(milliseconds) ? milliseconds : undefined
+}
+
+// Sekunden seit `startedAt`. Liefert `undefined`, solange der Run noch
+// nicht gestartet ist (z. B. QUEUED). `now` ist die Referenz (Default
+// Date.now()), wird per Parameter injiziert, damit Tests deterministisch
+// bleiben und der Hook in der UI einen eigenen Tick übergeben kann.
+export function runElapsedSeconds(run: TestRun, now: number = Date.now()): number | undefined {
+  const started = parseTimestamp(run.startedAt)
+  if (started == null) return undefined
+  const finished = parseTimestamp(run.finishedAt) ?? now
+  return Math.max(ZERO_SECONDS, (finished - started) / 1000)
+}
+
+// Verbleibende Sekunden laut Lastprofil. Liefert `undefined`, wenn der
+// Run noch nicht läuft oder das Profil keine vorhersagbare Gesamtdauer
+// hat (z. B. shared-iterations). Während des Laufs wird gegen `now`
+// gerechnet, danach gegen `finishedAt`, damit nachgelagerte
+// Statusanzeigen nicht "negativ" werden.
+export function runRemainingSeconds(run: TestRun, now: number = Date.now()): number | undefined {
+  if (!run.configuration) return undefined
+  const total = profileTotalSeconds(run.configuration.loadProfile)
+  if (total == null) return undefined
+  const elapsed = runElapsedSeconds(run, now)
+  if (elapsed == null) return undefined
+  return Math.max(ZERO_SECONDS, total - elapsed)
+}
+
+// ---- Fehleranalyse ---------------------------------------------------------
+//
+// k6 schreibt in die Standardausgabe typische GoError-Meldungen, die
+// den eigentlichen Grund für einen fehlgeschlagenen Lauf enthalten.
+// Wir parsen die wichtigsten Muster und liefern eine typisierte
+// `FailureReason` zurück, damit die UI ein präzises Label und eine
+// gezielte Handlungsempfehlung anzeigen kann — statt nur die erste
+// (oft generische) Zeile zu zeigen.
+//
+// Erweiterung: weitere Muster einfach in `matchFailurePattern` als
+// regulären Ausdruck mit `kind`, `buildSummary` und `buildDetail`
+// ergänzen.
+
+export type FailureKind =
+  | 'dns'
+  | 'connection-refused'
+  | 'connection-timeout'
+  | 'tls'
+  | 'http'
+  | 'script'
+  | 'process'
+  | 'unknown'
+
+export type FailureReason = {
+  kind: FailureKind
+  summary: string
+  detail: string
+  hint?: string
+}
+
+const FAILURE_HINT_BY_KIND: Record<Exclude<FailureKind, 'unknown'>, string> = {
+  dns: 'Prüfe, ob der Hostname in der Base-URL korrekt geschrieben ist und ob DNS aus dem k6-Container erreichbar ist.',
+  'connection-refused': 'Der Zielport ist nicht offen oder die Anwendung läuft nicht. Prüfe Firewall, Portweiterleitung und ob der Dienst gestartet ist.',
+  'connection-timeout': 'Die Anfrage hat das Zeitlimit überschritten. Prüfe Routing, Firewall und ob das Ziel auf eingehende Verbindungen antwortet.',
+  tls: 'Prüfe das Zertifikat des Ziels (Gültigkeit, Aussteller, Hostname). Eventuell fehlt eine CA oder das Zertifikat ist abgelaufen.',
+  http: 'Der Server hat mit einem HTTP-Fehler geantwortet. Prüfe den Statuscode in der k6-Konsolenausgabe.',
+  script: 'Das generierte k6-Skript enthält einen Fehler. Prüfe die k6-Konsolenausgabe auf die genaue Stelle.',
+  process: 'k6 konnte nicht gestartet werden. Prüfe, ob die k6-Binary installiert und im PATH verfügbar ist.',
+}
+
+type FailurePattern = {
+  kind: Exclude<FailureKind, 'unknown'>
+  regex: RegExp
+  buildSummary: (match: RegExpMatchArray) => string
+  buildDetail: (match: RegExpMatchArray) => string
+}
+
+// Reihenfolge ist relevant: das erste matchende Muster gewinnt. Das
+// Skript- und HTTP-Muster sollten daher am Ende stehen, weil sie sehr
+// weit gefasst sind.
+const FAILURE_PATTERNS: readonly FailurePattern[] = [
+  {
+    kind: 'dns',
+    // k6 v0.x / v1.x: "dial tcp[:PORT]: lookup HOST: <reason>"
+    // k6 v2.x: "lookup HOST on <resolver>:<port>: <reason>" (Go's pure DNS error, no dial prefix)
+    regex: /(?:dial tcp(?::\d+)?:\s*)?lookup ([^\s:]+)(?:\s+on\s+[0-9.:a-fA-F\[\]]+)?:\s*(no such host|Temporary failure in name resolution|Server misbehaving)/i,
+    buildSummary: match => `DNS-Auflösung fehlgeschlagen für „${match[1]}".`,
+    buildDetail: match => `k6 konnte den Hostnamen ${match[1]} nicht auflösen (${match[2]}).`,
+  },
+  {
+    kind: 'connection-refused',
+    regex: /dial tcp ([0-9.]+|\[[0-9a-fA-F:]+\]|[^:]+):(\d+):\s*connect: connection refused/i,
+    buildSummary: match => `Verbindung abgelehnt (${match[1]}:${match[2]}).`,
+    buildDetail: match => `k6 hat „connection refused" von ${match[1]}:${match[2]} erhalten — der Zielport antwortet nicht.`,
+  },
+  {
+    kind: 'connection-timeout',
+    regex: /dial tcp ([0-9.]+|\[[0-9a-fA-F:]+\]|[^:]+):(\d+):\s*(i\/o timeout|context deadline exceeded)/i,
+    buildSummary: match => `Verbindungs-Timeout zu ${match[1]}:${match[2]}.`,
+    buildDetail: match => `k6 hat innerhalb des Zeitlimits keine Antwort von ${match[1]}:${match[2]} erhalten.`,
+  },
+  {
+    kind: 'tls',
+    regex: /x509:\s*([^\n]+)/i,
+    buildSummary: match => `TLS-Handshake fehlgeschlagen: ${match[1].trim()}.`,
+    buildDetail: match => `Das TLS-Zertifikat des Ziels wurde abgelehnt (${match[1].trim()}).`,
+  },
+  {
+    kind: 'http',
+    regex: /http response error.*?status code (\d{3})/i,
+    buildSummary: match => `HTTP-Fehler ${match[1]} vom Server.`,
+    buildDetail: match => `k6 hat einen HTTP-Status ${match[1]} als Fehler gewertet (Threshold oder harter Fehler).`,
+  },
+  {
+    kind: 'script',
+    regex: /(?:GoError: )?([^\n:]+\.js):(\d+):\d+\s+([^\n]+)/,
+    buildSummary: match => `Skript-Fehler in ${match[1]} (Zeile ${match[2]}): ${match[3].trim()}`,
+    buildDetail: match => `${match[1]}:${match[2]} — ${match[3].trim()}`,
+  },
+  {
+    kind: 'process',
+    regex: /(?:Cannot find k6|Cannot run program "?'?k6"?'?|k6: command not found|no such file or directory)/i,
+    buildSummary: () => 'k6 konnte nicht gestartet werden.',
+    buildDetail: () => 'Die k6-Binary wurde nicht gefunden oder ist nicht ausführbar.',
+  },
+] as const
+
+// Nimmt die erste nicht-leere Zeile, entfernt ein „ERRO[<sekunden>]“-Prefix
+// (das k6 vor jede Fehlermeldung schreibt) und liefert den bereinigten
+// Text. Der Aufrufer hat bereits sichergestellt, dass der Input
+// mindestens ein nicht-Leerzeichen enthält — daher ist „leer“ hier nur
+// ein defensiver Fallback.
+export function extractErrorLine(text: string): string {
+  // Wir suchen vom Ende her die letzte nicht-leere Zeile. Damit
+  // überspringen wir wiederkehrende Time-Series-Output-Fehler am
+  // Anfang des k6-Outputs und greifen den letzten, i. d. R. finalen
+  // Fehler heraus.
+  const lines = text.split(/\r?\n/).reverse()
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.length === 0) continue
+    const stripped = trimmed.replace(/^ERRO\[\d+\]\s*/, '')
+    if (stripped.length > 0) return stripped
+  }
+  return text.trim()
+}
+
+export function summariseFailure(error: string | undefined | null): FailureReason | undefined {
+  if (!error) return undefined
+  const trimmed = error.trim()
+  if (trimmed.length === 0) return undefined
+  // Wir scannen die Fehlerzeilen vom Ende her, weil k6-Output in der
+  // Regel mit Time-Series-Output-Fehlern (z. B. InfluxDB-Writes)
+  // beginnt und erst später die eigentliche Test-Request-Fehler
+  // liefert. Der letzte Fehler ist i. d. R. der relevante.
+  const lines = trimmed.split(/\r?\n/).reverse()
+  for (const pattern of FAILURE_PATTERNS) {
+    for (const line of lines) {
+      const match = line.match(pattern.regex)
+      if (match) {
+        return {
+          kind: pattern.kind,
+          summary: pattern.buildSummary(match),
+          detail: pattern.buildDetail(match),
+          hint: FAILURE_HINT_BY_KIND[pattern.kind],
+        }
+      }
+    }
+  }
+  return {
+    kind: 'unknown',
+    summary: 'Test fehlgeschlagen.',
+    detail: extractErrorLine(trimmed),
+  }
+}
+
+// ---- SVG-Renderer für die Ramp-Grafik --------------------------------------
+//
+// Reine Funktionen ohne React-Abhängigkeit, damit sie unit-testbar
+// sind. Liefern Strings, die in ein <svg> eingebettet werden. Plot-
+// Bereich wird in [0..width]×[0..height] normalisiert; Padding für
+// Achsen wird vom Aufrufer addiert (wir rechnen intern gegen den
+// Plot-Bereich, nicht gegen die viewBox).
+
+export type RampPlot = {
+  width: number
+  height: number
+  // Domäne (in Sekunden, VUs/RPS)
+  maxSeconds: number
+  maxValue: number
+  // Soll-Linie
+  sollPoints: Array<{ seconds: number, value: number }>
+  // Optional: Ist-Linie
+  istPoints?: Array<{ seconds: number, value: number }>
+}
+
+const PLOT_PADDING = 4
+
+export function plotValue(plot: RampPlot, seconds: number, value: number): { x: number, y: number } {
+  const x = (seconds / plot.maxSeconds) * (plot.width - 2 * PLOT_PADDING) + PLOT_PADDING
+  const y = plot.height - PLOT_PADDING - (value / plot.maxValue) * (plot.height - 2 * PLOT_PADDING)
+  return { x, y }
+}
+
+export function buildSollPath(plot: RampPlot): string {
+  if (plot.sollPoints.length === 0) return ''
+  return plot.sollPoints.map((point, index) => {
+    const { x, y } = plotValue(plot, point.seconds, point.value)
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`
+  }).join(' ')
+}
+
+export function buildIstPath(plot: RampPlot): string {
+  if (!plot.istPoints || plot.istPoints.length === 0) return ''
+  return plot.istPoints.map((point, index) => {
+    const { x, y } = plotValue(plot, point.seconds, point.value)
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`
+  }).join(' ')
+}
+
+// Wandelt ISO-8601-Timestamps + Werte in Plot-Punkte um, normalisiert
+// auf `t0` (erster Zeitpunkt = 0 s). Wenn [ist] leer ist, gibt die
+// Funktion ein Objekt ohne `istPoints` zurück, sodass der Renderer
+// nur die Soll-Linie zeichnet.
+export function buildRampPlot(
+  profile: ReportLoadProfile,
+  istVus: ReadonlyArray<{ time: string, value: number }>,
+  options: { width: number, height: number } = { width: 720, height: 220 },
+): RampPlot {
+  const istVusSafe = istVus ?? []
+  const maxSeconds = profileTotalSeconds(profile) ?? 60
+  const sollPoints = buildSollPoints(profile)
+  const peakSoll = sollPoints.reduce((max, point) => Math.max(max, point.value), 0)
+  const peakIst = istVusSafe.reduce((max, point) => Math.max(max, point.value), 0)
+  const maxValue = Math.max(peakSoll, peakIst, 1) * 1.1
+  const t0 = istVusSafe.length > 0 ? new Date(istVusSafe[0].time).getTime() : 0
+  const istPoints = istVusSafe.map(point => ({
+    seconds: Math.max(0, (new Date(point.time).getTime() - t0) / 1000),
+    value: point.value,
+  }))
+  const plot: RampPlot = {
+    width: options.width,
+    height: options.height,
+    maxSeconds,
+    maxValue,
+    sollPoints,
+  }
+  if (istPoints.length > 0) plot.istPoints = istPoints
+  return plot
+}
+
+function buildSollPoints(profile: ReportLoadProfile): Array<{ seconds: number, value: number }> {
+  switch (normalizedType(profile)) {
+    case 'ramping-vus': {
+      const points: Array<{ seconds: number, value: number }> = []
+      const stages = profile.stages ?? []
+      let cursor = 0
+      let previous = profile.startVUs ?? 0
+      for (const stage of stages) {
+        points.push({ seconds: cursor, value: previous })
+        cursor += stage.durationSeconds
+        points.push({ seconds: cursor, value: stage.target })
+        previous = stage.target
+      }
+      return points
+    }
+    case 'constant-vus': {
+      const vus = profile.virtualUsers ?? 0
+      const duration = profile.durationSeconds ?? 0
+      return [
+        { seconds: 0, value: vus },
+        { seconds: duration, value: vus },
+      ]
+    }
+    case 'constant-arrival-rate': {
+      // Für die Ramp-Grafik zeigen wir bei Arrival-Rate die Rate
+      // als horizontale Linie, damit Ist (RPS) und Soll (Rate)
+      // direkt vergleichbar sind.
+      const rate = profile.rate ?? 0
+      const duration = profile.durationSeconds ?? 0
+      return [
+        { seconds: 0, value: rate },
+        { seconds: duration, value: rate },
+      ]
+    }
+    case 'shared-iterations':
+      // Keine sinnvolle Soll-Linie, weil die Dauer nicht vorhersagbar ist.
+      return []
+    default:
+      return []
+  }
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {

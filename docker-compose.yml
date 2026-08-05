@@ -20,6 +20,16 @@ services:
       # NOTE: SSL_CERT_FILE replaces the system CA bundle for k6 — only
       # use it if all targets are signed by the custom CA above.
       SSL_CERT_FILE: /etc/lasttest/custom-ca.pem
+      # --- InfluxDB-Ziel für k6-Output (Time-Series-Stream) ---
+      # Werden vom Backend gelesen, um k6 mit --out influxdb=... zu starten
+      # und die echte Ist-Kurve später aus InfluxDB abzufragen.
+      LASTTEST_INFLUXDB_URL: http://influxdb:8086
+      LASTTEST_INFLUXDB_BUCKET: k6
+      LASTTEST_INFLUXDB_USER: k6-writer
+      LASTTEST_INFLUXDB_PASSWORD: lasttest-writer-password
+    depends_on:
+      influxdb:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8286/ || exit 1"]
       interval: 5s
@@ -27,3 +37,63 @@ services:
       retries: 12
       start_period: 30s
     restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # InfluxDB 1.11 — Time-Series-Storage für k6-Output
+  # ------------------------------------------------------------------
+  # k6 v2.x hat nur den klassischen InfluxDB-v1-Output eingebaut.
+  # InfluxDB-v2 lehnt v1-Writes mit „unauthorized“ ab und ein
+  # xk6-Plugin wäre ein größerer Build-Change. Wir nutzen daher
+  # InfluxDB 1.11 — klein, schnell, k6-native. Die Daten landen in
+  # der Default-Datenbank `k6`, Retention-Policy `autogen`.
+  #
+  # Persistenz via benanntem Volume. Beim ersten Start wird die
+  # Datenbank `k6` automatisch angelegt und ein Admin-User mit
+  # Schreib-/Leserechten erstellt.
+  influxdb:
+    container_name: lasttest-influxdb
+    image: influxdb:1.11
+    ports:
+      # UI unter http://localhost:8086/ erreichbar (Login siehe unten)
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb
+      - ./influxdb/init:/docker-entrypoint-initdb.d:ro
+    environment:
+      INFLUXDB_ADMIN_USER: admin
+      INFLUXDB_ADMIN_PASSWORD: lasttest-admin-password
+      INFLUXDB_USER: k6-writer
+      INFLUXDB_USER_PASSWORD: lasttest-writer-password
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8086/ping || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # Grafana (optional) — vorkonfiguriertes Dashboard für Ad-hoc-Analysen
+  # ------------------------------------------------------------------
+  # Wird nur gestartet, wenn man die Time-Series direkt in Grafana
+  # untersuchen will. Aufruf unter http://localhost:3000/ (admin/admin).
+  grafana:
+    container_name: lasttest-grafana
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  influxdb-data:
+  grafana-data:

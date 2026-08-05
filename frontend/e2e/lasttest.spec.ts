@@ -809,3 +809,235 @@ paths:
   await page.getByLabel('getAlpha: id').fill('5')
   await expect(startButton).toBeEnabled()
 })
+
+test('renders the new load profile editor with presets and validates stages', async ({ page }) => {
+  await importDemo(page)
+
+  // Lastprofil-Sektion ist sichtbar; Default ist constant-vus mit 10 VUs / 30 s.
+  const profileSelect = page.locator('.profile-type-select')
+  await expect(profileSelect).toBeVisible()
+  await expect(profileSelect).toHaveValue('constant-vus')
+
+  // Profil auf Ramping-VUs umschalten.
+  await profileSelect.selectOption('ramping-vus')
+  const editor = page.locator('[data-testid="load-profile-editor"]')
+  await expect(editor).toBeVisible()
+
+  // Stages-Tabelle mit den 4 Spike-Preset-Stages.
+  const stageRows = editor.locator('.stages-table tbody tr')
+  await expect(stageRows).toHaveCount(4)
+  // Targets des Spike-Presets: 0, 800, 800, 0.
+  const firstStageTarget = stageRows.nth(0).locator('input[type="number"]').first()
+  await expect(firstStageTarget).toHaveValue('0')
+
+  // Spitze-Preset klicken, um Stages auf 0, 800, 800, 0 zu setzen.
+  await editor.getByRole('button', { name: 'Spike', exact: true }).click()
+  await expect(stageRows).toHaveCount(4)
+
+  // "Plateau erlaubt": zwei Stages mit demselben Target (800, 800) sollen
+  // keinen Validierungsfehler werfen.
+  const errorBox = editor.locator('.parameter-error')
+  await expect(errorBox).toHaveCount(0)
+
+  // Eine Stage hinzufügen.
+  await editor.getByRole('button', { name: 'Stage hinzufügen' }).click()
+  await expect(stageRows).toHaveCount(5)
+
+  // Erste Stage entfernen → 4 verbleibend.
+  await stageRows.nth(0).locator('button.stage-remove').click()
+  await expect(stageRows).toHaveCount(4)
+
+  // Auf Constant-Arrival-Rate wechseln → 5 spezifische Felder.
+  await profileSelect.selectOption('constant-arrival-rate')
+  await expect(editor.getByLabel('Rate (Anfragen)')).toBeVisible()
+  await expect(editor.getByLabel('pro Sekunden')).toBeVisible()
+  await expect(editor.getByLabel('Dauer (Sekunden)')).toBeVisible()
+  await expect(editor.getByLabel('preAllocatedVUs')).toBeVisible()
+  await expect(editor.getByLabel('maxVUs')).toBeVisible()
+})
+
+test('report page renders the ramp-grafik for a completed ramping-vus run', async ({ page }) => {
+  // Diese Suite setzt voraus, dass ein k6-fähiger Container läuft und
+  // ein Ramping-VUs-Lauf in der jüngeren Vergangenheit abgeschlossen
+  // wurde. Wir erzeugen den Lauf, warten auf COMPLETED, öffnen den
+  // Report und prüfen, dass die Ramp-Grafik gerendert wird.
+  await importDemo(page)
+
+  // Ramping-VUs-Profil auswählen.
+  const profileSelect = page.locator('.profile-type-select')
+  await profileSelect.selectOption('ramping-vus')
+  await page.locator('[data-testid="load-profile-editor"]').getByRole('button', { name: 'Spike', exact: true }).click()
+
+  // 200 ms reichen, damit der Demo-Endpunkt unter lasttest/demo-api
+  // antwortet; Stages sind 0/2s, 800/10s, 800/30s, 0/2s ≈ 44 s.
+  // Wir verkürzen die Stages für den E2E-Test, indem wir die
+  // Editor-Werte direkt ändern.
+  const stageRows = page.locator('.stages-table tbody tr')
+  await expect(stageRows).toHaveCount(4)
+  // Setze alle Durations auf 1 s → Lauf dauert ~4 s.
+  for (let i = 0; i < 4; i++) {
+    const durationInput = stageRows.nth(i).locator('input[type="number"]').nth(1)
+    await durationInput.fill('1')
+  }
+
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+  // Warten bis der Run-Status COMPLETED ist.
+  await expect(page.getByText('COMPLETED', { exact: false })).toBeVisible({ timeout: 60_000 })
+
+  // Report-Link öffnen.
+  const reportLink = page.getByRole('link', { name: /Ausführlichen k6-Testbericht/ })
+  const [reportPage] = await Promise.all([page.context().waitForEvent('page'), reportLink.click()])
+
+  // Lastprofil-Sektion und Ramp-Grafik sind sichtbar.
+  await expect(reportPage.getByRole('heading', { name: /Lastprofil.*Lastverlauf/ })).toBeVisible()
+  // SVG mit Soll-Linie (lila) ist im Ramp-Card.
+  const rampSvg = reportPage.locator('.ramp-svg').first()
+  await expect(rampSvg).toBeVisible()
+  // Legende zeigt beide Linien.
+  await expect(reportPage.getByText('Geplant (Soll)')).toBeVisible()
+  await expect(reportPage.getByText('Tatsächlich (Ist)')).toBeVisible()
+  // Stages-Tabelle ist ebenfalls da.
+  const stagesTable = reportPage.locator('table[aria-label="Stages des Lastprofils"]')
+  await expect(stagesTable).toBeVisible()
+  await expect(stagesTable.locator('tbody tr')).toHaveCount(4)
+})
+
+// ---- Run-Status-View: RunProgress / RunSummary / RunFailure ----------------
+//
+// Diese Tests decken die drei neuen Live-Sichten ab, die nach dem
+// Klick auf „k6-Lasttest starten“ im Haupt-Editor erscheinen.
+
+test('shows the live progress card while a k6 run is QUEUED or RUNNING', async ({ page }) => {
+  // Wählt einen etwas längeren Lauf, damit die Polling-Animation
+  // mit Sicherheit mindestens einen RUNNING-Frame einfängt.
+  await importDemo(page)
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('5')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  // Status-Badge ist sichtbar. Da der Test asynchron auf den Lauf
+  // wartet, kann die Karte sowohl RUNNING als auch schon COMPLETED
+  // sein — wir prüfen daher nur die Zeitanzeige-Komponente.
+  await expect(page.locator('.status.running, .status.queued, .status.completed').first()).toBeVisible({ timeout: 30_000 })
+
+  // .run-progress ist da, solange der Test läuft, ODER .run-summary-cards
+  // ist da, wenn er schon fertig ist. Mindestens eines davon.
+  const progress = page.locator('.run-progress')
+  const summary = page.locator('.run-summary-cards')
+  await expect(progress.or(summary)).toBeVisible()
+})
+
+test('renders a compact summary card grid after a successful smoke test completes', async ({ page }) => {
+  await importDemo(page)
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('1')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  // Warten auf COMPLETED.
+  await expect(page.locator('.status.completed')).toBeVisible({ timeout: 30_000 })
+
+  // Sechs Metrik-Karten sind sichtbar (Checks, Fehlerrate, p95, Requests, Iterationen, Laufzeit).
+  const cards = page.locator('.run-summary-card')
+  await expect(cards).toHaveCount(6)
+  await expect(page.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
+  await expect(page.getByText('HTTP-Fehlerrate', { exact: true })).toBeVisible()
+  await expect(page.getByText('p(95) Antwortzeit', { exact: true })).toBeVisible()
+  await expect(page.getByText('HTTP Requests', { exact: true })).toBeVisible()
+  await expect(page.getByText('Iterationen', { exact: true })).toBeVisible()
+  await expect(page.getByText('Laufzeit', { exact: true })).toBeVisible()
+})
+
+test('renders a typed failure card with DNS error when the target host cannot be resolved', async ({ page }) => {
+  // Spezifikation, die auf einen nicht auflösbaren Host zeigt.
+  const unreachableSpec = `openapi: 3.0.3
+info:
+  title: DNS Failure
+  version: "1"
+servers:
+  - url: http://this-host-does-not-resolve-anywhere.invalid
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '200': {description: OK}
+`
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'dns-failure.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from(unreachableSpec),
+  })
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: 'DNS Failure' })).toBeVisible()
+
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('2')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  // Status FAILED.
+  await expect(page.locator('.status.failed')).toBeVisible({ timeout: 60_000 })
+
+  // Typed-Failure-Card: Label „DNS-Auflösung“ und die Host-Domain.
+  const failureCard = page.locator('.run-failure')
+  await expect(failureCard).toBeVisible()
+  await expect(failureCard).toHaveClass(/kind-dns/)
+  await expect(failureCard.getByText('DNS-Auflösung', { exact: true })).toBeVisible()
+  await expect(failureCard).toContainText('this-host-does-not-resolve-anywhere.invalid')
+  // Action-Hint ist sichtbar.
+  await expect(failureCard.getByText(/Prüfe, ob der Hostname/)).toBeVisible()
+})
+
+test('renders a typed failure card with connection-refused when the port is not open', async ({ page }) => {
+  // 127.0.0.1:1 ist der Standard-„Verbindung abgelehnt“-Endpunkt auf jedem System.
+  const unreachableSpec = `openapi: 3.0.3
+info:
+  title: Connection Refused
+  version: "1"
+servers:
+  - url: http://127.0.0.1:1
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '200': {description: OK}
+`
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'refused.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from(unreachableSpec),
+  })
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: 'Connection Refused' })).toBeVisible()
+
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('1')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  await expect(page.locator('.status.failed')).toBeVisible({ timeout: 60_000 })
+
+  const failureCard = page.locator('.run-failure')
+  await expect(failureCard).toBeVisible()
+  await expect(failureCard).toHaveClass(/kind-connection-refused/)
+  await expect(failureCard.getByText('Verbindung abgelehnt', { exact: true })).toBeVisible()
+  await expect(failureCard).toContainText('127.0.0.1')
+})
+
+test('the completed summary card grid is also visible in the report popup', async ({ page }) => {
+  await importDemo(page)
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('1')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+  await expect(page.locator('.status.completed')).toBeVisible({ timeout: 30_000 })
+
+  // Report-Popup öffnen und prüfen, dass die ausführliche
+  // Zusammenfassung (Cards + Thresholds) sichtbar ist.
+  const popupPromise = page.context().waitForEvent('page')
+  await page.getByRole('link', { name: /Ausführlichen k6-Testbericht/ }).click()
+  const report = await popupPromise
+  await report.waitForLoadState('networkidle')
+
+  await expect(report.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
+  await expect(report.getByText('p(95) Antwortzeit', { exact: true })).toBeVisible()
+  await expect(report.getByRole('heading', { name: 'Thresholds' })).toBeVisible()
+})

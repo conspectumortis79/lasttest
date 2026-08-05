@@ -132,6 +132,35 @@ class SwaggerSpecificationImporterTest {
     }
 
     @Test
+    fun `imports OpenAPI 3 JSON documentation`() {
+        val imported = importer.import(OPENAPI_3_JSON)
+
+        assertEquals("Pet API", imported.title)
+        assertEquals("https://example.test", imported.baseUrl)
+        assertEquals(2, imported.operations.size)
+        val getPet = imported.operations.first { it.operationId == "getPet" }
+        assertEquals(7, (getPet.parameters.single().example as Number).toInt())
+        assertEquals(false, getPet.destructive)
+        assertTrue(getPet.bearerAuth)
+        val createPet = imported.operations.first { it.operationId == "createPet" }
+        assertTrue(createPet.destructive)
+        assertTrue(createPet.hasRequestBody)
+        assertTrue(createPet.requestBodyRequired)
+        assertEquals(false, createPet.bearerAuth)
+        assertEquals(mapOf("name" to "Fido"), createPet.requestBodyExample)
+    }
+
+    @Test
+    fun `imports OpenAPI 3 JSON documentation with leading whitespace`() {
+        val imported = importer.import("   $OPENAPI_3_JSON")
+
+        assertEquals("Pet API", imported.title)
+        assertEquals(2, imported.operations.size)
+        assertTrue(imported.operations.any { it.operationId == "getPet" })
+        assertTrue(imported.operations.any { it.operationId == "createPet" })
+    }
+
+    @Test
     fun `imports multiple OpenAPI servers and uses the first as baseUrl`() {
         val spec =
             """
@@ -828,6 +857,66 @@ class SwaggerSpecificationImporterTest {
                   "get": {
                     "operationId": "listPets",
                     "responses": {"200": {"description": "OK"}}
+                  }
+                }
+              }
+            }
+            """.trimIndent()
+
+        val OPENAPI_3_JSON =
+            """
+            {
+              "openapi": "3.0.3",
+              "info": {
+                "title": "Pet API",
+                "version": "1.0.0"
+              },
+              "servers": [
+                {"url": "https://example.test"}
+              ],
+              "security": [{"bearerAuth": []}],
+              "paths": {
+                "/pets/{id}": {
+                  "get": {
+                    "operationId": "getPet",
+                    "parameters": [
+                      {
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {"type": "integer", "example": 7}
+                      }
+                    ],
+                    "responses": {"200": {"description": "OK"}}
+                  }
+                },
+                "/pets": {
+                  "post": {
+                    "operationId": "createPet",
+                    "security": [],
+                    "requestBody": {
+                      "required": true,
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "type": "object",
+                            "properties": {
+                              "name": {"type": "string", "example": "Fido"}
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "responses": {"201": {"description": "Created"}}
+                  }
+                }
+              },
+              "components": {
+                "securitySchemes": {
+                  "bearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "JWT"
                   }
                 }
               }

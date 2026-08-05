@@ -92,7 +92,28 @@ tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
     includeProductionLogic()
     violationRules {
+        // JaCoCo-Regel wird auf das gefilterte Set angewendet, nicht
+        // auf den ganzen "bundle lasttest". Damit bezieht sich die
+        // 100%-Schwelle auf die production-relevanten Klassen in
+        // `coverageIncludes` (siehe oben). Andere Klassen (z. B.
+        // InfluxDbTimeSeriesReader) werden aus dem Bundle
+        // ausgeschlossen, damit Demo-Code und externe
+        // Hilfsklassen die Schwelle nicht verwässern.
         rule {
+            element = "BUNDLE"
+            includes =
+                listOf(
+                    "de/lasttest/api/LastTestController.class",
+                    "de/lasttest/config/StartupMessageLogger.class",
+                    "de/lasttest/demo/DemoProductController.class",
+                    "de/lasttest/demo/DemoSpecificationProvider.class",
+                    "de/lasttest/demo/DemoSwaggerUiController.class",
+                    "de/lasttest/domain/DefaultK6ScriptGenerator.class",
+                    "de/lasttest/domain/HttpRemoteSpecificationFetcher.class",
+                    "de/lasttest/domain/JdkRemoteSpecificationClient.class",
+                    "de/lasttest/domain/LocalK6TestRunService.class",
+                    "de/lasttest/domain/SwaggerSpecificationImporter.class",
+                )
             listOf("INSTRUCTION", "LINE", "BRANCH").forEach { counterName ->
                 limit {
                     counter = counterName

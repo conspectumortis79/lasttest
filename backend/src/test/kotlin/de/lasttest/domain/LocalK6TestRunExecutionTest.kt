@@ -44,7 +44,10 @@ class LocalK6TestRunExecutionTest {
         assertEquals(TestRunStatus.COMPLETED, completed.status)
         assertEquals(0, completed.exitCode)
         assertContains(completed.summary?.get("raw").toString(), "checks")
-        assertEquals("successful k6 output", completed.error)
+        // Bei erfolgreichem Run ist error = null, weil es nichts zu
+        // berichten gibt. Das ist eine bewusste Designentscheidung
+        // (siehe LocalK6TestRunService.execute).
+        assertNull(completed.error)
         assertNotNull(completed.startedAt)
         assertNotNull(completed.finishedAt)
         assertNull(service.find("missing"))
@@ -107,13 +110,12 @@ class LocalK6TestRunExecutionTest {
                         baseUrl: String,
                         operationIds: Set<String>,
                         operationConfigurations: List<OperationConfiguration>,
-                        virtualUsers: Int,
-                        durationSeconds: Int,
-                        useIterations: Boolean,
+                        loadProfile: de.lasttest.api.LoadProfile,
                     ): String = "export default function () {}"
                 },
             executor = Executor(Runnable::run),
             k6Command = command,
+            influxDbProperties = de.lasttest.config.InfluxDbProperties(enabled = false),
         )
 
     private fun request(): CreateTestRunRequest =
@@ -121,6 +123,12 @@ class LocalK6TestRunExecutionTest {
             specification = "openapi document",
             baseUrl = "https://example.test",
             operationIds = setOf("listPets"),
+            loadProfile =
+                de.lasttest.api.LoadProfile(
+                    type = de.lasttest.api.LoadProfileType.CONSTANT_VUS,
+                    virtualUsers = 1,
+                    durationSeconds = 1,
+                ),
         )
 
     private fun specification(): ImportedSpecification =

@@ -14,7 +14,8 @@
 2. [Supported platforms](#2-supported-platforms)
 3. [Installation](#3-installation)
    - 3.1 [Docker (recommended)](#31-docker-recommended)
-   - 3.2 [Local development install](#32-local-development-install)
+   - 3.2 [Docker with InfluxDB + Grafana (time-series)](#32-docker-with-influxdb--grafana-time-series)
+   - 3.3 [Local development install](#33-local-development-install)
 4. [First run and the demo API](#4-first-run-and-the-demo-api)
 5. [The main workflow at a glance](#5-the-main-workflow-at-a-glance)
 6. [Step 1 — Importing a specification](#6-step-1--importing-a-specification)
@@ -30,8 +31,14 @@
    - 7.5 [Bearer token](#75-bearer-token)
 8. [Step 3 — Choosing the load profile](#8-step-3--choosing-the-load-profile)
    - 8.1 [Base URL and server selection](#81-base-url-and-server-selection)
-   - 8.2 [Virtual users and duration](#82-virtual-users-and-duration)
-   - 8.3 [Limits](#83-limits)
+   - 8.2 [The four load-profile executors](#82-the-four-load-profile-executors)
+     - 8.2.1 [Constant-VUs (default)](#821-constant-vus-default)
+     - 8.2.2 [Shared-Iterations](#822-shared-iterations)
+     - 8.2.3 [Ramping-VUs](#823-ramping-vus)
+     - 8.2.4 [Constant-Arrival-Rate](#824-constant-arrival-rate)
+   - 8.3 [Presets](#83-presets)
+   - 8.4 [Editing ramping stages](#84-editing-ramping-stages)
+   - 8.5 [Validation and limits](#85-validation-and-limits)
 9. [Step 4 — Running the test and reading the result](#9-step-4--running-the-test-and-reading-the-result)
    - 9.1 [Live status](#91-live-status)
    - 9.2 [Console output and raw JSON](#92-console-output-and-raw-json)
@@ -39,7 +46,8 @@
 10. [The detailed report](#10-the-detailed-report)
     - 10.1 [Opening the report](#101-opening-the-report)
     - 10.2 [Sections of the report](#102-sections-of-the-report)
-    - 10.3 [Printing and exporting to PDF](#103-printing-and-exporting-to-pdf)
+    - 10.3 [The ramp-grafik (load chart)](#103-the-ramp-grafik-load-chart)
+    - 10.4 [Printing and exporting to PDF](#104-printing-and-exporting-to-pdf)
 11. [The generated k6 script](#11-the-generated-k6-script)
     - 11.1 [Inspecting the script](#111-inspecting-the-script)
     - 11.2 [Downloading the script](#112-downloading-the-script)
@@ -47,8 +55,11 @@
 12. [CLI helper scripts](#12-cli-helper-scripts)
     - 12.1 [`start-linux.sh`](#121-start-linuxsh)
     - 12.2 [`docker-start.sh`](#122-docker-startsh)
+    - 12.3 [InfluxDB-UI and Grafana](#123-influxdb-ui-and-grafana)
 13. [Troubleshooting](#13-troubleshooting)
     - 13.1 [Trusting custom TLS certificates](#131-trusting-custom-tls-certificates)
+    - 13.2 [InfluxDB is not reachable](#132-influxdb-is-not-reachable)
+    - 13.3 [Ramp-grafik shows only the Soll line](#133-ramp-grafik-shows-only-the-soll-line)
 14. [Glossary](#14-glossary)
 
 ---
@@ -137,7 +148,44 @@ docker compose down
 docker stop lasttest && docker rm lasttest
 ```
 
-### 3.2 Local development install
+### 3.2 Docker with InfluxDB + Grafana (time-series)
+
+The standard `docker compose up` brings up only lasttest. To get the
+**ramp-grafik** in the report (see [Section 10.3](#103-the-ramp-grafik-load-chart)),
+you also need an InfluxDB instance where k6 streams its per-second
+metrics. The Compose file ships with InfluxDB 1.11 and Grafana as
+optional services. They start automatically when you use `docker compose up`
+without arguments — no extra command is required.
+
+```bash
+docker compose up -d --build
+```
+
+After startup you will see three healthy containers:
+
+| Container | Port | Purpose |
+| --- | --- | --- |
+| `lasttest` | 8286 | Spring Boot + frontend bundle |
+| `lasttest-influxdb` | 8086 | InfluxDB 1.11, receives k6's per-second metrics |
+| `lasttest-grafana` | 3000 | optional, for ad-hoc exploration of the raw time-series |
+
+Both InfluxDB and Grafana use named volumes (`lasttest_influxdb-data`,
+`lasttest_grafana-data`) so the data survives container restarts.
+
+The credentials are baked into the image (and intentionally
+non-secret because they are only relevant for local development):
+
+| Service | URL | Credentials |
+| --- | --- | --- |
+| lasttest UI | http://localhost:8286 | — |
+| InfluxDB UI | http://localhost:8086 | `admin` / `lasttest-admin-password` |
+| Grafana | http://localhost:3000 | `admin` / `admin` (anonymous viewer enabled) |
+
+If you do **not** want InfluxDB, pass `LASTTEST_INFLUXDB_ENABLED=false`
+when starting lasttest. The ramp-grafik will then show only the Soll
+line; everything else still works.
+
+### 3.3 Local development install
 
 **Prerequisites:**
 
@@ -232,12 +280,19 @@ lasttest is structured as four numbered cards:
 
 1. **Swagger / OpenAPI-Dokumentation** — paste or upload a spec.
 2. **<title> v<version>** — select and configure endpoints.
-3. **Lastprofil** — choose base URL, virtual users, and duration.
+3. **Lastprofil** — pick an executor (constant-vus, shared-iterations,
+   ramping-vus, or constant-arrival-rate), tune the fields, optionally
+   load a preset (Smoke, Load, Stress, Spike, Soak, Arrival-Rate).
 4. **Testlauf** — start, monitor, and inspect the result.
 
 You move top-to-bottom. Each step is independent and idempotent: you can
 re-import a spec, re-configure endpoints, or change the load profile
 without losing the others.
+
+The report in step 4 contains a [ramp-grafik](#103-the-ramp-grafik-load-chart)
+that compares the load you *planned* (Soll) with the load k6 actually
+generated (Ist). The Ist line is only available when InfluxDB is
+running; see [Section 3.2](#32-docker-with-influxdb--grafana-time-series).
 
 ---
 
@@ -441,44 +496,172 @@ own spec.
 > inside the container is not your laptop. Use the host’s routable IP
 > or the special `host.docker.internal` host on Docker Desktop.
 
-### 8.2 Virtual users and duration
+### 8.2 The four load-profile executors
 
-| Field | Default | Notes |
+The load-profile card contains a single **Executor** dropdown with four
+options. They map directly to k6's executor types; pick the one that
+matches what you want to learn about your target.
+
+| Executor | k6 type | Best for |
 | --- | --- | --- |
-| Virtual Users (`vus`) | 1 | concurrent virtual users |
-| Duration (seconds) | 10 | total test wall time |
-| Iterations-Modus | off | ersetzt die Dauer durch „N Anfragen, so schnell wie möglich“ |
+| **Konstante Last** (default) | `constant-vus` | Smoke test, steady-state load, repeatable benchmarks |
+| **N Anfragen, so schnell wie möglich** | `shared-iterations` | Reproducible *request count* across releases (compare p95 between v1.2 and v1.3) |
+| **Ramping-VUs** | `ramping-vus` | Spike, stress, soak; load that ramps up and down in *stages* |
+| **Constant-Arrival-Rate** | `constant-arrival-rate` | Decoupling RPS from response time (the server's true throughput ceiling) |
 
-#### Constant-VUs-Modus (Standard)
+The bottom half of the card swaps its fields automatically depending
+on the selected executor. A row of one-click **presets** above the
+fields pre-fills sensible values for common scenarios.
 
-Without the iterations toggle, the k6 script uses the
-`constant-vus` executor with the values above: all VUs start together
-and the test runs for the full duration.
+#### 8.2.1 Constant-VUs (default)
 
-#### Iterations-Modus
+```
+┌─ Schnellauswahl ──────────────────────────────────┐
+│ [Smoke] [Load] [Stress] [Spike] [Soak] [Arrival] │
+└────────────────────────────────────────────────┘
 
-Ticking **„Statt Dauer: N Anfragen, so schnell wie möglich“** flips
-the script to k6’s `shared-iterations` executor. In this mode every
-Virtual User fires **exactly one** request, and the run finishes as
-soon as the last response comes back. The `Virtual Users` field is
-reused as the iteration count, and the `Dauer (Sekunden)` field is
-greyed out.
+  Lastprofil:  ( Konstante Last  ) ▾
+  Virtual Users:  [ 10    ]
+  Dauer (Sekunden): [ 30    ]
+```
 
-Pick this mode when you want a reproducible *number of requests*
-(e.g. to compare latency between releases) rather than a fixed wall
-clock duration. The thresholds, parameters, Bearer token, and request
-body behave exactly as in the constant-VUs mode.
+All VUs start together and run for the full duration. The defaults
+(10 VUs / 30 s) are tuned so that smoke-testing the demo spec completes
+in under a minute.
 
-### 8.3 Limits
+#### 8.2.2 Shared-Iterations
 
-The MVP hard-caps both knobs to keep runaway tests from melting your
-target:
+```
+  Lastprofil:  ( N Anfragen, so schnell wie möglich ) ▾
+  Virtual Users:  [ 100   ]
+  Iterationen:   [ 1000  ]
+```
 
-- `vus`: 1 – **30000**
-- `durationSeconds`: 1 – **3600**
+Every Virtual User fires exactly one request and the run finishes
+as soon as the last response comes back. The *Iterations* field is
+the total request count across all VUs.
 
-The form will refuse to start a run outside this range and display a
-clear error.
+#### 8.2.3 Ramping-VUs
+
+This is the most flexible mode. k6 runs through a list of
+**stages**; each stage has a target VU count and a duration. Between
+two stages k6 ramps linearly from the previous target to the next
+target during that stage's duration.
+
+```
+  Lastprofil:  ( Ramping-VUs ) ▾
+  Start-VUs:    [ 0     ]
+  Stages: 4          Gesamtdauer 80 s · Spitze 800 VUs
+  ┌──┬───────────┬───────────┐
+  │# │ Ziel-VUs  │ Dauer (s) │
+  ├──┼───────────┼───────────┤
+  │1 │ [    0   ]│ [   10   ]│
+  │2 │ [  800   ]│ [   10   ]│
+  │3 │ [  800   ]│ [   30   ]│
+  │4 │ [    0   ]│ [   30   ]│
+  └──┴───────────┴───────────┘
+  [ + Stage hinzufügen ]
+```
+
+The example above is the **Spike** preset: 10 s at 0 VUs, then a
+10 s ramp up to 800 VUs, hold the spike for 30 s, then ramp down
+again. A **Plateau** (two consecutive stages with the same target)
+is allowed — the example's stages 2 and 3 are a plateau at 800 VUs.
+
+For a Soak test, use a long plateau (e.g. 50 VUs for 3 600 s).
+
+#### 8.2.4 Constant-Arrival-Rate
+
+```
+  Lastprofil:  ( Constant-Arrival-Rate ) ▾
+  Rate (Anfragen):  [ 50    ]
+  pro Sekunden:     [  1    ]
+  Dauer (Sekunden): [ 120   ]
+  preAllocatedVUs:  [ 10    ]
+  maxVUs:           [ 200   ]
+```
+
+k6 decouples the request rate from the response time: it keeps firing
+exactly *N* requests per second regardless of how slow the target
+gets. **preAllocatedVUs** is the size of the initial VU pool; **maxVUs**
+is the upper bound k6 may grow the pool to when latency spikes. Use
+this executor when you want to find the server's true throughput
+ceiling — the constant-VUs executor will only find a ceiling when VUs
+saturate, which mixes response-time and concurrency effects.
+
+### 8.3 Presets
+
+The preset row above the executor fields loads a complete profile with
+one click. After loading, every field remains editable so you can
+fine-tune. The presets are designed for common load-testing scenarios:
+
+| Preset | Executor | Stages | Total duration | Use |
+| --- | --- | --- | --- | --- |
+| **Smoke** | constant-vus | 1 VU for 30 s | 30 s | CI pre-flight gate |
+| **Load** | ramping-vus | 0 → 50 VUs over 90 s, hold 5 min, ramp down | 6.5 min | textbook k6 example |
+| **Stress** | ramping-vus | stepwise 0 → 50 → 100 → 200 → 400 VUs | ~5 min | find the breaking point |
+| **Spike** | ramping-vus | 0 → 800 VUs in 10 s, hold 30 s, ramp down | 80 s | Black-Friday scenario |
+| **Soak** | ramping-vus | 50 VUs for 1 hour after a 5 min warm-up | ~66 min | leaks, slow degradation |
+| **Anfragen** | shared-iterations | 10 VUs, 1 000 iterations | ends when done | reproduce request count across releases |
+| **Arrival-Rate** | constant-arrival-rate | 50 req/s for 2 min | 2 min | decouple RPS from response time |
+
+Hover any preset button to read its one-line description in the help
+text below the row. The descriptions summarise the trade-off so you
+can pick the right profile without reading the full executor docs:
+
+| Preset | Hover description |
+| --- | --- |
+| **Smoke** | 1 VU für 30 s — idealer CI-Pre-Flight-Check |
+| **Load** | Schrittweise auf 50 VUs, 5 min Plateau |
+| **Stress** | Stufenweise bis 400 VUs, findet den Knick |
+| **Spike** | Plötzlicher Sprung auf 800 VUs, 30 s Plateau |
+| **Soak** | 50 VUs über eine Stunde, deckt Leaks auf |
+| **Anfragen** | 1 000 Anfragen so schnell wie möglich — vergleicht Releases mit fester Request-Anzahl |
+| **Arrival-Rate** | 50 Anfragen/s unabhängig von der Antwortzeit |
+
+### 8.4 Editing ramping stages
+
+Click **+ Stage hinzufügen** to append a stage to the end of the list.
+Each stage row has:
+
+- **Ziel-VUs** — the VU count k6 should reach at the *end* of the
+  stage. k6 ramps linearly from the previous stage's target during
+  the stage's duration.
+- **Dauer (s)** — how long the stage lasts. Minimum 1 s, maximum 3 600 s.
+
+Click **×** on the right of a row to remove that stage. Removing is
+immediate; the remaining stages are renumbered automatically.
+
+You can change the order of stages by editing them in sequence: k6 walks
+through them in the order shown. **Plateaus are allowed** (two
+consecutive stages with the same target); the validator will not
+reject them.
+
+### 8.5 Validation and limits
+
+The validator runs on every change and rejects profiles that would
+otherwise crash k6 or melt your target:
+
+| Executor | Field | Range |
+| --- | --- | --- |
+| `constant-vus` | Virtual Users | 1 – 30 000 |
+| `constant-vus` | Duration | 1 – 3 600 s |
+| `shared-iterations` | Virtual Users | 1 – 30 000 |
+| `shared-iterations` | Iterations | 1 – 1 000 000 |
+| `ramping-vus` | Start-VUs | 0 – 30 000 |
+| `ramping-vus` | Stage Ziel-VUs | 0 – 30 000 |
+| `ramping-vus` | Stage Dauer | 1 – 3 600 s |
+| `ramping-vus` | Stages | 1 – ∞ |
+| `constant-arrival-rate` | Rate | 1 – 100 000 / timeUnit |
+| `constant-arrival-rate` | timeUnit | 1 – 60 s |
+| `constant-arrival-rate` | Duration | 1 – 3 600 s |
+| `constant-arrival-rate` | preAllocatedVUs | 1 – 30 000 |
+| `constant-arrival-rate` | maxVUs | preAllocatedVUs … 30 000 |
+
+Invalid values show an inline error below the field and the **Start**
+button stays disabled. Validation runs in the browser *and* on the
+backend; the backend is the last line of defence so a misconfigured
+profile cannot reach k6.
 
 ---
 
@@ -542,16 +725,60 @@ The printable report contains:
    checks, average / p95 latency, data received / sent.
 3. **Thresholds** — every k6 threshold, coloured green for passed and
    red for failed, with the actual measured value.
-4. **Run configuration** — base URL, VUs, duration.
+4. **Run configuration** — base URL, lastprofil summary, planned runtime.
 5. **API configuration** — every selected operation with its actual
    parameters, body, and Bearer token as sent to the target.
-6. **Detailed metrics** — extended k6 metrics tables broken down per
+6. **Lastprofil & Lastverlauf** — the **ramp-grafik** showing the
+   scheduled load (Soll) and the actually achieved load (Ist) over
+   time. See [Section 10.3](#103-the-ramp-grafik-load-chart) for details.
+7. **Stages im Detail** — for ramping-vus profiles, a table that
+   describes each stage in plain German ("+50 VUs (Rampe auf 50)",
+   "Plateau", "−800 VUs (Rampe auf 0)").
+8. **Statuscode-Verteilung** — exact HTTP status codes per endpoint
+   (`200`, `429`, `5xx`, `err`, `other`).
+9. **Detailed metrics** — extended k6 metrics tables broken down per
    endpoint and per status code.
-7. **Generated script** — the exact k6 script that was executed.
-8. **Console output and raw JSON** — the same blocks as in the main
-   UI, formatted for print.
+10. **Generated script** — the exact k6 script that was executed.
+11. **Console output and raw JSON** — the same blocks as in the main
+    UI, formatted for print.
 
-### 10.3 Printing and exporting to PDF
+### 10.3 The ramp-grafik (load chart)
+
+When the test completes, the report shows a **ramp-grafik** that
+visualises the load over time. Two lines are drawn:
+
+- **Soll (planned)** — purple, solid. Computed deterministically from
+  the configured load profile. For a ramping-vus run, the line is a
+  staircase: a flat segment for each stage's plateau, with linear ramps
+  between consecutive stages.
+- **Ist (actual)** — orange, dashed. Drawn from k6's per-second
+  VU-count measurements streamed to InfluxDB during the run.
+
+Three callout cards summarise the gap:
+
+| Callout | Meaning |
+| --- | --- |
+| **Geplante Spitze** | Peak target VUs from the stages (or `virtualUsers` for constant-vus) |
+| **Tatsächliche Spitze** | Highest measured VU count during the run |
+| **Datenpunkte** | Number of per-second samples written to InfluxDB |
+
+Use the gap between Geplant and Tatsächlich to see whether your target
+could absorb the load you intended. A large gap (e.g. planned 800 VUs,
+actual 600 VUs) means the target was saturated before k6 reached the
+desired concurrency — that is the kind of information a constant-VUs
+test cannot give you, because a saturating target looks identical to a
+slow target at constant concurrency.
+
+**Requirements:** the ramp-grafik requires the InfluxDB container from
+[Section 3.2](#32-docker-with-influxdb--grafana-time-series) to be
+running. Without InfluxDB, the report shows only the Soll line; the
+Ist data is simply not available. See
+[Section 13.3](#133-ramp-grafik-shows-only-the-soll-line) for
+troubleshooting.
+
+### 10.4 Printing and exporting to PDF
+
+### 10.4 Printing and exporting to PDF
 
 The report is laid out in a print-friendly A4 style sheet. Open the
 browser print dialog (`Ctrl/⌘ + P`) and pick **Save as PDF** as the
@@ -644,6 +871,24 @@ local iteration fast and safe.
 # open http://localhost:8286 in a browser
 ```
 
+### 12.3 InfluxDB-UI and Grafana
+
+When you started with `docker compose up` (rather than `docker run`),
+two additional containers are running:
+
+- **InfluxDB UI** at http://localhost:8086 — login with
+  `admin` / `lasttest-admin-password`. The default bucket is `k6`.
+  Useful to spot-check whether k6 actually wrote data during a run
+  (you should see measurements `vus`, `http_reqs`, `http_req_duration`).
+- **Grafana** at http://localhost:3000 — anonymous viewer mode is
+  enabled; log in with `admin` / `admin` to make changes. The InfluxDB
+  data source is pre-configured, so you can build queries and dashboards
+  without re-entering credentials.
+
+These services are intended for **local development**. For a
+production deployment you would isolate them behind authentication
+and use a managed time-series database.
+
 ---
 
 ## 13. Troubleshooting
@@ -660,6 +905,8 @@ local iteration fast and safe.
 | Bearer-authenticated requests come back as `401` | The placeholder misled you into including the `Bearer ` prefix | Strip the prefix; lasttest adds it for you |
 | CORS error in the browser console when calling the target API | The target does not allow cross-origin requests from the frontend | lasttest runs the test from the backend, not the browser — open the report and check the k6 output; the CORS error is from the browser, not from the test |
 | `PKIX path building failed: unable to find valid certification path to requested target` | The target API uses a TLS certificate that is not trusted by the JVM (self-signed, internal CA, missing intermediate) | See [Section 13.1 — Trusting custom TLS certificates](#131-trusting-custom-tls-certificates) |
+| The ramp-grafik shows only the Soll line, no Ist line | InfluxDB is not reachable, or no data was written during the run | See [Section 13.2](#132-influxdb-is-not-reachable) and [13.3](#133-ramp-grafik-shows-only-the-soll-line) |
+| k6 run logs contain `could not create the 'influxdb' output: unknown query parameter: org` | The InfluxDB image version is 2.x; k6 v2 only supports InfluxDB v1 | Use the bundled Compose file (it ships with InfluxDB 1.11) |
 
 ### 13.1 Trusting custom TLS certificates
 
@@ -700,6 +947,36 @@ keytool -importcert -alias staging -file staging-ca.pem \
 
 The variables only have to be set in the environment that runs the lasttest backend (Docker container, systemd unit, terminal, …). Restart lasttest after changing them.
 
+### 13.2 InfluxDB is not reachable
+
+The backend probes InfluxDB at startup via `LASTTEST_INFLUXDB_URL/health`
+and the run's lasttest container logs will show a warning if it is
+unreachable. Common causes and their fixes:
+
+| Cause | Fix |
+| --- | --- |
+| InfluxDB container not started | `docker compose up -d influxdb` |
+| Wrong URL | Set `LASTTEST_INFLUXDB_URL=http://influxdb:8086` (must match the Docker network name) |
+| Wrong credentials | Set `LASTTEST_INFLUXDB_USER` and `LASTTEST_INFLUXDB_PASSWORD` to match the `docker-compose.yml` defaults (`k6-writer` / `lasttest-writer-password`) |
+| You use the plain `docker run` command, not Compose | InfluxDB is **not** started by `docker run`; either switch to Compose or run InfluxDB separately and point `LASTTEST_INFLUXDB_URL` at it |
+
+If InfluxDB is unreachable, lasttest still works — you just lose the
+Ist line in the ramp-grafik.
+
+### 13.3 Ramp-grafik shows only the Soll line
+
+Two reasons are common:
+
+1. **InfluxDB was unreachable** (see above). The backend returns an
+   empty time-series array; the SVG renderer draws only the Soll line
+   and the "Tatsächliche Spitze" callout shows "–".
+2. **The run was very short** (< 2 s). k6 may not have written enough
+   per-second samples to InfluxDB yet. Wait for the next run.
+
+If neither applies, check the k6 container's logs for
+`could not write stats, ...` warnings — they indicate the k6 → InfluxDB
+write path is broken.
+
 ---
 
 ## 14. Glossary
@@ -710,6 +987,12 @@ The variables only have to be set in the environment that runs the lasttest back
 | **Endpoint card** | The collapsible UI block that represents one operation. |
 | **VU (Virtual User)** | A concurrent loop in k6 that issues requests as fast as the script allows. |
 | **Iteration** | One full execution of the script by one VU. |
+| **Executor** | The k6 strategy for issuing requests. lasttest exposes four: `constant-vus`, `shared-iterations`, `ramping-vus`, `constant-arrival-rate`. |
+| **Stage** | In a Ramping-VUs profile, one row of the stages table. Each stage has a target VU count and a duration; k6 ramps linearly between consecutive stages. |
+| **Soll / Ist** | "Planned / Actual" — the ramp-grafik compares the scheduled load profile (Soll, deterministic) with the measured per-second VU counts from k6 (Ist, streamed via InfluxDB). |
+| **InfluxDB** | The optional time-series database that lasttest ships with. Stores per-second k6 metrics so the ramp-grafik can show the Ist line. |
+| **Grafana** | The optional dashboard UI on top of InfluxDB, included in the Compose file for ad-hoc exploration. |
+| **Preset** | One-click load profile in the editor: Smoke, Load, Stress, Spike, Soak, Arrival-Rate. |
 | **Threshold** | A k6 expression (e.g. `http_req_duration{p95:200}`) that the script evaluates at the end; pass / fail is shown in the report. |
 | **Run ID** | UUID assigned to each test run; used in deep-links and for downloading the script. |
 | **Spec** | The OpenAPI or Swagger document that describes the target API. |
