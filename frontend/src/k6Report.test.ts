@@ -278,16 +278,16 @@ test('activeStatusCodes returns only the fallback columns when nothing fired', (
 })
 
 
-// ---- Zusammenfuehrung der Konflikt-Seiten --------------------------------
+// ---- Merge of the conflict pages -------------------------------------------
 //
-// HEAD (Feature) und ffe00f7ec (Main) bleiben beide erhalten:
+// HEAD (Feature) and ffe00f7ec (Main) are both retained:
 //   HEAD       - formatDuration* / runElapsedSeconds / runRemainingSeconds /
 //                summariseFailure (s) / extractErrorLine
 //   ffe00f7ec  - summarizeFailure (z) / buildMetricRow
 //
-// summarizeFailure (z) wird in App.tsx:380 produktiv aufgerufen,
-// buildMetricRow in App.tsx:382. Beide brauchen Tests, sonst scheitert
-// die 100-Prozent-Coverage-Vorgabe in package.json:scripts.test:coverage.
+// summariseFailure (z) is called in App.tsx:380,
+// buildMetricRow in App.tsx:382. Both need tests, otherwise the
+// 100% coverage requirement in package.json:scripts.test:coverage fails.
 
 // ---- formatDurationSeconds / formatDurationHuman ----
 
@@ -369,8 +369,8 @@ test('runElapsedSeconds treats invalid timestamps as undefined', () => {
 })
 
 test('runElapsedSeconds clamps negative deltas to zero', () => {
-  // Server clock skew can make finishedAt < startedAt; wir wollen
-  // keine negative oder NaN-Anzeige.
+  // Server clock skew can make finishedAt < startedAt; we want
+  // no negative or NaN display.
   const started = '2026-01-01T00:00:10Z'
   const finished = '2026-01-01T00:00:05Z'
   equal(runElapsedSeconds({ id: 'r', status: 'COMPLETED', createdAt: started, startedAt: started, finishedAt: finished }, new Date(started).getTime() + 1_000), 0)
@@ -385,9 +385,9 @@ test('runRemainingSeconds returns undefined without a configuration', () => {
 })
 
 test('runRemainingSeconds returns undefined when the run has not started yet', () => {
-  // Konfiguration ist da, aber startedAt fehlt (z. B. QUEUED).
-  // profileTotalSeconds liefert einen Wert, aber runElapsedSeconds
-  // liefert undefined, daher müssen wir auch hier undefined liefern.
+  // Configuration is present but startedAt is missing (e.g. QUEUED).
+  // profileTotalSeconds returns a value, but runElapsedSeconds returns
+  // undefined, so we must also return undefined here.
   const now = 1_700_000_000_000
   const run: TestRun = {
     id: 'r',
@@ -463,8 +463,8 @@ test('summariseFailure detects DNS failures with a "Temporary failure in name re
 })
 
 test('summariseFailure detects DNS failures with a port-prefixed dial tcp string', () => {
-  // Das Fragezeichen-Optional in `(?::\d+)?` des DNS-Patterns wird
-  // genutzt, wenn k6 einen Port in den Lookup-Pfad einbettet.
+  // The question-mark optional in `(?::\d+)?` of the DNS pattern is
+  // used when k6 embeds a port into the lookup path.
   const reason = summariseFailure('dial tcp:443: lookup api.example.com: no such host')
   ok(reason)
   equal(reason!.kind, 'dns')
@@ -534,27 +534,27 @@ test('summariseFailure detects missing k6 process errors', () => {
 })
 
 test('summariseFailure detects k6 as a missing command in a shell error', () => {
-  // Deckt den `k6: command not found`-Pfad und die Variante ohne
-  // umschließende Anführungszeichen ab.
+  // Covers the `k6: command not found` path and the variant without
+  // surrounding quotes.
   const reason = summariseFailure('/bin/sh: k6: command not found')
   ok(reason)
   equal(reason!.kind, 'process')
 })
 
 test('summariseFailure detects a "no such file or directory" error from the OS', () => {
-  // Plain OS-Fehler ohne explizite Nennung von k6 — der Fallback im
-  // process-Pattern schlägt trotzdem an, weil `no such file or
-  // directory` Teil der Fehlermeldung ist.
+  // Plain OS error without explicitly mentioning k6 — the fallback in
+  // the process pattern still hits because `no such file or
+  // directory` is part of the error message.
   const reason = summariseFailure('fork/exec /usr/local/bin/k6: no such file or directory')
   ok(reason)
   equal(reason!.kind, 'process')
 })
 
 test('summariseFailure detects connection-refused against a hostname without explicit IP', () => {
-  // Das dritte Alternativ-Pattern `[^:]+` greift, wenn weder eine IPv4
-  // noch eine IPv6-Adresse, sondern ein Hostname ohne Doppelpunkt
-  // angegeben ist (z. B. wenn k6 die Verbindung gegen einen
-  // DNS-Namen aufbaut, der aber über /etc/hosts auf einen Port zeigt).
+  // The third alternative pattern `[^:]+` matches when neither an
+  // IPv4 nor an IPv6 address is given, but a hostname without a colon
+  // (e.g. when k6 dials a DNS name that points to a port via
+  // /etc/hosts).
   const reason = summariseFailure('dial tcp myservice:8080: connect: connection refused')
   ok(reason)
   equal(reason!.kind, 'connection-refused')
@@ -565,9 +565,9 @@ test('summariseFailure returns an unknown reason for unmatched k6 output', () =>
   const reason = summariseFailure('first noise line\nSomething completely unexpected\nhappened on the line below')
   ok(reason)
   equal(reason!.kind, 'unknown')
-  // Wir scannen vom Ende her, daher landen die letzten Zeilen im
-  // Detail — die ersten Zeilen sind oft Time-Series-Output-Fehler,
-  // die nicht die eigentliche Fehlerursache sind.
+  // We scan from the end, so the last lines end up in the
+  // detail — the first lines are often time-series output errors,
+  // which are not the actual cause of the failure.
   ok(reason!.detail.includes('happened on the line below'))
 })
 
@@ -575,30 +575,30 @@ test('summariseFailure strips the ERRO[] prefix in the unknown fallback', () => 
   const reason = summariseFailure('ERRO[0002] Something completely unexpected\nERRO[0003] actual last error')
   ok(reason)
   equal(reason!.kind, 'unknown')
-  // Die letzte Zeile gewinnt: ERRO[0003] wird abgeschnitten, damit
-  // die UI den eigentlichen Text ohne k6-Logging-Rauschen anzeigt.
+  // The last line wins: ERRO[0003] is truncated so the UI shows
+  // the actual text without k6 logging noise.
   equal(reason!.detail, 'actual last error')
 })
 
 test('summariseFailure prefers the first matching pattern and ignores ERRO[] prefixes', () => {
   const reason = summariseFailure('ERRO[0001] GoError: dial tcp example.com:80: i/o timeout\nERRO[0001] http response error: status code 503')
   ok(reason)
-  // Beide Muster würden matchen, aber time-out steht im Pattern-Array
-  // vor http — also wird der time-out-Label gewinnen.
+  // Both patterns would match, but time-out comes before http in
+  // the pattern array — so the time-out label wins.
   equal(reason!.kind, 'connection-timeout')
 })
 
-// ---- extractErrorLine (interne Helper, exportiert für Tests) ----
+// ---- extractErrorLine (internal helper, exported for tests) ----
 
 test('extractErrorLine returns the last non-empty line and strips the ERRO[] prefix', () => {
-  // Wir scannen vom Ende her, damit der finale Fehler (nicht ein
-  // zwischengeschobener Time-Series-Output) für die UI gewinnt.
+  // We scan from the end so the final error (not an interleaved
+  // time-series output) wins for the UI.
   equal(extractErrorLine('ERRO[0001] dial tcp: lookup x: no such host'), 'dial tcp: lookup x: no such host')
 })
 
 test('extractErrorLine prefers the meaningful line at the end of the buffer', () => {
-  // Wenn am Anfang InfluxDB-Output-Fehler stehen und am Ende der
-  // eigentliche Test-Request-Fehler, muss letzterer extrahiert werden.
+  // When InfluxDB output errors appear at the beginning and the
+  // actual test-request error at the end, the latter must be extracted.
   equal(
     extractErrorLine('ERRO[0000] lookup influxdb: no such host\ntime="…" level=warning msg="Request Failed" error="Get \\"http://127.0.0.1:1/\\": dial tcp 127.0.0.1:1: connect: connection refused"'),
     'time="…" level=warning msg="Request Failed" error="Get \\"http://127.0.0.1:1/\\": dial tcp 127.0.0.1:1: connect: connection refused"',
@@ -606,8 +606,8 @@ test('extractErrorLine prefers the meaningful line at the end of the buffer', ()
 })
 
 test('extractErrorLine falls back to the trimmed text when every line is just an ERRO[] marker', () => {
-  // Defensive Pfad: jeder Strip liefert eine leere Zeile. Wir nehmen
-  // dann die letzte Zeile, die noch Inhalt hat.
+  // Defensive path: each strip yields an empty line. We then take
+  // the last line that still has content.
   equal(extractErrorLine('ERRO[0000]\nERRO[0001]\n   '), 'ERRO[0000]\nERRO[0001]')
 })
 

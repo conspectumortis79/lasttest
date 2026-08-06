@@ -3,31 +3,29 @@ package de.lasttest.config
 import org.springframework.boot.context.properties.ConfigurationProperties
 
 /**
- * Konfiguration für den InfluxDB-1.x-Endpunkt, an den k6 seinen
- * Output streamt. Alle Felder haben Defaults, die zum
- * docker-compose-Setup passen, sodass ein frisch geklontes Projekt
- * ohne weitere Anpassung funktioniert. Wird per
- * `application.properties` oder `LASTTEST_INFLUXDB_*`-Env-Variablen
- * überschrieben.
+ * Configuration for the InfluxDB 1.x endpoint that k6 streams its
+ * output to. All fields have defaults matching the docker-compose
+ * setup, so a freshly cloned project works without further changes.
+ * Override via `application.properties` or `LASTTEST_INFLUXDB_*`
+ * environment variables.
  */
 @ConfigurationProperties(prefix = "lasttest.influxdb")
 data class InfluxDbProperties(
-    /** Basis-URL von InfluxDB. */
+    /** Base URL of InfluxDB. */
     val url: String = "http://influxdb:8086",
     /**
-     * Datenbank-Name. Bei InfluxDB-v1 heißt das Konzept "Database",
-     * nicht "Bucket" — wir behalten den Property-Namen aus
-     * historischen Gründen.
+     * Database name. In InfluxDB v1 the concept is called "Database",
+     * not "Bucket" — we keep the property name for historical reasons.
      */
     val bucket: String = "k6",
-    /** HTTP-Basic-Auth Username (in docker-compose.yml: `k6-writer`). */
+    /** HTTP Basic Auth username (in docker-compose.yml: `k6-writer`). */
     val user: String = "k6-writer",
-    /** HTTP-Basic-Auth Passwort. */
+    /** HTTP Basic Auth password. */
     val token: String = "lasttest-writer-password",
     /**
-     * Wenn false, schreibt k6 NICHT nach InfluxDB und das Backend
-     * versucht nicht, eine Ist-Kurve zu laden. Nützlich für CI-Tests
-     * und Minimal-Setups ohne InfluxDB-Container.
+     * When false, k6 does NOT write to InfluxDB and the backend does
+     * not try to load a measured curve. Useful for CI tests and
+     * minimal setups without an InfluxDB container.
      */
     val enabled: Boolean = true,
 )

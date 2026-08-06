@@ -196,9 +196,9 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 .run-summary-card strong.success { color: #55e6c1; }
 .run-summary-card small { color: #93a2b8; font-size: .76rem; }
 
-/* Pass/Fail-Varianten der Summary-Card. Wir färben die ganze Karte
-   (nicht nur den Wert), damit man auf einen Blick erkennt, welche
-   Kennzahl den Threshold gehalten oder gerissen hat. */
+/* Pass/Fail variants of the summary card. We colour the whole card
+   (not just the value) so that at a glance you can tell which metric
+   met or breached the threshold. */
 .run-summary-card.is-pass {
   border-color: #2d6a4f;
   background: #112219;
@@ -351,11 +351,11 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 .report-btn:hover { background: #2a2660; color: #fff; }
 .report-btn::after { content: "↗"; font-weight: 500; }
 
-/* ---- Karten-Header mit Run-ID + Report-Button ---------------------------- */
-/* Zwei Zeilen: oben Step + Titel + Run-ID (rechtsbündig), darunter
-   der Report-Button rechtsbündig. Dadurch wandert der Button nicht
-   beim Auf-/Zuklappen der Details, und die Details bekommen unten
-   die volle Kartenbreite. */
+/* ---- Card header with run ID + report button ---------------------------- */
+/* Two rows: top has step + title + run ID (right-aligned), below
+   the report button right-aligned. This way the button does not
+   jump when the details are expanded/collapsed, and the details
+   get the full card width at the bottom. */
 .result-header {
   display: flex;
   flex-direction: column;
@@ -364,11 +364,11 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   margin-bottom: 1.1rem;
 }
 .result-header-top {
-  /* Volle Kartenbreite einnehmen, damit der Step-Badge ganz links
-     und die Run-ID ganz rechts (margin-left: auto) liegen — ohne
-     diese Breite schrumpft der Flex-Container auf den Inhalt und
-     die Run-ID würde rechts am Inhalt-Ende statt am Karten-Rand
-     kleben. */
+  /* Take the full card width so the step badge sits on the far left
+     and the run ID sits on the far right (margin-left: auto) —
+     without this width the flex container would shrink to its
+     content and the run ID would stick to the right end of the
+     content rather than the card edge. */
   display: flex;
   align-items: center;
   gap: .75rem;
@@ -388,14 +388,15 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   align-self: stretch;
 }
 .result-header h2 {
-  /* Im Flex-Header übernimmt `gap` den Abstand; das alte margin-left
-     für den absolut positionierten Step-Badge brauchen wir hier nicht. */
+  /* In the flex header `gap` takes over the spacing; the old
+     margin-left for the absolutely positioned step badge is no
+     longer needed here. */
   margin: 0;
   flex-shrink: 0;
 }
 .result-header .step {
-  /* Innerhalb des Flex-Headers soll der Step-Badge Teil des
-     Layouts sein, nicht absolut positioniert über dem Titel. */
+  /* Inside the flex header the step badge should be part of the
+     layout, not absolutely positioned over the title. */
   position: static;
   top: auto;
   flex-shrink: 0;
@@ -611,9 +612,9 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .preset-button { padding: .4rem .8rem; border: 1px solid #3a4d6b; border-radius: 8px; background: #1a2638; color: #dbe5f3; font-size: .78rem; font-weight: 700; cursor: pointer; }
 .preset-button:hover { background: #243450; border-color: #7d63ff; color: #fff; }
 .preset-button.hovered { background: #7d63ff; border-color: #9a5df3; color: #fff; box-shadow: 0 6px 18px #7d63ff44; }
-/* Zuletzt geklickte Schnellauswahl behält den Hover-Look, auch wenn
-   die Maus den Button wieder verlassen hat. Eine andere Schnellauswahl
-   zu klicken verschiebt die Markierung. */
+/* The last clicked preset keeps the hover look even after the
+   mouse has left the button. Clicking another preset shifts the
+   highlight. */
 .preset-button.selected { background: #7d63ff; border-color: #9a5df3; color: #fff; box-shadow: 0 6px 18px #7d63ff44; }
 .preset-button:disabled { opacity: .5; cursor: wait; }
 .preset-help { color: #93a2b8; font-size: .78rem; }

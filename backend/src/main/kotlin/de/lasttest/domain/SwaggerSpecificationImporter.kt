@@ -68,9 +68,9 @@ class SwaggerSpecificationImporter : SpecificationImporter {
                                         ?.firstOrNull()
                                         ?.value
                                         ?.let(::normalizeExample)
-                                    ?: media.schema?.let(::exampleFor)
+                                    ?: media.schema?.let { dereference(it, api)?.let(::exampleFor) }
                             },
-                        requestBodySchema = primaryMedia?.schema?.let(::toRequestBodySchema),
+                        requestBodySchema = primaryMedia?.schema?.let { dereference(it, api)?.let(::toRequestBodySchema) },
                         hasRequestBody = operation.requestBody != null,
                         requestBodyRequired = operation.requestBody?.required == true,
                         bearerAuth = usesBearerAuthentication(operation.security, api.security, bearerSecuritySchemes),
@@ -120,6 +120,38 @@ class SwaggerSpecificationImporter : SpecificationImporter {
         pathParameters: List<Parameter>?,
         operationParameters: List<Parameter>?,
     ): List<Parameter> = (pathParameters.orEmpty() + operationParameters.orEmpty()).distinctBy { "${it.`in`}:${it.name}" }
+
+    /**
+     * Resolve a schema that is only a `$ref` placeholder (Swagger does
+     * this for `application/json` bodies when the spec uses
+     * `$ref: '#/components/schemas/Foo'`) to its concrete definition
+     * under `components.schemas`. Without this step
+     * `toParameterSchema` / `toRequestBodySchema` see a schema with
+     * `type == null` and return null, and the frontend has nothing to
+     * validate the request body against.
+     *
+     * Circular references are broken at the first revisit; the original
+     * schema is returned unchanged in that case.
+     */
+    internal fun dereference(
+        schema: Schema<*>?,
+        api: OpenAPI,
+        seen: Set<String> = emptySet(),
+    ): Schema<*>? {
+        if (schema == null) return null
+        val ref = schema.`$ref` ?: return schema
+        // Swagger uses local refs like "#/components/schemas/CreateProduct".
+        // We only handle those — external refs (e.g. other files or URLs)
+        // are out of scope for the demo / MVP.
+        val localName = ref.substringAfterLast('/')
+        if (localName in seen) return null
+        // If the ref points to a component that doesn't exist (or to
+        // a cycle we'd loop on), return null so the caller can detect
+        // the missing shape. Returning the unresolvable schema itself
+        // would force every downstream call to re-validate it.
+        val resolved = api.components?.schemas?.get(localName) ?: return null
+        return dereference(resolved, api, seen + localName)
+    }
 
     internal fun parserProblems(
         openApiProblems: List<String>?,

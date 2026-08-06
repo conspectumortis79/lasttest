@@ -42,14 +42,14 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
   const [generatedScript, setGeneratedScript] = useState<string>()
   const [scriptError, setScriptError] = useState('')
   const [error, setError] = useState('')
-  // Time-Series aus InfluxDB. Wird nur einmalig geladen, sobald der Run
-  // COMPLETED ist. EMPTY_TIME_SERIES bedeutet „noch nicht geladen oder
-  // nicht verfügbar" — die RampCard rendert dann nur die Soll-Linie.
+  // Time-series from InfluxDB. Only loaded once, as soon as the run
+  // is COMPLETED. EMPTY_TIME_SERIES means "not yet loaded or not
+  // available" — the RampCard then renders only the target line.
   const [timeSeries, setTimeSeries] = useState<TimeSeriesResponse>(EMPTY_TIME_SERIES)
   const [timeSeriesLoaded, setTimeSeriesLoaded] = useState(false)
-  // Live-Tick für die Laufzeit-Anzeige bei QUEUED/RUNNING. Liefert
-  // einen millisekunden-präzisen Zeitstempel an <RunStatusView>, damit
-  // „Läuft seit" / „Noch" ohne Polling aktualisieren.
+  // Live tick for the runtime display during QUEUED/RUNNING. Provides
+  // a millisecond-precise timestamp to <RunStatusView> so that
+  // "Running since" / "Remaining" update without polling.
   const runNow = useRunClock(run)
 
   useEffect(() => {
@@ -104,9 +104,9 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
     return () => { cancelled = true }
   }, [runId])
 
-  // Polling der Time-Series: einmalig nach COMPLETED. Frühere Status
-  // (QUEUED/RUNNING) liefern ohnehin keine sinnvollen Daten aus
-  // InfluxDB; FAILED-Runs sind uninteressant für die Last-Kurve.
+  // Polling of the time series: once after COMPLETED. Earlier
+  // statuses (QUEUED/RUNNING) do not yield useful data from InfluxDB
+  // anyway; FAILED runs are uninteresting for the load curve.
   useEffect(() => {
     if (!run) return
     if (run.status !== 'COMPLETED') return
@@ -513,11 +513,11 @@ function formatJson(raw: string): string {
   }
 }
 
-// ---- Lastprofil & Ramp-Grafik ---------------------------------------------
+// ---- Load profile & Ramp chart -------------------------------------------
 //
-// Soll-Linie (lila) wird deterministisch aus den Stages berechnet.
-// Ist-Linie (orange) kommt aus dem InfluxDB-Stream und ist nur sichtbar,
-// wenn das Backend Time-Series liefern konnte.
+// The target line (purple) is computed deterministically from the stages.
+// The actual line (orange) comes from the InfluxDB stream and is only
+// visible when the backend was able to deliver time-series data.
 
 function RampSection({ profile, timeSeries }: { profile: ReportLoadProfile, timeSeries: TimeSeriesResponse }) {
   return <section className="report-section">
@@ -576,11 +576,11 @@ function RampCard({ profile, timeSeries }: { profile: ReportLoadProfile, timeSer
 }
 
 function RampSvg({ plot, sollPath, istPath, hasIst }: { plot: RampPlot, sollPath: string, istPath: string, hasIst: boolean }) {
-  // Wir rendern das SVG in einem festen viewBox und lassen den Browser
-  // es per CSS auf 100 % Breite skalieren. Y-Ticks (5 Stück) und
-  // X-Ticks (5 Stück) werden automatisch beschriftet; die exakte
-  // Skala ist unkritisch, weil der Renderer nur eine qualitative
-  // Visualisierung liefert.
+  // We render the SVG in a fixed viewBox and let the browser scale
+  // it to 100% width via CSS. Y-ticks (5 pieces) and X-ticks
+  // (5 pieces) are labelled automatically; the exact scale is not
+  // critical because the renderer only provides a qualitative
+  // visualisation.
   const top = 20
   const bottom = plot.height
   const left = 0

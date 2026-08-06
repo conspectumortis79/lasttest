@@ -228,6 +228,14 @@ npm install
 npm run dev
 ```
 
+> **Note**: `./gradlew bootRun` is a blocking task — Gradle stays in
+> the foreground and keeps showing a progress bar (`EXECUTING [Ns]`)
+> until you press `Ctrl+C`, even though the Spring Boot app is already
+> up. As soon as you see `Started LasttestApplicationKt in N.N seconds`
+> in the log, the API is reachable on `http://localhost:8286/`. Open
+> the dev-UI URL below in your browser while the Gradle process keeps
+> running.
+
 In dev mode two URLs are exposed; they are **not** interchangeable:
 
 | URL | What it serves |

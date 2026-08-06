@@ -92,12 +92,12 @@ tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
     includeProductionLogic()
     violationRules {
-        // JaCoCo-Regel wird auf das gefilterte Set angewendet, nicht
-        // auf den ganzen "bundle lasttest". Damit bezieht sich die
-        // 100%-Schwelle auf die produktions-relevanten Klassen in
-        // `coverageIncludes` (siehe oben). Single Source of Truth:
-        // DTOs, Spring-Bootstrap und Hilfsklassen ohne Geschäftslogik
-        // sind ausgeschlossen, damit sie die Schwelle nicht verwässern.
+        // JaCoCo rule is applied to the filtered set, not to the whole
+        // "bundle lasttest". This makes the 100% threshold refer to the
+        // production-relevant classes listed in `coverageIncludes`
+        // (see above). Single source of truth: DTOs, the Spring bootstrap,
+        // and helper classes with no business logic are excluded so they
+        // cannot dilute the threshold.
         rule {
             element = "BUNDLE"
             includes = coverageIncludes

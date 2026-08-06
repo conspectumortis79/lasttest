@@ -91,9 +91,9 @@ class LocalK6TestRunService(
         requireNotNull(vus) { "Es wurde weder loadProfile noch das legacy-Tripel (virtualUsers, durationSeconds) übergeben." }
         val duration = request.durationSeconds
         requireNotNull(duration) { "Es wurde weder loadProfile noch das legacy-Tripel (virtualUsers, durationSeconds) übergeben." }
-        // Explizite if/else statt Elvis, damit beide Branches im
-        // Coverage-Report als getrennte Pfade gezählt werden. Wenn
-        // useIterations null ist, fällt es auf false zurück.
+        // Explicit if/else instead of Elvis so that both branches are
+        // counted as separate paths in the coverage report. If
+        // useIterations is null, it falls back to false.
         val useIterations = request.useIterations
         return if (useIterations != null && useIterations) {
             LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = vus, iterations = vus)
@@ -182,10 +182,10 @@ class LocalK6TestRunService(
                     finishedAt = Instant.now().toString(),
                     exitCode = exitCode,
                     summary = summary,
-                    // k6-Konsolenausgabe wird unabhängig vom Status
-                    // gespeichert, damit die UI sie auch im Erfolgsfall
-                    // anzeigen kann. `error` bleibt die Fehlermeldung
-                    // für strukturierte Analysen (siehe RunFailure).
+                    // k6 console output is persisted regardless of status
+                    // so the UI can show it on success as well. `error`
+                    // remains the failure message for structured analysis
+                    // (see RunFailure).
                     consoleOutput = console,
                     error = if (succeeded) null else console,
                 )
@@ -197,14 +197,13 @@ class LocalK6TestRunService(
     }
 
     /**
-     * Baut den `k6 run`-Befehl zusammen. Wenn InfluxDB aktiviert ist,
-     * wird `--out influxdb=...` angehängt, damit k6 jeden Datenpunkt
-     * live in die Time-Series-DB schreibt. k6 v2.x unterstützt nur
-     * den klassischen InfluxDB-v1-Output (HTTP-Basic-Auth).
+     * Builds the `k6 run` command. When InfluxDB is enabled,
+     * `--out influxdb=...` is appended so that k6 writes every data
+     * point live to the time-series database. k6 v2.x only supports
+     * the classic InfluxDB v1 output (HTTP Basic Auth).
      *
-     * Das `run_id`-Tag wird in jedem Datenpunkt mitgeschrieben, damit
-     * parallele oder spätere Läufe beim Lesen sauber gefiltert werden
-     * können.
+     * The `run_id` tag is written into every data point so that
+     * parallel or later runs can be cleanly filtered when reading.
      */
     private fun buildK6Process(
         runId: String,

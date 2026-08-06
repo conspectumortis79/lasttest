@@ -21,10 +21,10 @@ export type ReportOperation = {
 // renderer — the report only reads the discriminator and the fields it
 // already knows about.
 //
-// Wir akzeptieren beide Schreibweisen für `type`: `RAMPING_VUS` (wie
-// vom Backend serialisiert) und `ramping-vus` (kebab-case, executor-
-// Name). Ein normalisierendes `type` unten sorgt dafür, dass alle
-// nachgelagerten Switch-Statements case-insensitiv arbeiten können.
+// We accept both spellings for `type`: `RAMPING_VUS` (as serialised
+// by the backend) and `ramping-vus` (kebab-case, executor name). A
+// normalising `type` below ensures that all downstream switch
+// statements can work case-insensitively.
 export type ReportLoadProfile = {
   type: 'ramping-vus' | 'RAMPING_VUS' | 'constant-vus' | 'CONSTANT_VUS' | 'shared-iterations' | 'SHARED_ITERATIONS' | 'constant-arrival-rate' | 'CONSTANT_ARRIVAL_RATE'
   virtualUsers?: number
@@ -58,11 +58,10 @@ export type TestRun = {
   configuration?: TestRunConfiguration
   summary?: { raw: string }
   /**
-   * Roher (gekürzter) k6-Output. Wird vom Backend sowohl im
-   * Erfolgsfall als auch im Fehlerfall befüllt, damit die UI den
-   * "k6-Konsolenausgabe"-Block immer anzeigen kann. `null`, wenn k6
-   * gar nicht gestartet werden konnte (dann steht die Diagnose in
-   * `error`).
+   * Raw (truncated) k6 output. Populated by the backend in both the
+   * success and failure cases so the UI can always show the
+   * "k6 console" block. `null` if k6 could not be started at all
+   * (the diagnosis is then in `error`).
    */
   consoleOutput?: string
   error?: string
@@ -86,9 +85,9 @@ export type FailureCategory =
 
 export type FailureSummary = {
   category: FailureCategory
-  // Short headline shown next to the status badge, e.g. "Ziel nicht erreichbar".
+  // Short headline shown next to the status badge, e.g. "Target unreachable".
   diagnosis: string
-  // Concrete value the user can act on, e.g. "Connection refused auf http://127.0.0.1:1".
+  // Concrete value the user can act on, e.g. "Connection refused on http://127.0.0.1:1".
   detail: string
   // Bullet points explaining the conclusion with concrete evidence drawn
   // from run.error and run.summary. Empty when there is nothing useful.
@@ -277,11 +276,11 @@ export function manualK6Command(configuration: TestRunConfiguration | undefined,
 // how long the k6 run was actually scheduled for. For constant-vus and
 // arrival-rate this is just the explicit duration; for shared-iterations
 // we return undefined because the test stops as soon as the last iteration
-// completes, which the user already sees via the "beendet am" timestamp.
+// completes, which the user already sees via the "completed at" timestamp.
 //
-// Wir normalisieren den `type` auf kebab-case, damit der Switch
-// case-insensitive funktioniert (`RAMPING_VUS` aus dem Backend wird
-// zu `ramping-vus`).
+// Normalises the `type` to kebab-case so the switch works
+// case-insensitively (`RAMPING_VUS` from the backend becomes
+// `ramping-vus`).
 function normalizedType(profile: ReportLoadProfile): string {
   return profile.type.toLowerCase().replace(/_/g, '-')
 }
@@ -319,20 +318,19 @@ export function profileSummary(profile: ReportLoadProfile): string {
   }
 }
 
-// ---- Laufzeit-Anzeige -----------------------------------------------------
+// ---- Runtime display -------------------------------------------------------
 //
-// Reine Helfer, die aus `startedAt`/`finishedAt` und dem Lastprofil die
-// für den Nutzer sichtbare Zeit berechnen. `now` ist ein optionaler
-// Parameter, damit Tests deterministisch laufen können — die UI übergibt
-// einen eigenen Tick-State, damit die Anzeige ohne Polling aktualisiert
-// wird.
+// Pure helpers that compute the user-visible time from
+// `startedAt`/`finishedAt` and the load profile. `now` is an optional
+// parameter so tests can run deterministically — the UI passes its
+// own tick state so the display updates without polling.
 
 const ZERO_SECONDS = 0
 const SECONDS_PER_MINUTE = 60
 const SECONDS_PER_HOUR = 3600
 
-// Sekunden als "MM:SS" oder "H:MM:SS" (z. B. "01:23", "1:02:03").
-// Negative oder NaN-Werte werden als "–" dargestellt.
+// Seconds as "MM:SS" or "H:MM:SS" (e.g. "01:23", "1:02:03").
+// Negative or NaN values render as "–".
 export function formatDurationSeconds(seconds: number | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '–'
   const total = Math.floor(seconds)
@@ -343,10 +341,10 @@ export function formatDurationSeconds(seconds: number | undefined): string {
   return `${pad(minutes)}:${pad(remainder)}`
 }
 
-// Sekunden als "X min Y s" / "Y s" / "H h M min S s". Für die
-// ausgeschriebene Form in Karten und Hinweistexten — kompakter als
-// "MM:SS" und leichter lesbar in längeren Texten. Segmente mit dem
-// Wert 0 werden übersprungen, damit "1 h 0 min 0 s" zu "1 h" wird.
+// Seconds as "X min Y s" / "Y s" / "H h M min S s". Used for the
+// long form in cards and hint texts — more compact than "MM:SS" and
+// easier to read in longer prose. Segments with value 0 are skipped
+// so that "1 h 0 min 0 s" becomes "1 h".
 export function formatDurationHuman(seconds: number | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '–'
   const total = Math.floor(seconds)
@@ -371,10 +369,10 @@ function parseTimestamp(value: string | undefined): number | undefined {
   return Number.isFinite(milliseconds) ? milliseconds : undefined
 }
 
-// Sekunden seit `startedAt`. Liefert `undefined`, solange der Run noch
-// nicht gestartet ist (z. B. QUEUED). `now` ist die Referenz (Default
-// Date.now()), wird per Parameter injiziert, damit Tests deterministisch
-// bleiben und der Hook in der UI einen eigenen Tick übergeben kann.
+// Seconds since `startedAt`. Returns `undefined` while the run has
+// not started yet (e.g. QUEUED). `now` is the reference (default
+// Date.now()), injected via parameter so tests stay deterministic
+// and the UI hook can pass in its own tick.
 export function runElapsedSeconds(run: TestRun, now: number = Date.now()): number | undefined {
   const started = parseTimestamp(run.startedAt)
   if (started == null) return undefined
@@ -382,11 +380,11 @@ export function runElapsedSeconds(run: TestRun, now: number = Date.now()): numbe
   return Math.max(ZERO_SECONDS, (finished - started) / 1000)
 }
 
-// Verbleibende Sekunden laut Lastprofil. Liefert `undefined`, wenn der
-// Run noch nicht läuft oder das Profil keine vorhersagbare Gesamtdauer
-// hat (z. B. shared-iterations). Während des Laufs wird gegen `now`
-// gerechnet, danach gegen `finishedAt`, damit nachgelagerte
-// Statusanzeigen nicht "negativ" werden.
+// Remaining seconds according to the load profile. Returns `undefined`
+// when the run has not started yet or the profile has no predictable
+// total duration (e.g. shared-iterations). While running, it is
+// computed against `now`; once finished, against `finishedAt`, so
+// downstream status displays never go negative.
 export function runRemainingSeconds(run: TestRun, now: number = Date.now()): number | undefined {
   if (!run.configuration) return undefined
   const total = profileTotalSeconds(run.configuration.loadProfile)
@@ -396,18 +394,16 @@ export function runRemainingSeconds(run: TestRun, now: number = Date.now()): num
   return Math.max(ZERO_SECONDS, total - elapsed)
 }
 
-// ---- Fehleranalyse ---------------------------------------------------------
+// ---- Failure analysis ------------------------------------------------------
 //
-// k6 schreibt in die Standardausgabe typische GoError-Meldungen, die
-// den eigentlichen Grund für einen fehlgeschlagenen Lauf enthalten.
-// Wir parsen die wichtigsten Muster und liefern eine typisierte
-// `FailureReason` zurück, damit die UI ein präzises Label und eine
-// gezielte Handlungsempfehlung anzeigen kann — statt nur die erste
-// (oft generische) Zeile zu zeigen.
+// k6 writes typical GoError messages to stdout that contain the
+// actual reason for a failed run. We parse the most important
+// patterns and return a typed `FailureReason` so the UI can show a
+// precise label and a targeted recommendation — instead of just the
+// first (often generic) line.
 //
-// Erweiterung: weitere Muster einfach in `matchFailurePattern` als
-// regulären Ausdruck mit `kind`, `buildSummary` und `buildDetail`
-// ergänzen.
+// To extend: add another pattern in `matchFailurePattern` as a
+// regular expression with `kind`, `buildSummary` and `buildDetail`.
 
 export type FailureKind =
   | 'dns'
@@ -443,9 +439,9 @@ type FailurePattern = {
   buildDetail: (match: RegExpMatchArray) => string
 }
 
-// Reihenfolge ist relevant: das erste matchende Muster gewinnt. Das
-// Skript- und HTTP-Muster sollten daher am Ende stehen, weil sie sehr
-// weit gefasst sind.
+// Order matters: the first matching pattern wins. The script and
+// HTTP patterns are therefore placed last because they are very
+// broad.
 const FAILURE_PATTERNS: readonly FailurePattern[] = [
   {
     kind: 'dns',
@@ -493,16 +489,15 @@ const FAILURE_PATTERNS: readonly FailurePattern[] = [
   },
 ] as const
 
-// Nimmt die erste nicht-leere Zeile, entfernt ein „ERRO[<sekunden>]“-Prefix
-// (das k6 vor jede Fehlermeldung schreibt) und liefert den bereinigten
-// Text. Der Aufrufer hat bereits sichergestellt, dass der Input
-// mindestens ein nicht-Leerzeichen enthält — daher ist „leer“ hier nur
-// ein defensiver Fallback.
+// Takes the first non-empty line, strips an "ERRO[<seconds>]" prefix
+// (which k6 prepends to every error message) and returns the cleaned
+// text. The caller has already ensured that the input contains at
+// least one non-whitespace character — so "empty" here is only a
+// defensive fallback.
 export function extractErrorLine(text: string): string {
-  // Wir suchen vom Ende her die letzte nicht-leere Zeile. Damit
-  // überspringen wir wiederkehrende Time-Series-Output-Fehler am
-  // Anfang des k6-Outputs und greifen den letzten, i. d. R. finalen
-  // Fehler heraus.
+  // We search from the end for the last non-empty line. This skips
+  // recurring time-series output errors at the start of the k6
+  // output and grabs the last, usually final, error.
   const lines = text.split(/\r?\n/).reverse()
   for (const line of lines) {
     const trimmed = line.trim()
@@ -517,10 +512,10 @@ export function summariseFailure(error: string | undefined | null): FailureReaso
   if (!error) return undefined
   const trimmed = error.trim()
   if (trimmed.length === 0) return undefined
-  // Wir scannen die Fehlerzeilen vom Ende her, weil k6-Output in der
-  // Regel mit Time-Series-Output-Fehlern (z. B. InfluxDB-Writes)
-  // beginnt und erst später die eigentliche Test-Request-Fehler
-  // liefert. Der letzte Fehler ist i. d. R. der relevante.
+  // We scan the error lines from the end because k6 output usually
+  // starts with time-series output errors (e.g. InfluxDB writes)
+  // and only later contains the actual test request errors. The
+  // last error is the one that matters.
   const lines = trimmed.split(/\r?\n/).reverse()
   for (const pattern of FAILURE_PATTERNS) {
     for (const line of lines) {
@@ -542,23 +537,23 @@ export function summariseFailure(error: string | undefined | null): FailureReaso
   }
 }
 
-// ---- SVG-Renderer für die Ramp-Grafik --------------------------------------
+// ---- SVG renderer for the ramp chart ---------------------------------------
 //
-// Reine Funktionen ohne React-Abhängigkeit, damit sie unit-testbar
-// sind. Liefern Strings, die in ein <svg> eingebettet werden. Plot-
-// Bereich wird in [0..width]×[0..height] normalisiert; Padding für
-// Achsen wird vom Aufrufer addiert (wir rechnen intern gegen den
-// Plot-Bereich, nicht gegen die viewBox).
+// Pure functions with no React dependency so they can be unit-tested.
+// They return strings that are embedded in an <svg>. The plot area
+// is normalised to [0..width]×[0..height]; the caller adds axis
+// padding (we compute internally against the plot area, not the
+// viewBox).
 
 export type RampPlot = {
   width: number
   height: number
-  // Domäne (in Sekunden, VUs/RPS)
+  // Domain (in seconds, VUs/RPS)
   maxSeconds: number
   maxValue: number
-  // Soll-Linie
+  // Target line
   sollPoints: Array<{ seconds: number, value: number }>
-  // Optional: Ist-Linie
+  // Optional: actual line
   istPoints?: Array<{ seconds: number, value: number }>
 }
 
@@ -586,10 +581,10 @@ export function buildIstPath(plot: RampPlot): string {
   }).join(' ')
 }
 
-// Wandelt ISO-8601-Timestamps + Werte in Plot-Punkte um, normalisiert
-// auf `t0` (erster Zeitpunkt = 0 s). Wenn [ist] leer ist, gibt die
-// Funktion ein Objekt ohne `istPoints` zurück, sodass der Renderer
-// nur die Soll-Linie zeichnet.
+// Converts ISO-8601 timestamps + values into plot points, normalising
+// to `t0` (first timestamp = 0 s). When [ist] is empty, the function
+// returns an object without `istPoints`, so the renderer only draws
+// the target line.
 export function buildRampPlot(
   profile: ReportLoadProfile,
   istVus: ReadonlyArray<{ time: string, value: number }>,
@@ -641,9 +636,9 @@ function buildSollPoints(profile: ReportLoadProfile): Array<{ seconds: number, v
       ]
     }
     case 'constant-arrival-rate': {
-      // Für die Ramp-Grafik zeigen wir bei Arrival-Rate die Rate
-      // als horizontale Linie, damit Ist (RPS) und Soll (Rate)
-      // direkt vergleichbar sind.
+      // For the ramp chart, when using arrival-rate we show the
+      // rate as a horizontal line so that actual (RPS) and target
+      // (rate) are directly comparable.
       const rate = profile.rate ?? 0
       const duration = profile.durationSeconds ?? 0
       return [
@@ -652,7 +647,7 @@ function buildSollPoints(profile: ReportLoadProfile): Array<{ seconds: number, v
       ]
     }
     case 'shared-iterations':
-      // Keine sinnvolle Soll-Linie, weil die Dauer nicht vorhersagbar ist.
+      // No meaningful target line because the duration is not predictable.
       return []
     default:
       return []

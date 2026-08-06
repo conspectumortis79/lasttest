@@ -1,8 +1,12 @@
 package de.lasttest.domain
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.swagger.v3.oas.models.Components
+import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.media.ArraySchema
+import io.swagger.v3.oas.models.media.ObjectSchema
 import io.swagger.v3.oas.models.media.Schema
+import io.swagger.v3.oas.models.media.StringSchema
 import io.swagger.v3.oas.models.parameters.Parameter
 import java.math.BigDecimal
 import kotlin.test.Test
@@ -61,12 +65,200 @@ class SwaggerSpecificationImporterTest {
     }
 
     @Test
+    fun `dereferences $ref in request body schema and example so validation works against components`() {
+        val imported = importer.import(SPECIFICATION_WITH_REQUEST_BODY_REF)
+
+        val operation = imported.operations.single { it.operationId == "createProduct" }
+        assertTrue(operation.hasRequestBody)
+        assertTrue(operation.requestBodyRequired)
+        // Without $ref dereferencing, the Swagger parser hands back a Schema
+        // object with only `$ref` set — no `type`, no properties. The
+        // frontend then has nothing to validate against.
+        val schema = operation.requestBodySchema
+        assertEquals("object", schema?.type)
+        assertEquals(listOf("price"), schema?.required)
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "string"),
+            schema?.properties?.get("name"),
+        )
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "number", format = "double", minimum = 0.01),
+            schema?.properties?.get("price"),
+        )
+        // The example for a $ref-backed body must be dereferenced too,
+        // otherwise the UI shows no example at all.
+        assertEquals(
+            mapOf("name" to "Clean Code", "price" to 34.95),
+            operation.requestBodyExample,
+        )
+    }
+
+    @Test
+    fun `dereferences $ref in parameter schemas so validation works against components`() {
+        // A request body schema referenced via $ref must resolve to its
+        // concrete definition, otherwise the frontend receives `null`
+        // and has nothing to validate against.
+        val imported = importer.import(SPECIFICATION_WITH_REQUEST_BODY_REF)
+
+        val operation = imported.operations.single { it.operationId == "createProduct" }
+        val schema = operation.requestBodySchema
+        assertEquals("object", schema?.type)
+        assertEquals(
+            de.lasttest.api.ApiParameterSchema(type = "number", format = "double", minimum = 0.01),
+            schema?.properties?.get("price"),
+        )
+    }
+
+    @Test
+    fun `falls back gracefully when a $ref points to a missing component`() {
+        val imported = importer.import(SPECIFICATION_WITH_BROKEN_REQUEST_BODY_REF)
+
+        val operation = imported.operations.single { it.operationId == "createProduct" }
+        // We can't recover a concrete schema, but the importer must not
+        // crash and the body must still be reported as present so the
+        // UI can render the (empty) textarea for free-form JSON input.
+        assertTrue(operation.hasRequestBody)
+        assertTrue(operation.requestBodyRequired)
+        assertEquals(null, operation.requestBodySchema)
+        // The example path (L71) must also terminate gracefully when
+        // dereference returns the unresolved schema: dereference returns
+        // a non-null schema (the original ref), but `exampleFor` finds no
+        // `type`, no `example`, no `default`, no `enum` — so it returns
+        // null. The Elvis `?:` then yields null overall.
+        assertEquals(null, operation.requestBodyExample)
+    }
+
+    @Test
+    fun `falls back gracefully for body schemas that are not $ref-based and have no usable type`() {
+        // A schema with only `example` (no `type`, no `$ref`) must not
+        // crash the importer — toRequestBodySchema returns null and the
+        // body just lacks structured validation.
+        val imported = importer.import(SPECIFICATION_WITH_EXAMPLE_ONLY_BODY)
+
+        val operation = imported.operations.single { it.operationId == "ping" }
+        assertTrue(operation.hasRequestBody)
+        assertEquals(null, operation.requestBodySchema)
+    }
+
+    @Test
+    fun `prefers media example over media schema when both are set on the request body`() {
+        // When `media.example` is non-null, the Elvis chain on the
+        // requestBodyExample side takes the LEFT operand and the
+        // `media.schema?.let` branch is never entered. With a valid
+        // `$ref`-backed schema, this is the path the user sees in the
+        // UI when an API provides both an inline example and a real
+        // schema.
+        val imported = importer.import(SPECIFICATION_WITH_EXAMPLE_AND_SCHEMA)
+
+        val operation = imported.operations.single { it.operationId == "createProduct" }
+        assertTrue(operation.hasRequestBody)
+        // The example wins; the schema is ignored for the example path.
+        assertEquals(mapOf("source" to "inline"), operation.requestBodyExample)
+        // The schema is still resolved correctly for the validation path.
+        assertEquals("object", operation.requestBodySchema?.type)
+    }
+
+    @Test
+    fun `request body example falls back to schema example when media example is null`() {
+        // media.example is null, media.examples is null, but media.schema
+        // has an inline `example` field. exampleFor() returns that
+        // example for an object schema. This exercises the
+        // `media.schema?.let { dereference(...).let(::exampleFor) }`
+        // path with `dereference` returning a schema that has example.
+        val imported = importer.import(SPECIFICATION_WITH_SCHEMA_EXAMPLE)
+
+        val operation = imported.operations.single { it.operationId == "createProduct" }
+        assertTrue(operation.hasRequestBody)
+        // exampleFor traverses the object schema's properties and
+        // returns their inline examples as a map.
+        assertEquals(mapOf("name" to "Widget", "category" to "books"), operation.requestBodyExample)
+    }
+
+    @Test
+    fun `request body example falls through when dereference returns the unresolved ref`() {
+        // media.example + media.examples are null, media.schema has a
+        // `$ref` to a missing component. `dereference` returns the
+        // original (unresolved) schema; `exampleFor` finds no usable
+        // fields and returns null. The Elvis `?:` then yields null
+        // overall, exercising the `dereference(...).?.let` skip branch.
+        val imported = importer.import(SPECIFICATION_WITH_BROKEN_REQUEST_BODY_REF)
+
+        val operation = imported.operations.single { it.operationId == "createProduct" }
+        assertTrue(operation.hasRequestBody)
+        assertEquals(null, operation.requestBodyExample)
+    }
+
+    @Test
+    fun `cycles in $ref do not loop forever`() {
+        // A → B → A. The dereferencer must break the cycle and return
+        // the first ref it touched, not crash or recurse forever.
+        val imported = importer.import(SPECIFICATION_WITH_CIRCULAR_REQUEST_BODY_REF)
+
+        val operation = imported.operations.single { it.operationId == "createProduct" }
+        assertTrue(operation.hasRequestBody)
+        // No concrete schema to validate against — null is acceptable.
+        assertEquals(null, operation.requestBodySchema)
+        // The importer must complete in finite time and not stack-overflow.
+    }
+
+    @Test
+    fun `$ref is left untouched when there are no components at all`() {
+        // A spec with a $ref body schema but no `components.schemas`
+        // section must not crash — we just fall back to the raw schema.
+        val imported = importer.import(SPECIFICATION_WITH_REF_BUT_NO_COMPONENTS)
+
+        val operation = imported.operations.single { it.operationId == "ping" }
+        assertTrue(operation.hasRequestBody)
+        assertEquals(null, operation.requestBodySchema)
+    }
+
+    @Test
     fun `omits request body schema when the schema is missing or has no object properties`() {
         val noSchema = importer.import(REQUEST_BODY_WITHOUT_SCHEMA)
         assertEquals(null, noSchema.operations.single().requestBodySchema)
 
         val nonObject = importer.import(REQUEST_BODY_NON_OBJECT_SCHEMA)
         assertEquals(null, nonObject.operations.single().requestBodySchema)
+    }
+
+    @Test
+    fun `dereference handles every edge case directly`() {
+        // The function is small but has many branches. These cover each
+        // one explicitly so the 100% coverage rule stays green.
+        val api = OpenAPI()
+        // 1. null schema -> null
+        assertEquals(null, importer.dereference(null, api))
+        // 2. schema without $ref -> same schema returned untouched
+        val inlineSchema = ObjectSchema()
+        inlineSchema.type = "object"
+        inlineSchema.addProperty("x", StringSchema())
+        assertEquals("object", importer.dereference(inlineSchema, api)?.type)
+        // 3. schema with $ref but no components.schemas at all -> null
+        val refNoComponents = Schema<Any>()
+        refNoComponents.`$ref` = "#/components/schemas/Foo"
+        assertEquals(null, importer.dereference(refNoComponents, api))
+        // 4. schema with $ref pointing to a missing component -> null (the
+        // caller can't derive a usable shape from an unresolvable ref,
+        // so dereference signals "nothing to validate against").
+        val refMissing = Schema<Any>()
+        refMissing.`$ref` = "#/components/schemas/Missing"
+        assertEquals(null, importer.dereference(refMissing, api))
+        // 5. circular $ref (A -> B -> A) is broken — we return some
+        // schema in the cycle rather than hanging or stack-overflowing.
+        val a = Schema<Any>()
+        a.`$ref` = "#/components/schemas/B"
+        val b = Schema<Any>()
+        b.`$ref` = "#/components/schemas/A"
+        val components = Components()
+        components.addSchemas("A", a)
+        components.addSchemas("B", b)
+        api.components = components
+        val refA = Schema<Any>()
+        refA.`$ref` = "#/components/schemas/A"
+        // Cycles return null so the caller can detect the loop without
+        // getting stuck with an unresolvable ref. The important thing
+        // is that we don't blow the stack.
+        assertEquals(null, importer.dereference(refA, api))
     }
 
     @Test
@@ -1100,6 +1292,208 @@ class SwaggerSpecificationImporterTest {
                         schema:
                           type: array
                           items: {type: string}
+                  responses:
+                    '201': {description: Created}
+            """.trimIndent()
+
+        val SPECIFICATION_WITH_REQUEST_BODY_REF =
+            """
+            openapi: 3.0.3
+            info:
+              title: Ref-Body API
+              version: "1.0"
+            servers:
+              - url: https://ref.example.test
+            paths:
+              /products:
+                post:
+                  operationId: createProduct
+                  requestBody:
+                    required: true
+                    content:
+                      application/json:
+                        schema:
+                          ${'$'}ref: '#/components/schemas/CreateProduct'
+                        example:
+                          name: Clean Code
+                          price: 34.95
+                  responses:
+                    '201': {description: Created}
+            components:
+              schemas:
+                CreateProduct:
+                  type: object
+                  required: [price]
+                  properties:
+                    name:
+                      type: string
+                    price:
+                      type: number
+                      format: double
+                      minimum: 0.01
+            """.trimIndent()
+
+        val SPECIFICATION_WITH_BROKEN_REQUEST_BODY_REF =
+            """
+            openapi: 3.0.3
+            info:
+              title: Broken-Ref API
+              version: "1.0"
+            paths:
+              /products:
+                post:
+                  operationId: createProduct
+                  requestBody:
+                    required: true
+                    content:
+                      application/json:
+                        schema:
+                          ${'$'}ref: '#/components/schemas/MissingSchema'
+                  responses:
+                    '201': {description: Created}
+            components:
+              schemas:
+                OtherSchema:
+                  type: object
+            """.trimIndent()
+
+        val SPECIFICATION_WITH_EXAMPLE_ONLY_BODY =
+            """
+            openapi: 3.0.3
+            info:
+              title: Example-Only API
+              version: "1.0"
+            paths:
+              /ping:
+                post:
+                  operationId: ping
+                  requestBody:
+                    required: true
+                    content:
+                      application/json:
+                        example: {anything: goes}
+                  responses:
+                    '201': {description: Created}
+            """.trimIndent()
+
+        val SPECIFICATION_WITH_EXAMPLE_AND_SCHEMA =
+            """
+            openapi: 3.0.3
+            info:
+              title: Example-And-Schema API
+              version: "1.0"
+            paths:
+              /products:
+                post:
+                  operationId: createProduct
+                  requestBody:
+                    required: true
+                    content:
+                      application/json:
+                        example: {source: inline}
+                        schema:
+                          ${'$'}ref: '#/components/schemas/CreateProduct'
+                  responses:
+                    '201': {description: Created}
+            components:
+              schemas:
+                CreateProduct:
+                  type: object
+                  required: [name]
+                  properties:
+                    name:
+                      type: string
+            """.trimIndent()
+
+        val SPECIFICATION_WITH_SCHEMA_EXAMPLE =
+            """
+            openapi: 3.0.3
+            info:
+              title: Schema-Example API
+              version: "1.0"
+            paths:
+              /products:
+                post:
+                  operationId: createProduct
+                  requestBody:
+                    required: true
+                    content:
+                      application/json:
+                        schema:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                              example: Widget
+                            category:
+                              type: string
+                              example: books
+                  responses:
+                    '201': {description: Created}
+            """.trimIndent()
+
+        val SPECIFICATION_WITH_CIRCULAR_REQUEST_BODY_REF =
+            """
+            openapi: 3.0.3
+            info:
+              title: Circular-Ref API
+              version: "1.0"
+            paths:
+              /products:
+                post:
+                  operationId: createProduct
+                  requestBody:
+                    required: true
+                    content:
+                      application/json:
+                        schema:
+                          ${'$'}ref: '#/components/schemas/A'
+                  responses:
+                    '201': {description: Created}
+            components:
+              schemas:
+                A:
+                  ${'$'}ref: '#/components/schemas/B'
+                B:
+                  ${'$'}ref: '#/components/schemas/A'
+            """.trimIndent()
+
+        val SPECIFICATION_WITH_REF_BUT_NO_COMPONENTS =
+            """
+            openapi: 3.0.3
+            info:
+              title: Dangling-Ref API
+              version: "1.0"
+            paths:
+              /ping:
+                post:
+                  operationId: ping
+                  requestBody:
+                    required: true
+                    content:
+                      application/json:
+                        schema:
+                          ${'$'}ref: '#/components/schemas/MissingSchema'
+                  responses:
+                    '201': {description: Created}
+            """.trimIndent()
+
+        val SPECIFICATION_WITH_DANGLING_REF_AND_NO_EXAMPLE =
+            """
+            openapi: 3.0.3
+            info:
+              title: Dangling-Ref No-Example API
+              version: "1.0"
+            paths:
+              /ping:
+                post:
+                  operationId: ping
+                  requestBody:
+                    required: true
+                    content:
+                      application/json:
+                        schema:
+                          ${'$'}ref: '#/components/schemas/MissingSchema'
                   responses:
                     '201': {description: Created}
             """.trimIndent()

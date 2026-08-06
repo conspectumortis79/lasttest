@@ -1,16 +1,15 @@
 package de.lasttest.api
 
 /**
- * Time-Series-Antwort für die Ramp-Grafik im Report. Wird vom
- * `GET /api/test-runs/{id}/time-series`-Endpoint geliefert und
- * enthält die echten Ist-Werte aus InfluxDB, die der SVG-Renderer
- * zusätzlich zur Soll-Linie aus den Stages zeichnet.
+ * Time-series response for the ramp chart in the report. Returned by
+ * the `GET /api/test-runs/{id}/time-series` endpoint; contains the
+ * actual measured values from InfluxDB that the SVG renderer draws
+ * in addition to the target line derived from the stages.
  *
- * `vus` und `requestsPerSecond` sind getrennte Arrays, damit der
- * Renderer sie unabhängig voneinander ein- und ausblenden kann.
- * `empty arrays` sind erlaubt und bedeuten „InfluxDB nicht
- * erreichbar oder noch keine Daten" — die UI behandelt das
- * transparent, indem sie nur die Soll-Linie zeigt.
+ * `vus` and `requestsPerSecond` are separate arrays so that the
+ * renderer can show and hide them independently. Empty arrays are
+ * allowed and mean "InfluxDB unreachable or no data yet" — the UI
+ * handles this transparently by showing only the target line.
  */
 data class TimeSeriesResponse(
     val runId: String,
@@ -20,8 +19,8 @@ data class TimeSeriesResponse(
 )
 
 data class TimeSeriesPoint(
-    /** ISO-8601-Zeitstempel (z. B. "2026-08-04T16:51:22Z"). */
+    /** ISO-8601 timestamp (e.g. "2026-08-04T16:51:22Z"). */
     val time: String,
-    /** Messwert zum Zeitpunkt (VUs als Ganzzahl, RPS als Fließkomma). */
+    /** Measured value at that time (VUs as integer, RPS as float). */
     val value: Number,
 )

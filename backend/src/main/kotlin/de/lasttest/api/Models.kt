@@ -18,10 +18,10 @@ import com.fasterxml.jackson.annotation.JsonInclude
 //   ConstantArrivalRate  → rate + timeUnit + durationSeconds + preAllocatedVUs + maxVUs
 //
 // Stages for RampingVUs encode the k6 stages shape directly:
-//   stages[0]: { target: 0,    duration: '30s' }   // 30 s Anlauf / Pause
-//   stages[1]: { target: 200,  duration: '2m'  }   // Rampe auf 200 VUs in 2 m
-//   stages[2]: { target: 200,  duration: '5m'  }   // Plateau
-//   stages[3]: { target: 0,    duration: '30s' }   // sauberer Abbau
+//   stages[0]: { target: 0,    duration: '30s' }   // 30 s warm-up / pause
+//   stages[1]: { target: 200,  duration: '2m'  }   // ramp to 200 VUs in 2 min
+//   stages[2]: { target: 200,  duration: '5m'  }   // plateau
+//   stages[3]: { target: 0,    duration: '30s' }   // graceful ramp-down
 // The frontend presets (smoke, load, stress, spike, soak) translate into
 // exactly such a list of stages so the user can edit any of them.
 
@@ -65,10 +65,10 @@ enum class LoadProfileType {
 
     companion object {
         /**
-         * Akzeptiert sowohl `RAMPING_VUS` (Enum-Konstante) als auch
-         * `ramping-vus` (kebab-case, executor-Name aus k6) beim
-         * Deserialisieren. Das Frontend sendet kebab-case, alte Clients
-         * könnten den Enum-Namen senden — beides funktioniert.
+         * Accepts both `RAMPING_VUS` (enum constant) and `ramping-vus`
+         * (kebab-case, executor name from k6) when deserializing. The
+         * frontend sends kebab-case; older clients may send the enum
+         * name — both work.
          */
         @JvmStatic
         @com.fasterxml.jackson.annotation.JsonCreator
@@ -217,10 +217,10 @@ data class TestRun(
     val configuration: TestRunConfiguration? = null,
     val summary: Map<String, Any?>? = null,
     /**
-     * Roher (gekürzter) k6-Output für die UI. Wird sowohl für
-     * erfolgreiche als auch für gescheiterte Läufe befüllt, damit die
-     * "k6-Konsolenausgabe" immer eingeblendet werden kann. `null`, wenn
-     * k6 gar nicht gestartet werden konnte (siehe `error`).
+     * Raw (truncated) k6 output for the UI. Populated for both
+     * successful and failed runs so that the "k6 console" tab can
+     * always be shown. `null` if k6 could not be started at all
+     * (see `error`).
      */
     val consoleOutput: String? = null,
     val error: String? = null,

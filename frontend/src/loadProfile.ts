@@ -122,9 +122,9 @@ export function arrivalRatePreset(): LoadProfile {
 }
 
 export function requestsPreset(): LoadProfile {
-  // 1 000 Anfragen so schnell wie möglich, mit 10 parallelen VUs.
-  // Ideal für Smoke-Tests, die die Antwortzeiten messen, ohne eine
-  // feste Laufzeit vorzugeben.
+  // 1,000 requests as fast as possible, with 10 parallel VUs.
+  // Ideal for smoke tests that measure response times without
+  // prescribing a fixed runtime.
   return { type: 'shared-iterations', virtualUsers: 10, iterations: 1000 }
 }
 
@@ -159,11 +159,12 @@ export function validateLoadProfile(profile: LoadProfile): string | undefined {
         if (!Number.isInteger(stage.durationSeconds) || stage.durationSeconds < 1 || stage.durationSeconds > MAX_DURATION_SECONDS) {
           return `Stage ${stageNumber}: Dauer muss zwischen 1 und ${MAX_DURATION_SECONDS} Sekunden liegen.`
         }
-        // Aufeinanderfolgende Stages mit demselben Ziel sind erlaubt:
-        // sie modellieren ein Plateau (z. B. 50 VUs für 5 min halten),
-        // was ein klassisches Lasttest-Muster ist. Nur Stages mit
-        // Ziel == 0 UND Dauer == 0 wären redundant — aber Dauer wird
-        // oben bereits gegen [1, MAX_DURATION_SECONDS] validiert.
+        // Consecutive stages with the same target are allowed:
+        // they model a plateau (e.g. holding 50 VUs for 5 min),
+        // which is a classic load-test pattern. Only stages with
+        // target == 0 AND duration == 0 would be redundant — but
+        // duration is already validated against [1, MAX_DURATION_SECONDS]
+        // above.
       }
       return undefined
     }

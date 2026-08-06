@@ -20,9 +20,9 @@ services:
       # NOTE: SSL_CERT_FILE replaces the system CA bundle for k6 — only
       # use it if all targets are signed by the custom CA above.
       SSL_CERT_FILE: /etc/lasttest/custom-ca.pem
-      # --- InfluxDB-Ziel für k6-Output (Time-Series-Stream) ---
-      # Werden vom Backend gelesen, um k6 mit --out influxdb=... zu starten
-      # und die echte Ist-Kurve später aus InfluxDB abzufragen.
+      # --- InfluxDB target for k6 output (time-series stream) ---
+      # Read by the backend to start k6 with --out influxdb=... and
+      # to query the actual measured curve later from InfluxDB.
       LASTTEST_INFLUXDB_URL: http://influxdb:8086
       LASTTEST_INFLUXDB_BUCKET: k6
       LASTTEST_INFLUXDB_USER: k6-writer
@@ -39,13 +39,13 @@ services:
     restart: unless-stopped
 
   # ------------------------------------------------------------------
-  # InfluxDB 1.11 — Time-Series-Storage für k6-Output
+  # InfluxDB 1.11 — time-series storage for k6 output
   # ------------------------------------------------------------------
-  # k6 v2.x hat nur den klassischen InfluxDB-v1-Output eingebaut.
-  # InfluxDB-v2 lehnt v1-Writes mit „unauthorized“ ab und ein
-  # xk6-Plugin wäre ein größerer Build-Change. Wir nutzen daher
-  # InfluxDB 1.11 — klein, schnell, k6-native. Die Daten landen in
-  # der Default-Datenbank `k6`, Retention-Policy `autogen`.
+  # k6 v2.x only ships the classic InfluxDB v1 output. InfluxDB v2
+  # rejects v1 writes with "unauthorized", and an xk6 plugin would
+  # be a larger build change. We therefore use InfluxDB 1.11 — small,
+  # fast, k6-native. The data lands in the default database `k6`,
+  # retention policy `autogen`.
   #
   # Persistenz via benanntem Volume. Beim ersten Start wird die
   # Datenbank `k6` automatisch angelegt und ein Admin-User mit
@@ -73,10 +73,10 @@ services:
     restart: unless-stopped
 
   # ------------------------------------------------------------------
-  # Grafana (optional) — vorkonfiguriertes Dashboard für Ad-hoc-Analysen
+  # Grafana (optional) — preconfigured dashboard for ad-hoc analyses
   # ------------------------------------------------------------------
-  # Wird nur gestartet, wenn man die Time-Series direkt in Grafana
-  # untersuchen will. Aufruf unter http://localhost:3000/ (admin/admin).
+  # Only started if you want to inspect the time series directly in
+  # Grafana. Access at http://localhost:3000/ (admin/admin).
   grafana:
     container_name: lasttest-grafana
     image: grafana/grafana:11.2.0

@@ -68,8 +68,8 @@ test('rejects ramping-vus with empty stages', () => {
 })
 
 test('accepts a plateau as consecutive stages with the same target', () => {
-  // Plateaus (z. B. 50 VUs für 5 min halten) sind ein klassisches
-  // Lasttest-Muster und müssen erlaubt sein.
+  // Plateaus (e.g. holding 50 VUs for 5 min) are a classic load-
+  // test pattern and must be allowed.
   const profile: LoadProfile = {
     type: 'ramping-vus',
     startVUs: 0,
@@ -207,9 +207,9 @@ test('rejects constant-arrival-rate with maxVUs below preAllocatedVUs', () => {
 })
 
 test('rejects constant-arrival-rate with maxVUs above maximum', () => {
-  // preAllocatedVUs ist gültig (<= MAX), aber maxVUs überschreitet
-  // MAX_PRE_ALLOCATED_VUS. Dadurch erreichen wir die letzte Oder-
-  // Verzweigung in `validateLoadProfile`.
+  // preAllocatedVUs is valid (<= MAX), but maxVUs exceeds
+  // MAX_PRE_ALLOCATED_VUS. This reaches the final or-branch in
+  // `validateLoadProfile`.
   const profile: LoadProfile = {
     type: 'constant-arrival-rate',
     rate: 50, timeUnitSeconds: 1, durationSeconds: 60, preAllocatedVUs: 10, maxVUs: 30_001,
@@ -219,10 +219,10 @@ test('rejects constant-arrival-rate with maxVUs above maximum', () => {
 })
 
 test('rejects constant-arrival-rate with invalid duration (caught after rate and timeUnit)', () => {
-  // Dieser Pfad ist nur erreichbar, wenn rate und timeUnit gültig sind.
-  // Die `if (durationError) return durationError`-Verzweigung wird
-  // nur getroffen, wenn der Aufrufer ein Profil mit ungültiger Dauer
-  // aber gültiger Rate und gültiger Zeiteinheit schickt.
+  // This path is only reachable when rate and timeUnit are valid.
+  // The `if (durationError) return durationError` branch is only
+  // hit when the caller sends a profile with invalid duration but
+  // valid rate and valid time unit.
   const profile: LoadProfile = {
     type: 'constant-arrival-rate',
     rate: 50, timeUnitSeconds: 1, durationSeconds: 0, preAllocatedVUs: 10, maxVUs: 100,
@@ -232,7 +232,7 @@ test('rejects constant-arrival-rate with invalid duration (caught after rate and
 })
 
 test('rejects constant-arrival-rate with invalid preAllocatedVUs (caught after duration)', () => {
-  // Analog: preAllocatedVUs ungültig lassen, alles davor gültig.
+  // Analogously: keep preAllocatedVUs invalid, everything before it valid.
   const profile: LoadProfile = {
     type: 'constant-arrival-rate',
     rate: 50, timeUnitSeconds: 1, durationSeconds: 60, preAllocatedVUs: 0, maxVUs: 100,
@@ -242,7 +242,7 @@ test('rejects constant-arrival-rate with invalid preAllocatedVUs (caught after d
 })
 
 test('rejects constant-arrival-rate with non-integer maxVUs', () => {
-  // Defensive: `!Number.isInteger(maxVUs)` als erste Oder-Verzweigung.
+  // Defensive: `!Number.isInteger(maxVUs)` as the first or-branch.
   const profile: LoadProfile = {
     type: 'constant-arrival-rate',
     rate: 50, timeUnitSeconds: 1, durationSeconds: 60, preAllocatedVUs: 10, maxVUs: 100.5,
@@ -292,8 +292,8 @@ test('rejects ramping-vus with startVUs below zero', () => {
 })
 
 test('rejects ramping-vus with startVUs above maximum', () => {
-  // Zweite Verzweigung der `||`-Verkettung: `startVUs > MAX` ohne
-  // den `< 0`-Pfad zu treffen.
+  // Second branch of the `||` chain: `startVUs > MAX` without
+  // hitting the `< 0` path.
   const profile: LoadProfile = {
     type: 'ramping-vus',
     startVUs: MAX_VIRTUAL_USERS + 1,
@@ -314,8 +314,8 @@ test('presets carry the expected executor type', () => {
 })
 
 test('requestsPreset uses shared-iterations with a fixed iteration count', () => {
-  // Verifies that the new "Anfragen" preset (Mouseover: "1 000 Anfragen
-  // so schnell wie möglich") is correctly typed and has the defaults
+  // Verifies that the new "Requests" preset (mouseover: "1 000 requests
+  // as fast as possible") is correctly typed and has the defaults
   // documented in the preset hover description.
   const profile = requestsPreset()
   equal(profile.type, 'shared-iterations')
@@ -354,8 +354,8 @@ test('loadProfileLabel produces a human-readable summary per profile type', () =
 })
 
 test('loadProfileLabel for ramping-vus handles empty stages defensively', () => {
-  // Deckt den Fall ab, dass `Math.max(...[])` aufgerufen wird.
-  // V8 erfasst den leeren-Spread-Pfad als Branch.
+  // Covers the case where `Math.max(...[])` is called.
+  // V8 records the empty-spread path as a branch.
   const label = loadProfileLabel({ type: 'ramping-vus', startVUs: 0, stages: [] })
   ok(label.includes('0 Stages'))
 })

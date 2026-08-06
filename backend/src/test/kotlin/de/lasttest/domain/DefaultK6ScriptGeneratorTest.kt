@@ -612,15 +612,15 @@ class DefaultK6ScriptGeneratorTest {
 
     // ---- Branch coverage for renderScenario and validateLoadProfile ----
     //
-    // Die Elvis-Operatoren `?: error("...")` und die `require`-/
-    // `requireNotNull`-Aufrufe werfen beim Aufruf mit unvollständigen
-    // Daten. `validateLoadProfile` ist die vorgelagerte Prüfung; wenn
-    // wir sie umgehen und direkt `renderScenario` aufrufen, treffen
-    // wir genau die sonst unerreichbaren Default-Branches.
+    // The Elvis operators `?: error("...")` and the `require` /
+    // `requireNotNull` calls throw when invoked with incomplete data.
+    // `validateLoadProfile` is the upstream check; if we bypass it and
+    // call `renderScenario` directly, we hit exactly the otherwise
+    // unreachable default branches.
     //
-    // `validateLoadProfile` selbst hat keinen Default-Case; jede
-    // `require`-Verzweigung wird über das Testen mit Werten außerhalb
-    // des gültigen Bereichs abgedeckt.
+    // `validateLoadProfile` itself has no default case; each
+    // `require` branch is covered by testing with values outside
+    // the valid range.
 
     @Test
     fun `renderScenario throws when constant-vus is missing virtualUsers`() {
@@ -814,7 +814,7 @@ class DefaultK6ScriptGeneratorTest {
                 virtualUsers = 1,
                 durationSeconds = 1,
             )
-        // Kein Wurf: valide Boundary-Werte müssen akzeptiert werden.
+        // No throw: valid boundary values must be accepted.
         generator.validateLoadProfile(profile)
     }
 

@@ -43,13 +43,13 @@ test('buildSollPath emits the ramp shape for a ramping-vus profile', () => {
   }
   const plot = buildRampPlot(profile, [])
   const path = buildSollPath(plot)
-  // 2 Punkte pro Stage + 1 Startpunkt = 9 Punkte → 1 M + 8 L.
-  // (Plateau-Übergang 800→800 erzeugt einen extra Segment-Endpunkt.)
+  // 2 points per stage + 1 start point = 9 points → 1 M + 8 L.
+  // (Plateau transition 800→800 creates an extra segment endpoint.)
   ok(path.startsWith('M '), 'path starts with M')
   const segments = path.split('L').length - 1
   ok(segments >= 7, `expected at least 7 line segments, got ${segments}`)
-  // Der Pfad endet am unteren Rand (Y-Koordinate = Plot-Höhe-Padding),
-  // weil der letzte Stage-Zielwert 0 VUs ist.
+  // The path ends at the bottom edge (Y coordinate = plot height - padding),
+  // because the last stage target is 0 VUs.
   const lastSegment = path.split('L').pop()!.trim()
   const lastY = Number(lastSegment.split(' ').pop())
   equal(lastY, plot.height - 4, 'last Y-coordinate is the bottom edge')
@@ -73,9 +73,9 @@ test('buildSollPath emits a horizontal line for constant-arrival-rate', () => {
     maxVUs: 100,
   }
   const plot = buildRampPlot(profile, [])
-  // buildSollPath liefert Pixel-Koordinaten, nicht die Roh-Werte.
-  // Wir prüfen, dass die Linie ein M + genau ein L hat (horizontal)
-  // und dass beide Y-Koordinaten gleich sind.
+  // buildSollPath returns pixel coordinates, not the raw values.
+  // We check that the line has an M + exactly one L (horizontal)
+  // and that both Y coordinates are equal.
   const path = buildSollPath(plot)
   const segments = path.split('L')
   equal(segments.length, 2, 'horizontal line has exactly 1 L-segment')
@@ -108,9 +108,9 @@ test('buildRampPlot incorporates ist points and scales the Y axis to the maximum
     { time: '2026-08-04T16:50:20Z', value: 1000 },
   ]
   const plot = buildRampPlot(profile, ist)
-  // Y-Achse muss über dem höchsten Wert liegen (1.1x).
-  ok(plot.maxValue >= 1000, 'maxValue skaliert auf den Ist-Peak')
-  ok(plot.istPoints, 'istPoints sind gesetzt')
+  // Y-axis must be above the highest value (1.1x).
+  ok(plot.maxValue >= 1000, 'maxValue scales to the ist peak')
+  ok(plot.istPoints, 'istPoints set')
   equal(plot.istPoints?.length, 4)
 })
 

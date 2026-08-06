@@ -235,8 +235,8 @@ test('parseK6Summary returns parsed summary for valid input', () => {
 // ---- profileTotalSeconds: ?? 0 / ?? [] defaults for incomplete data ----
 
 test('profileTotalSeconds falls back to 0 when durationSeconds is missing for constant-vus', () => {
-  // Defensive: wenn das Backend irgendwann ein inkonsistentes Profil
-  // liefert, sollen wir nicht abstürzen, sondern 0 annehmen.
+  // Defensive: if the backend ever returns an inconsistent profile,
+  // we should not crash but assume 0.
   equal(profileTotalSeconds({ type: 'constant-vus' } as ReportLoadProfile), 0)
 })
 
@@ -275,8 +275,8 @@ test('profileSummary falls back to placeholders for all constant-arrival-rate fi
 // ---- buildSollPoints: ?? 0 defaults for incomplete profile fields ----
 
 test('buildRampPlot falls back to 0 VUs for constant-vus without virtualUsers or durationSeconds', () => {
-  // Soll-Linie wird mit (0, 0) und (0, 0) gebaut; maxValue skaliert
-  // entsprechend. Wichtig ist nur, dass kein TypeError fliegt.
+  // The target line is built with (0, 0) and (0, 0); maxValue scales
+  // accordingly. The only important thing is that no TypeError is thrown.
   const plot = buildRampPlot({ type: 'constant-vus' } as ReportLoadProfile, [], { width: 100, height: 50 })
   deepEqual(plot.sollPoints, [{ seconds: 0, value: 0 }, { seconds: 0, value: 0 }])
 })
@@ -286,10 +286,10 @@ test('buildRampPlot falls back to 0 rate for constant-arrival-rate without rate 
   deepEqual(plot.sollPoints, [{ seconds: 0, value: 0 }, { seconds: 0, value: 0 }])
 })
 
-// ---- buildSollPath / buildIstPath (alle Verzweigungen) ----
+// ---- buildSollPath / buildIstPath (all branches) ----
 
 test('buildSollPath emits an M command for the first point and L for the rest', () => {
-  // Trifft den Ternary `index === 0 ? 'M' : 'L'` in beiden Ästen.
+  // Hits the ternary `index === 0 ? 'M' : 'L'` in both branches.
   const plot = buildRampPlot({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 30 }, [], { width: 100, height: 50 })
   const path = buildSollPath(plot)
   ok(path.startsWith('M '))
@@ -325,7 +325,7 @@ test('buildIstPath returns empty string when istPoints is missing or empty', () 
   equal(buildIstPath(noIstPlot), '')
 })
 
-// ---- buildSollPoints (alle Case-Pfade) ----
+// ---- buildSollPoints (all case branches) ----
 
 test('buildRampPlot returns the ramping-vus sollPoints shape with startVUs and stages', () => {
   const profile: ReportLoadProfile = {
@@ -337,7 +337,7 @@ test('buildRampPlot returns the ramping-vus sollPoints shape with startVUs and s
     ],
   }
   const plot = buildRampPlot(profile, [], { width: 100, height: 50 })
-  // Erster Punkt: (0, startVUs=5), dann Plateaus zu jedem Stage-Target.
+  // First point: (0, startVUs=5), then plateaus to each stage target.
   deepEqual(plot.sollPoints, [
     { seconds: 0, value: 5 },
     { seconds: 30, value: 10 },
@@ -358,9 +358,9 @@ test('buildRampPlot returns the shared-iterations sollPoints as an empty array',
 })
 
 test('buildRampPlot clamps negative relative timestamps to 0 when normalizing', () => {
-  // Wenn der erste ist-Punkt zeitlich NACH den anderen liegt, wird t0
-  // auf den ersten Punkt gesetzt; ältere Punkte bekommen negative
-  // Deltas, die per `Math.max(0, …)` auf 0 geklemmt werden.
+  // When the first ist point is later in time than the others, t0 is
+  // set to the first point; older points get negative deltas which
+  // are clamped to 0 via `Math.max(0, …)`.
   const profile: ReportLoadProfile = { type: 'constant-vus', virtualUsers: 1, durationSeconds: 30 }
   const plot = buildRampPlot(
     profile,
@@ -370,8 +370,8 @@ test('buildRampPlot clamps negative relative timestamps to 0 when normalizing', 
     ],
     { width: 100, height: 50 },
   )
-  // `istPoints` wurde erzeugt; wir prüfen nur, dass kein negativer
-  // `seconds`-Wert in den Plot einfließt.
+  // `istPoints` was generated; we only check that no negative
+  // `seconds` value flows into the plot.
   const path = buildIstPath(plot)
   ok(path.length > 0)
 })
@@ -393,15 +393,15 @@ test('buildRampPlot incorporates ist points and scales the Y axis to the maximum
 })
 
 test('buildRampPlot falls back to maxSeconds=60 when the profile has no predictable total', () => {
-  // shared-iterations liefert profileTotalSeconds === undefined, also
-  // greift der `?? 60`-Fallback im buildRampPlot.
+  // shared-iterations yields profileTotalSeconds === undefined, so
+  // the `?? 60` fallback in buildRampPlot kicks in.
   const plot = buildRampPlot({ type: 'shared-iterations', virtualUsers: 5, iterations: 100 }, [], { width: 100, height: 50 })
   equal(plot.maxSeconds, 60)
 })
 
 test('buildRampPlot tolerates a missing istVus argument via the ?? [] fallback', () => {
-  // Deckt den `istVus ?? []`-Pfad ab, falls ein Aufrufer das Argument
-  // auslässt (z. B. ältere UI-Skripte).
+  // Covers the `istVus ?? []` path in case a caller omits the
+  // argument (e.g. older UI scripts).
   // @ts-expect-error testing defensive default-branch with undefined
   const plot = buildRampPlot({ type: 'constant-vus', virtualUsers: 1, durationSeconds: 30 }, undefined, { width: 100, height: 50 })
   deepEqual(plot.istPoints, undefined)
@@ -409,8 +409,8 @@ test('buildRampPlot tolerates a missing istVus argument via the ?? [] fallback',
 })
 
 test('buildSollPoints for ramping-vus falls back to empty stages and 0 startVUs when fields are missing', () => {
-  // Deckt die `?? []`- und `?? 0`-Verzweigungen in buildSollPoints für
-  // den ramping-vus-Pfad ab.
+  // Covers the `?? []` and `?? 0` branches in buildSollPoints for
+  // the ramping-vus path.
   const plot = buildRampPlot({ type: 'ramping-vus' } as ReportLoadProfile, [], { width: 100, height: 50 })
   deepEqual(plot.sollPoints, [])
 })

@@ -11,21 +11,20 @@ import java.net.URI
 import java.time.Instant
 
 /**
- * Liest Time-Series-Daten aus InfluxDB 1.11 für einen abgeschlossenen
- * k6-Lauf. Wird vom Frontend-Endpoint `/api/test-runs/{id}/time-series`
- * aufgerufen, um die echte Ist-Lastkurve zu rendern.
+ * Reads time-series data from InfluxDB 1.11 for a completed k6 run.
+ * Invoked by the frontend endpoint `/api/test-runs/{id}/time-series`
+ * to render the actual measured load curve.
  *
- * k6 schreibt unter dem Measurement `vus` einen Datenpunkt pro
- * Sekunde (Standard-`summaryTrendStats`-Intervall). Wir lesen diese
- * Punkte per InfluxQL und liefern sie als flaches Array zurück —
- * der Frontend-SVG-Renderer braucht keine Query-Semantik.
+ * k6 writes one data point per second under the `vus` measurement
+ * (default `summaryTrendStats` interval). We read those points via
+ * InfluxQL and return them as a flat array — the frontend SVG
+ * renderer does not need query semantics.
  *
- * InfluxDB-v1 unterstützt keine Authorization-Header, sondern
- * erwartet HTTP Basic Auth in Form von `?u=<user>&p=<password>` als
- * Query-Parameter. Wenn InfluxDB nicht erreichbar ist oder die
- * Datenbank noch leer ist, geben wir ein leeres Array zurück, statt
- * einen 5xx zu erzeugen — die Ramp-Grafik zeigt dann nur die
- * Soll-Linie, was ein klares Signal ist.
+ * InfluxDB v1 does not support the `Authorization` header. It expects
+ * HTTP Basic Auth in the form `?u=<user>&p=<password>` as query
+ * parameters. If InfluxDB is unreachable or the database is still
+ * empty, we return an empty array instead of a 5xx — the ramp chart
+ * then shows only the target line, which is a clear signal.
  */
 @Service
 class InfluxDbTimeSeriesReader(
@@ -33,13 +32,12 @@ class InfluxDbTimeSeriesReader(
     private val restTemplate: RestTemplate,
 ) : TimeSeriesReader {
     /**
-     * Liefert VU-Werte (Anzahl aktiver Virtual Users) pro Sekunde für
-     * den Lauf mit der ID [runId]. k6 schreibt das Measurement `vus`
-     * automatisch; wir filtern auf das `run_id`-Tag, das das Backend
-     * beim k6-Start setzt, damit parallele oder alte Läufe sich
-     * nicht vermischen.
+     * Returns the VU values (number of active virtual users) per second
+     * for the run with ID [runId]. k6 writes the `vus` measurement
+     * automatically; we filter on the `run_id` tag that the backend
+     * sets when k6 starts, so that parallel or older runs do not mix in.
      *
-     * @return sortiert nach Zeit aufsteigend, leere Liste bei Fehler
+     * @return sorted by time ascending, empty list on error
      */
     override fun readVusOverTime(
         runId: String,
@@ -58,10 +56,10 @@ class InfluxDbTimeSeriesReader(
     }
 
     /**
-     * Liefert HTTP-Requests-pro-Sekunde als Time-Series. k6 schreibt
-     * das in InfluxDB-v1 als Measurement `http_reqs` mit dem Feld
-     * `value` (Anzahl). Wir liefern diese Counters, weil die Y-Achse
-     * dann RPS-konsistent ist.
+     * Returns HTTP requests per second as a time series. k6 writes
+     * this in InfluxDB v1 as the `http_reqs` measurement with the
+     * `value` field (count). We return these counters so that the
+     * Y-axis is consistently RPS.
      */
     override fun readRequestsPerSecond(
         runId: String,
@@ -80,9 +78,9 @@ class InfluxDbTimeSeriesReader(
     }
 
     /**
-     * Führt eine InfluxQL-Query gegen InfluxDB-v1 aus und gibt die
-     * Zeitstempel + Wert-Paare als TimeSeriesPoints zurück. Die
-     * Authentifizierung erfolgt per HTTP-Basic-Auth via Query-Param.
+     * Runs an InfluxQL query against InfluxDB v1 and returns the
+     * timestamp + value pairs as TimeSeriesPoints. Authentication is
+     * performed via HTTP Basic Auth through query parameters.
      */
     internal fun queryInfluxQL(influxql: String): List<TimeSeriesPoint> {
         val uri =
@@ -103,18 +101,17 @@ class InfluxDbTimeSeriesReader(
                 )
             parseInfluxQLJson(response.body.orEmpty())
         } catch (exception: Exception) {
-            logger.warn("InfluxDB-Query fehlgeschlagen (uri={}): {}", uri, exception.message)
+            logger.warn("InfluxDB query failed (uri={}): {}", uri, exception.message)
             emptyList()
         }
     }
 
     /**
-     * Sehr simpler InfluxDB-v1-JSON-Parser. InfluxDB-v1 liefert
-     * Antworten im JSON-Format:
+     * Very simple InfluxDB v1 JSON parser. InfluxDB v1 returns
+     * responses in the JSON format:
      *   { "results": [{ "statement_id": 0, "series": [{ "name": "vus", "columns": ["time", "value"], "values": [[ts, 1], ...] }] }] }
-     * Wir lesen nur `time` + `value` und ignorieren alles andere, um
-     * eine Abhängigkeit auf eine InfluxDB-spezifische Bibliothek zu
-     * vermeiden.
+     * We only read `time` + `value` and ignore everything else to
+     * avoid a dependency on an InfluxDB-specific library.
      */
     internal fun parseInfluxQLJson(json: String): List<TimeSeriesPoint> {
         if (json.isBlank()) return emptyList()
@@ -170,10 +167,10 @@ data class TimeSeriesPoint(
 )
 
 /**
- * Abstraktion über die Time-Series-Quelle. Wird vom REST-Controller
- * injiziert, damit Tests einen Fake einsetzen können, ohne einen
- * echten InfluxDB-Server hochfahren zu müssen. Die Produktiv-
- * Implementierung ist [InfluxDbTimeSeriesReader].
+ * Abstraction over the time-series source. Injected by the REST
+ * controller so that tests can plug in a fake without having to
+ * spin up a real InfluxDB server. The production implementation is
+ * [InfluxDbTimeSeriesReader].
  */
 interface TimeSeriesReader {
     fun readVusOverTime(

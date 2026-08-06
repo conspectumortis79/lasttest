@@ -18,15 +18,15 @@ import {
   type TestRun,
 } from './k6Report.ts'
 
-// Importe von React werden unten gebündelt, damit die Datei kompakt
-// bleibt und sich nicht mit dem exportierten Typ-Block vermischt.
+// Imports from React are bundled below so the file stays compact
+// and does not get mixed up with the exported type block.
 
 // ---- RunProgress -----------------------------------------------------------
 //
-// Während QUEUED/RUNNING zeigen wir dem Nutzer, wie lange der Test
-// bereits läuft und — falls das Lastprofil eine vorhersagbare Gesamtdauer
-// hat — wie viele Sekunden noch verbleiben. Für `shared-iterations`
-// lassen wir die Restzeit bewusst weg, weil sie unbestimmt ist.
+// While QUEUED/RUNNING we show the user how long the test has been
+// running and — if the load profile has a predictable total duration —
+// how many seconds remain. For `shared-iterations` we deliberately
+// omit the remaining time because it is indeterminate.
 
 type RunProgressProps = {
   run: TestRun
@@ -57,15 +57,15 @@ export function RunProgress({ run, now }: RunProgressProps) {
 
 // ---- RunSummary ------------------------------------------------------------
 //
-// Direkt nach Abschluss eines kurzen Lasttests (Smoke / Load) wollen
-// die Nutzer:innen die wichtigsten Kennzahlen sehen, ohne den
-// ausführlichen Report öffnen zu müssen. Wir rendern deshalb dieselben
-// Kern-Cards wie im Report, aber kompakter und ohne Schwellwert-Box.
+// Right after a short load test (smoke / load) finishes, users want
+// to see the key metrics without having to open the full report. We
+// therefore render the same core cards as the report, but more
+// compact and without the threshold box.
 //
-// Sobald k6 fertig ist (COMPLETED oder FAILED), bekommt die Karte oben
-// einen Pass/Fail-Header und unten einen Run-Foot mit Run-ID und
-// Report-Link. Während k6 noch läuft (RUNNING/QUEUED) wird stattdessen
-// weiterhin `RunProgress` angezeigt — der ist 1:1 wie bisher.
+// As soon as k6 is done (COMPLETED or FAILED), the card gets a
+// pass/fail header on top and a run foot with run ID and report link
+// at the bottom. While k6 is still running (RUNNING/QUEUED),
+// `RunProgress` keeps being shown unchanged.
 
 type RunSummaryProps = {
   run: TestRun
@@ -74,7 +74,7 @@ type RunSummaryProps = {
 export function RunSummary({ run }: RunSummaryProps) {
   const summary = parseK6Summary(run)
   if (!summary) {
-    return <div className="run-summary-empty">Es liegen keine k6-Auswertungsdaten vor (Summary fehlt).</div>
+    return <div className="run-summary-empty">No k6 evaluation data is available (summary missing).</div>
   }
   const checks = metric(summary, 'checks')
   const requests = metric(summary, 'http_reqs')
@@ -95,7 +95,7 @@ export function RunSummary({ run }: RunSummaryProps) {
   return <>
     <ResultHeader passed={passed} run={run} />
     <ThresholdNotice passed={passed} failedMetrics={failedNames} run={run} />
-    {noRequests && <div className="run-summary-empty warning">Keine HTTP-Anfrage wurde abgeschlossen. Das Ziel war aus dem k6-Container nicht erreichbar oder antwortete nicht rechtzeitig.</div>}
+    {noRequests && <div className="run-summary-empty warning">No HTTP request was completed. The target was unreachable from the k6 container or did not respond in time.</div>}
     <div className="run-summary-cards">
       <SummaryCard label="Checks erfolgreich" value={formatPercentage(checkRate)} detail={`${formatInteger(checks.passes)} bestanden, ${formatInteger(checks.fails)} fehlgeschlagen`} status={checksPass ? 'pass' : 'fail'} />
       <SummaryCard label="HTTP-Fehlerrate" value={formatPercentage(failureRate)} detail={`${formatInteger(requestCount ?? 0)} Requests`} status={failureRatePass ? 'pass' : 'fail'} />
@@ -109,9 +109,9 @@ export function RunSummary({ run }: RunSummaryProps) {
 
 // ---- ResultHeader -----------------------------------------------------------
 //
-// Zeigt "PASSED" oder "FAILED" als Pille. Wird nur eingeblendet, wenn
-// k6 den Run abgeschlossen hat — die laufende Ansicht (RunProgress)
-// bleibt unangetastet.
+// Shows "PASSED" or "FAILED" as a pill. Only rendered when k6 has
+// finished the run — the in-progress view (RunProgress) is left
+// untouched.
 
 type ResultHeaderProps = {
   passed: boolean
@@ -127,10 +127,10 @@ function ResultHeader({ passed, run }: ResultHeaderProps) {
 
 // ---- ThresholdNotice --------------------------------------------------------
 //
-// Die kompakte Zeile unter dem Header: "Alle N Thresholds eingehalten" oder
-// "N Thresholds verletzt: <metric>, <metric>". Bei FAILED werden die
-// betroffenen Metriken als <code>-Tags gerendert, damit klar ist, welche
-// konfigurierten Thresholds betroffen sind.
+// The compact line under the header: "All N thresholds met" or
+// "N thresholds violated: <metric>, <metric>". On FAILED, the affected
+// metrics are rendered as <code> tags so it is clear which configured
+// thresholds are involved.
 
 type ThresholdNoticeProps = {
   passed: boolean
@@ -161,13 +161,13 @@ function ThresholdNotice({ passed, failedMetrics, run }: ThresholdNoticeProps) {
   </div>
 }
 
-// ---- ResultFoot entfernt ---------------------------------------------------
+// ---- ResultFoot removed ----------------------------------------------------
 //
-// Der Report-Button ist nach App.tsx in den Karten-Header gewandert
-// (`.result-header-actions`) und sitzt dort in einer eigenen Zeile
-// rechtsbündig direkt unter der Run-ID. Die k6-Konsolenausgabe und
-// die k6-JSON-Rohdaten-Details bekommen dadurch in `.result-extras`
-// wieder die volle Kartenbreite.
+// The report button has moved to the card header in App.tsx
+// (`.result-header-actions`) and sits there in its own row,
+// right-aligned directly under the run ID. The k6 console output
+// and the k6 JSON raw-data details therefore regain the full card
+// width in `.result-extras`.
 
 function parseFinishedAt(run: TestRun): number {
   const finished = new Date(run.finishedAt ?? '').getTime()
@@ -188,11 +188,24 @@ function SummaryCard({ label, value, detail, status = 'normal' }: { label: strin
 
 // ---- RunFailure ------------------------------------------------------------
 //
-// Statt nur die erste (oft generische) k6-Fehlerzeile anzuzeigen,
-// versuchen wir über `summariseFailure` eine typisierte Ursache zu
-// erkennen. Die UI zeigt dann ein farbiges Label, eine prägnante
-// Zusammenfassung, das technische Detail und — falls bekannt — eine
-// gezielte Handlungsempfehlung.
+// Instead of showing only the first (often generic) k6 error line, we
+// try to recognise a typed cause via `summariseFailure`. The UI then
+// shows a coloured label, a concise summary, the technical detail
+// and — if known — a targeted recommendation.
+
+// "Hard" infrastructure failures that make the threshold metrics
+// meaningless (the run never reached the application logic). For
+// these we displace the summary cards so the user sees the actual
+// root cause. `http`/`unknown` are intentionally excluded: the server
+// actually answered, the threshold numbers are still informative.
+const HARD_FAILURE_KINDS: ReadonlySet<FailureKind> = new Set<FailureKind>([
+  'dns',
+  'connection-refused',
+  'connection-timeout',
+  'tls',
+  'script',
+  'process',
+])
 
 type RunFailureProps = {
   run: TestRun
@@ -229,17 +242,17 @@ function labelForFailure(kind: FailureKind): string {
 
 // ---- RunStatusView ---------------------------------------------------------
 //
-// Bündelt die drei oben definierten Sichten in einer einzigen Komponente,
-// die den passenden Slot je nach Status rendert. So muss jede Aufrufstelle
-// (App.tsx und TestRunReport.tsx) nur eine einzige Komponente einbinden
-// und übergibt das aktuelle `now` aus dem `useRunClock`-Hook.
+// Bundles the three views defined above into a single component that
+// renders the appropriate slot based on status. This way every call
+// site (App.tsx and TestRunReport.tsx) only has to mount a single
+// component and pass the current `now` from the `useRunClock` hook.
 
 type RunStatusViewProps = {
   run: TestRun
   now: number
   /**
-   * Optionales Override der Fehleranalyse. Nützlich, wenn die Aufrufstelle
-   * das `run.error` schon vorverarbeitet hat (z. B. um es zu kürzen).
+   * Optional override for the failure analysis. Useful when the call
+   * site has already preprocessed `run.error` (e.g. to truncate it).
    */
   reasonOverride?: FailureReason
 }
@@ -252,17 +265,27 @@ export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) 
     return <RunSummary run={run} />
   }
   if (run.status === 'FAILED') {
-    // Ein FAILED-Lauf kann zwei sehr verschiedene Ursachen haben:
-    //   a) k6 hat Thresholds verletzt — dann gibt es echte Metriken
-    //      und wir zeigen die Summary-Karten mit roter Einfärbung.
-    //   b) k6 ist intern fehlgeschlagen (z. B. DNS, Connection refused,
-    //      TLS, Skript-Fehler) — dann gibt es keine verwertbaren
-    //      Metriken und wir zeigen den typisierten Failure-Block.
+    // A FAILED run can have two very different causes:
+    //   a) k6 violated thresholds — then we have real metrics and we
+    //      show the summary cards with red colouring.
+    //   b) k6 failed internally (e.g. DNS, connection refused, TLS,
+    //      script error) — there are still metrics (e.g.
+    //      http_req_failed.value=1), but the run was technically
+    //      not successful. In that case we prioritise the typed
+    //      failure block so the user sees the actual cause (DNS,
+    //      connection refused, …) and is not distracted by
+    //      threshold cards.
+    const reason = reasonOverride ?? summariseFailure(run.error)
+    // Only infrastructure failures (DNS, connection, script, process,
+    // TLS) displace the threshold cards — for `http`/`unknown` the
+    // server actually answered, so the threshold metrics are
+    // meaningful and should stay visible.
+    const hardFailure = reason && HARD_FAILURE_KINDS.has(reason.kind)
+    if (hardFailure) return <RunFailure run={run} reason={reason} />
     const threshold = summariseThresholds(run)
     if (threshold.failedMetrics.length > 0) {
       return <RunSummary run={run} />
     }
-    const reason = reasonOverride ?? summariseFailure(run.error)
     if (reason) return <RunFailure run={run} reason={reason} />
   }
   return null

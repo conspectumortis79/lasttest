@@ -16,8 +16,8 @@ import {
   validateLoadProfile,
   type LoadProfile,
 } from './loadProfile.ts'
-// MAX_DURATION_SECONDS / MAX_VIRTUAL_USERS werden in App.tsx nicht mehr
-// direkt benötigt — die Limits leben jetzt im LoadProfileEditor.
+// MAX_DURATION_SECONDS / MAX_VIRTUAL_USERS are no longer needed
+// directly in App.tsx — the limits now live in LoadProfileEditor.
 import {
   buildOperationConfigurations,
   createOperationSettings,
@@ -77,19 +77,19 @@ function LoadTestApp() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [lastFetched, setLastFetched] = useState<FetchedSpecification | undefined>()
-  // Lokaler Ticker für die Laufzeit-Anzeige. Tickt nur, solange der
-  // Run in QUEUED oder RUNNING ist; der Hook gibt das aktuelle
-  // `now` an <RunStatusView> weiter.
+  // Local ticker for the runtime display. It only ticks while the
+  // run is QUEUED or RUNNING; the hook forwards the current `now`
+  // to <RunStatusView>.
   const runNow = useRunClock(run)
 
   useEffect(() => {
     let cancelled = false
 
     async function loadDemo() {
-      // Retry mit Backoff, damit ein noch hochfahrendes Backend nicht zu
-      // ECONNREFUSED-Einträgen im Vite-Proxy-Log führt. Bei dauerhaftem
-      // Fehlschlag (z. B. Backend antwortet mit 5xx) bleibt das eingebettete
-      // Sample im Textarea stehen.
+      // Retry with backoff so that a backend still starting up does
+      // not produce ECONNREFUSED entries in the Vite proxy log. On
+      // persistent failure (e.g. backend responds with 5xx), the
+      // embedded sample in the textarea remains.
       try {
         const response = await fetchWithRetry(
           '/api/demo-specification',
@@ -100,7 +100,7 @@ function LoadTestApp() {
         const content = await response.text()
         if (!cancelled && content.trim() !== '') setSpecification(content)
       } catch {
-        // Fallback auf eingebettetes Sample, falls Backend nicht erreichbar ist.
+        // Fallback to the embedded sample if the backend is not reachable.
       }
     }
 
@@ -398,18 +398,17 @@ function TestRunSummary({ run }: TestRunSummaryProps) {
   const summary = parseK6Summary(run)
   const failure = summarizeFailure(run)
   const metricItems = buildMetricRow(run, summary, failure)
-  // Sobald k6 fertig ist, übernimmt <RunStatusView> die komplette
-  // Ergebnisdarstellung (Badge + Threshold-Notice + Karten + Run-Foot).
-  // Wir blenden dann hier oben die Metrik-Zeile und die Fehlerursachen
-  // Sobald k6 fertig ist, übernimmt <RunStatusView> die komplette
-  // Ergebnisdarstellung (PASSED/FAILED-Pille + Exit-Code in der
-  // `ResultHeader`-Zeile, Threshold-Notice, Karten, Run-Foot). Hier
-  // oben blenden wir dann sowohl die Status-Pille als auch die
-  // Fehlerursachen aus, damit nichts doppelt erscheint. Für
-  // RUNNING/QUEUED bleibt die Status-Pille sichtbar; den Zeit-Hint
-  // (`läuft seit …`) blenden wir weiterhin aus, weil die drei Cells
-  // unten (LÄUFT SEIT / NOCH / GESTARTET) dieselbe Information
-  // übersichtlicher zeigen.
+  // As soon as k6 is done, <RunStatusView> takes over the full
+  // result presentation (badge + threshold notice + cards + run
+  // foot). We then hide the metric row and the failure causes here.
+  // As soon as k6 is done, <RunStatusView> takes over the full
+  // result presentation (PASSED/FAILED pill + exit code in the
+  // `ResultHeader` row, threshold notice, cards, run foot). Here at
+  // the top we hide both the status pill and the failure causes so
+  // nothing appears twice. For RUNNING/QUEUED the status pill stays
+  // visible; we keep hiding the time hint ("running since …")
+  // because the three cells below (RUNNING SINCE / REMAINING /
+  // STARTED) show the same information more clearly.
   const isFinished = run.status === 'COMPLETED' || run.status === 'FAILED'
 
   return (

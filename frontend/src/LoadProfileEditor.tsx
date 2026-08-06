@@ -68,9 +68,9 @@ export function LoadProfileEditor({ profile, onChange, disabled = false }: LoadP
   const errorId = useId()
   const presetHelpId = useId()
   const [presetHovered, setPresetHovered] = useState<string | undefined>()
-  // Die zuletzt geklickte Schnellauswahl bleibt markiert, bis eine
-  // andere gewählt wird. So sieht der User jederzeit, welches Preset
-  // aktuell aktiv ist — auch nachdem die Maus den Button verlassen hat.
+  // The last clicked preset stays highlighted until a different one is
+  // chosen. This way the user always sees which preset is currently
+  // active — even after the mouse has left the button.
   const [presetSelected, setPresetSelected] = useState<string | undefined>()
 
   function emit(next: LoadProfile) {
@@ -104,10 +104,9 @@ export function LoadProfileEditor({ profile, onChange, disabled = false }: LoadP
             className="profile-type-select"
             value={profile.type}
             onChange={event => {
-              // Wenn der User den Lastprofil-Typ manuell wechselt, passt
-              // die zuvor gewählte Schnellauswahl nicht mehr — wir
-              // räumen die Markierung auf, damit klar ist, dass kein
-              // Preset mehr aktiv ist.
+              // When the user manually switches the load profile type,
+              // the previously chosen preset no longer fits — we clear
+              // the highlight so it's clear that no preset is active.
               setPresetSelected(undefined)
               emit(changeProfileType(profile, event.target.value as LoadProfile['type']))
             }}
@@ -154,9 +153,9 @@ function PresetRow({
   onPick: (entry: PresetEntry) => void
   helpId: string
 }) {
-  // Beim Verlassen der Maus / des Fokus fällt der Hilfe-Text auf die
-  // Beschreibung der zuletzt gewählten Schnellauswahl zurück, damit
-  // der User weiterhin sieht, was das aktive Preset macht.
+  // When the mouse / focus leaves, the help text falls back to the
+  // description of the last selected preset, so the user keeps seeing
+  // what the active preset does.
   const focusLabel = hovered ?? selected
   return (
     <div className="preset-row" aria-describedby={helpId}>
@@ -164,7 +163,13 @@ function PresetRow({
       <div className="preset-buttons">
         {PRESETS.map(entry => {
           const isHovered = hovered === entry.label
-          const isSelected = !isHovered && selected === entry.label
+          // `hovered` and `selected` are orthogonal — both classes can
+          // be active at the same time (mouse over an already-selected
+          // preset). Previously they were coupled together
+          // (`!isHovered && selected === …`), which swallowed the
+          // `selected` class on click as long as the mouse had not
+          // been moved away from the button.
+          const isSelected = selected === entry.label
           return (
             <button
               type="button"

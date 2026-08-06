@@ -1,12 +1,12 @@
-// Time-Series-Loader für die Ramp-Grafik im Report. Holt die echten
-// Ist-Werte (VUs, RPS) aus InfluxDB über das Backend. Liefert bei
-// Netzwerk- oder Server-Fehlern leere Arrays zurück, damit die UI
-// transparent auf Soll-only zurückfällt.
+// Time-series loader for the ramp chart in the report. Fetches the
+// real measured values (VUs, RPS) from InfluxDB through the backend.
+// Returns empty arrays on network or server errors so the UI can
+// transparently fall back to "target only".
 
 export type TimeSeriesPoint = {
-  /** ISO-8601-Zeitstempel. */
+  /** ISO-8601 timestamp. */
   time: string
-  /** Messwert (VUs als Ganzzahl, RPS als Fließkomma). */
+  /** Measured value (VUs as integer, RPS as float). */
   value: number
 }
 

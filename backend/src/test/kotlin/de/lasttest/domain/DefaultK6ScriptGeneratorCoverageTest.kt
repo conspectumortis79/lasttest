@@ -11,13 +11,12 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Tests, die ausschließlich die Branches der `validateLoadProfile`- und
- * `renderScenario`-Methoden abdecken. Diese Methoden haben viele
- * Validierungspfade (4 Executor × mehrere Pflichtfelder × Range-Checks),
- * und die normalen Smoke-Tests aus `DefaultK6ScriptGeneratorTest`
- * decken nicht alle Branches ab. Wir testen hier isoliert, damit
- * Coverage-Lücken in `validateLoadProfile` und `renderScenario`
- * geschlossen werden.
+ * Tests that exclusively cover the branches of the `validateLoadProfile`
+ * and `renderScenario` methods. These methods have many validation
+ * paths (4 executor flavours × several mandatory fields × range checks),
+ * and the normal smoke tests in `DefaultK6ScriptGeneratorTest` do not
+ * cover all branches. We test them in isolation here so that coverage
+ * gaps in `validateLoadProfile` and `renderScenario` are closed.
  */
 class DefaultK6ScriptGeneratorCoverageTest {
     private val generator = DefaultK6ScriptGenerator()
@@ -423,7 +422,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         assertTrue(ex.message!!.contains("maxVUs"))
     }
 
-    // --- renderScenario: alle 4 Pfade explizit abdecken ---
+    // --- renderScenario: cover all 4 branches explicitly ---
 
     @Test
     fun `renderScenario constant-vus with all fields set produces valid output`() {

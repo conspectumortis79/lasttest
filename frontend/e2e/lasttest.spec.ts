@@ -78,7 +78,7 @@ test('validates imports, load profiles, parameters, bodies, and target URLs', as
   await expect(page.locator('.operation-card')).toHaveCount(6)
   await expect(page.getByLabel('Endpunkt GET /products auswählen')).toBeChecked()
 
-  // Initial sind alle Endpunkte eingeklappt. Erst aufklappen, dann füllen.
+  // Initially all endpoints are collapsed. Expand first, then fill in.
   await expandOperation(page, 'listProducts')
   await expandOperation(page, 'getProduct')
   await expect(page.getByLabel('listProducts: category')).toHaveValue('books')
@@ -97,19 +97,24 @@ test('validates imports, load profiles, parameters, bodies, and target URLs', as
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
   await expect(page.locator('.error')).toHaveText('Die Dauer muss zwischen 1 und 3600 Sekunden liegen.')
 
-  // URL-Validierung zuerst (listProducts ist weiterhin ausgewählt).
+  // URL validation first (listProducts remains selected).
   await page.getByLabel('Dauer (Sekunden)').fill('1')
   await page.getByLabel('Base URL').fill('file:///etc/passwd')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
   await expect(page.locator('.error')).toContainText('Base-URL muss mit http:// oder https:// beginnen')
 
-  // Jetzt den JSON-Validierungsfehler: updateProduct auswählen (ersetzt listProducts).
+  // Now the JSON validation error: select updateProduct (replaces listProducts).
+  // With the body-schema-aware validation, the start button is disabled
+  // while the body is invalid, and an inline error explains why.
   await page.getByLabel('Base URL').fill('http://localhost:8286/demo-api')
   await expandOperation(page, 'updateProduct')
-  await page.getByLabel('updateProduct: JSON Request-Body').fill('{invalid}')
   await page.getByLabel('Endpunkt PUT /products/{id} auswählen').check()
-  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
-  await expect(page.locator('.error')).toContainText('kein gültiges JSON')
+  await page.getByLabel('updateProduct: JSON Request-Body').fill('{invalid}')
+  const startButton = page.getByRole('button', { name: 'k6-Lasttest starten' })
+  await expect(startButton).toBeDisabled()
+  await expect(
+    page.locator('.parameter-error', { hasText: /kein gültiges JSON/ }),
+  ).toBeVisible()
 })
 
 test('runs the selected endpoint and opens the complete report in a new tab', async ({ page }) => {
@@ -117,7 +122,7 @@ test('runs the selected endpoint and opens the complete report in a new tab', as
   await expect(specification).toContainText('Lasttest Demo API')
   await importDemo(page)
 
-  // Single-Selection: listProducts (Default) abwählen, dann searchProducts auswählen.
+  // Single-selection: uncheck listProducts (default), then check searchProducts.
   await page.getByLabel('Endpunkt GET /products auswählen').uncheck()
   await expandOperation(page, 'searchProducts')
   await page.getByLabel('Endpunkt POST /products/search auswählen').check()
@@ -268,7 +273,7 @@ test('allows only one endpoint to be selected at a time', async ({ page }) => {
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
 
-  // Initial: nur der erste nonDestructive Endpunkt (listProducts) ist ausgewählt.
+  // Initially: only the first nonDestructive endpoint (listProducts) is selected.
   const listCheckbox = page.getByLabel('Endpunkt GET /products auswählen')
   const searchCheckbox = page.getByLabel('Endpunkt POST /products/search auswählen')
   const getCheckbox = page.getByLabel('Endpunkt GET /products/{id} auswählen')
@@ -277,22 +282,22 @@ test('allows only one endpoint to be selected at a time', async ({ page }) => {
   await expect(searchCheckbox).not.toBeChecked()
   await expect(getCheckbox).not.toBeChecked()
 
-  // Klick auf searchProducts: listProducts wird abgewählt.
+  // Click on searchProducts: listProducts is unchecked.
   await searchCheckbox.check()
   await expect(searchCheckbox).toBeChecked()
   await expect(listCheckbox).not.toBeChecked()
 
-  // Klick auf getProduct: searchProducts wird abgewählt.
+  // Click on getProduct: searchProducts is unchecked.
   await getCheckbox.check()
   await expect(getCheckbox).toBeChecked()
   await expect(searchCheckbox).not.toBeChecked()
 
-  // Erneuter Klick auf listProducts: getProduct wird abgewählt.
+  // Click on listProducts again: getProduct is unchecked.
   await listCheckbox.check()
   await expect(listCheckbox).toBeChecked()
   await expect(getCheckbox).not.toBeChecked()
 
-  // Erneuter Klick auf die bereits ausgewählte Checkbox wählt ab.
+  // Clicking an already-selected checkbox again deselects it.
   await listCheckbox.uncheck()
   await expect(listCheckbox).not.toBeChecked()
   await expect(page.getByRole('button', { name: 'k6-Lasttest starten' })).toBeDisabled()
@@ -412,14 +417,15 @@ paths:
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
   await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 30_000 })
-  // Die neue RunStatusView-Komponente: Bei FAILED mit Threshold-Verletzung
-  // (http_req_failed > 5 %) rendert sie die Summary-Karten mit roter
-  // Einfärbung, einen ResultHeader mit FAILED-Pille und einen ResultFoot
-  // mit dem Report-Link. Wir verifizieren alle drei.
+  // Bei einem unerreichbaren Endpoint liefert k6 zwar Threshold-Metriken
+  // (http_req_failed.value=1), aber der Run war technisch nicht
+  // erfolgreich. Die UI priorisiert dann den typisierten Failure-Block
+  // (Connection refused), damit der User die eigentliche Ursache sieht
+  // — Threshold-Karten mit „100 % HTTP-Fehlerrate“ waeren hier
+  // irrefuehrend.
   await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
-  await expect(page.locator('.run-summary-cards')).toBeVisible()
-  await expect(page.getByText('HTTP-Fehlerrate')).toBeVisible()
-  await expect(page.locator('.run-result-foot')).toBeVisible()
+  await expect(page.locator('.run-failure').locator('.run-failure-label')).toHaveText('Verbindung abgelehnt')
+  await expect(page.locator('.result-header-actions').getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })).toBeVisible()
   await expect(page.getByText('k6-Konsolenausgabe')).toBeVisible()
   await expect(page.getByText('k6-JSON-Rohdaten')).toBeVisible()
 })
@@ -431,7 +437,7 @@ test('runs the selected destructive endpoint with bearer token and downloads the
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
   await expect(page.locator('.operation-card')).toHaveCount(6)
 
-  // Single-Selection: nur eine Operation zur Zeit – wir wählen searchProducts für den Bearer-Test.
+  // Single-selection: only one operation at a time — we pick searchProducts for the bearer test.
   await expandOperation(page, 'searchProducts')
   await page.getByLabel('Endpunkt POST /products/search auswählen').check()
   await page.getByLabel('searchProducts: Bearer-Token').fill('demo-secret')
@@ -541,8 +547,8 @@ paths:
   await expect(page.locator('.parameter-box', { has: emailInput }).locator('.type-hint')).toHaveText('email')
   await expect(page.locator('.parameter-box', { has: enabledInput }).locator('.type-hint')).toHaveText('boolean')
 
-  // Die importierten Beispielwerte (id=1, count=1, price=0.01, category=books, email=test@example.com, enabled=true)
-// sind alle schema-konform und lösen keinen Hinweis aus.
+  // The imported sample values (id=1, count=1, price=0.01, category=books, email=test@example.com, enabled=true)
+// are all schema-conformant and do not trigger any hint.
   await expect(card.locator('.parameter-error')).toHaveCount(0)
 
   // int64: Buchstaben → rote Fehlermeldung.
@@ -551,11 +557,11 @@ paths:
   await expect(idBox.locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Ganzzahl (long).')
   await expect(idInput).toHaveAttribute('aria-invalid', 'true')
 
-  // int64: gültiger Wert → Fehlermeldung verschwindet.
+  // int64: valid value → error message disappears.
   await idInput.fill('42')
   await expect(idBox.locator('.parameter-error')).toHaveCount(0)
 
-  // int32: out-of-range → Fehlermeldung über Bereich.
+  // int32: out-of-range → error message about the range.
   await countInput.fill('2147483648')
   await expect(page.locator('.parameter-box', { has: countInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Ganzzahl (int32).')
 
@@ -563,7 +569,7 @@ paths:
   await countInput.fill('0')
   await expect(page.locator('.parameter-box', { has: countInput }).locator('.parameter-error')).toHaveText('Ungültig: Wert muss ≥ 1 sein.')
 
-  // int32: gültig → Fehlermeldung verschwindet.
+  // int32: valid → error message disappears.
   await countInput.fill('50')
   await expect(page.locator('.parameter-box', { has: countInput }).locator('.parameter-error')).toHaveCount(0)
 
@@ -571,23 +577,23 @@ paths:
   await priceInput.fill('not-a-number')
   await expect(page.locator('.parameter-box', { has: priceInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Zahl (double).')
 
-  // double: gültige Dezimalzahl → ok.
+  // double: valid decimal number → ok.
   await priceInput.fill('19.95')
   await expect(page.locator('.parameter-box', { has: priceInput }).locator('.parameter-error')).toHaveCount(0)
 
-  // enum: ungültiger Wert → Meldung listet erlaubte Werte.
+  // enum: invalid value → message lists allowed values.
   await categoryInput.fill('toys')
   await expect(page.locator('.parameter-box', { has: categoryInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet einen Wert aus „books“, „hardware“ oder „software“.')
 
-  // enum: gültig → ok.
+  // enum: valid → ok.
   await categoryInput.fill('books')
   await expect(page.locator('.parameter-box', { has: categoryInput }).locator('.parameter-error')).toHaveCount(0)
 
-  // email: ungültig → Meldung.
+  // email: invalid → message.
   await emailInput.fill('not-an-email')
   await expect(page.locator('.parameter-box', { has: emailInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet eine E-Mail-Adresse.')
 
-  // email: gültig → ok.
+  // email: valid → ok.
   await emailInput.fill('user@example.com')
   await expect(page.locator('.parameter-box', { has: emailInput }).locator('.parameter-error')).toHaveCount(0)
 
@@ -640,7 +646,7 @@ paths:
   const idInput = page.getByLabel('listItems: id')
   const startButton = page.getByRole('button', { name: 'k6-Lasttest starten' })
 
-  // Mit leerem Wert ist alles gültig → Button aktiv.
+  // With an empty value, everything is valid → button is enabled.
   await expect(startButton).toBeEnabled()
 
   // Buchstaben in das int64-Feld → Fehlermeldung + Button deaktiviert.
@@ -649,11 +655,11 @@ paths:
   await expect(page.getByRole('alert').filter({ hasText: 'Bitte korrigiere die rot markierten Eingaben' })).toBeVisible()
   await expect(startButton).toBeDisabled()
 
-  // Endpunkt abwählen → nichts zum Starten ausgewählt → Button bleibt deaktiviert.
+  // Uncheck the endpoint → nothing selected to start → button stays disabled.
   await page.getByLabel('Endpunkt GET /items auswählen').uncheck()
   await expect(startButton).toBeDisabled()
 
-  // Endpunkt erneut auswählen → Validierung greift wieder.
+  // Re-select the endpoint → validation kicks in again.
   await page.getByLabel('Endpunkt GET /items auswählen').check()
   await expect(startButton).toBeDisabled()
 
@@ -701,7 +707,7 @@ paths:
   await expect(page.getByRole('heading', { name: /Body API/ })).toBeVisible()
   await expect(page.locator('.operation-card')).toHaveCount(1)
 
-  // POST ist destruktiv → wird nicht auto-selektiert. Manuell auswählen.
+  // POST is destructive → is not auto-selected. Select it manually.
   await page.getByLabel('Endpunkt POST /items auswählen').check()
 
   const card = page.locator('.operation-card').first()
@@ -711,7 +717,7 @@ paths:
   const bodyInput = page.getByLabel('createItem: JSON Request-Body')
   const startButton = page.getByRole('button', { name: 'k6-Lasttest starten' })
 
-  // Beispiel wird vom Backend gesetzt: ein gültiges Objekt. Button ist aktiv.
+  // Example is set by the backend: a valid object. Button is enabled.
   await expect(bodyInput).toHaveValue(/.+/)
   await expect(startButton).toBeEnabled()
 
@@ -720,7 +726,7 @@ paths:
   await expect(card.locator('.parameter-error')).toHaveText('Ungültig: Pflicht-Request-Body ist leer.')
   await expect(startButton).toBeDisabled()
 
-  // Ungültiges JSON.
+  // Invalid JSON.
   await bodyInput.fill('{invalid}')
   await expect(card.locator('.parameter-error')).toHaveText('Ungültig: kein gültiges JSON.')
   await expect(startButton).toBeDisabled()
@@ -740,7 +746,7 @@ paths:
   await expect(card.locator('.parameter-error')).toContainText('Wert muss ≥ 0.01 sein')
   await expect(startButton).toBeDisabled()
 
-  // Gültiger Body.
+  // Valid body.
   await bodyInput.fill('{"name":"Luna","price":1.5}')
   await expect(card.locator('.parameter-error')).toHaveCount(0)
   await expect(startButton).toBeEnabled()
@@ -789,7 +795,7 @@ paths:
   await expect(page.getByRole('heading', { name: /Two Endpoints/ })).toBeVisible()
   await expect(page.locator('.operation-card')).toHaveCount(2)
 
-  // getAlpha ist initial ausgewählt. Wir machen es ungültig.
+  // getAlpha is initially selected. We make it invalid.
   const alphaCard = page.locator('.operation-card', { has: page.locator('.operation-id', { hasText: 'getAlpha' }) })
   const betaCard = page.locator('.operation-card', { has: page.locator('.operation-id', { hasText: 'getBeta' }) })
   await alphaCard.locator('button.expand-toggle').click()
@@ -797,23 +803,23 @@ paths:
   const startButton = page.getByRole('button', { name: 'k6-Lasttest starten' })
   await expect(startButton).toBeDisabled()
 
-  // Wechsel zu getBeta: alpha-Wert bleibt ungültig, aber die ausgewählte Operation ist neu.
-  // Beta hat einen gültigen Beispielwert (erster enum-Wert "a") → Button wird wieder aktiv.
+  // Switch to getBeta: alpha value stays invalid, but the selected operation is the new one.
+  // Beta has a valid example value (first enum value "a") → button is enabled again.
   await page.getByLabel('Endpunkt GET /alpha auswählen').uncheck()
   await page.getByLabel('Endpunkt GET /beta auswählen').check()
   await expect(startButton).toBeEnabled()
 
-  // Beta ungültig machen → Button wird deaktiviert.
+  // Make Beta invalid → button is disabled.
   await betaCard.locator('button.expand-toggle').click()
   await page.getByLabel('getBeta: flag').fill('toys')
   await expect(startButton).toBeDisabled()
 
-  // Zurück zu Alpha: alpha hat immer noch den ungültigen Wert → Button bleibt deaktiviert.
+  // Back to Alpha: alpha still has the invalid value → button stays disabled.
   await page.getByLabel('Endpunkt GET /beta auswählen').uncheck()
   await page.getByLabel('Endpunkt GET /alpha auswählen').check()
   await expect(startButton).toBeDisabled()
 
-  // Alpha wieder gültig machen → Button wird wieder aktiv.
+  // Make Alpha valid again → button is enabled again.
   await page.getByLabel('getAlpha: id').fill('5')
   await expect(startButton).toBeEnabled()
 })
@@ -847,7 +853,7 @@ test('renders the new load profile editor with presets and validates stages', as
   const errorBox = editor.locator('.parameter-error')
   await expect(errorBox).toHaveCount(0)
 
-  // Eine Stage hinzufügen.
+  // Add one stage.
   await editor.getByRole('button', { name: 'Stage hinzufügen' }).click()
   await expect(stageRows).toHaveCount(5)
 
@@ -906,8 +912,8 @@ test('changing the profile-type dropdown clears the selected preset', async ({ p
 
   // User wechselt das Lastprofil im Dropdown von constant-vus auf ramping-vus.
   // Spike (das nur ramping-vus liefert) ist weiter klickbar, aber die
-  // Auswahl an sich soll zurückgesetzt werden, weil der User jetzt
-  // bewusst einen anderen Typ gewählt hat.
+  // The selection itself should be reset because the user has now
+  // consciously chosen a different type.
   await profileSelect.selectOption('ramping-vus')
   await expect(spike).not.toHaveClass(/selected/)
   await expect(soak).not.toHaveClass(/selected/)
@@ -916,7 +922,7 @@ test('changing the profile-type dropdown clears the selected preset', async ({ p
   await soak.click()
   await expect(soak).toHaveClass(/selected/)
 
-  // Und ein weiterer Dropdown-Wechsel räumt auch Soak wieder ab.
+  // And another dropdown change also clears Soak again.
   await profileSelect.selectOption('constant-arrival-rate')
   await expect(soak).not.toHaveClass(/selected/)
 })
@@ -965,10 +971,10 @@ test('Report-Button sitzt fest direkt unter der Run-ID (rechtsbündig) — Detai
   const jsonClosed = await jsonDetails.boundingBox()
   if (!cardBox || !btnClosed || !consoleClosed || !jsonClosed) throw new Error('Bounding-Box nicht verfuegbar')
 
-  // 1) Button ist rechtsbündig: sein rechter Rand liegt am rechten
-  //    Inhaltsrand der Karte. Da `.card` ein `padding: 1.5rem` (24 px)
-  //    hat, darf der Abstand bis zur Card-Außenkante diesen Wert plus
-  //    etwas Subpixel-Puffer nicht überschreiten.
+  // 1) Button is right-aligned: its right edge sits at the right
+  //    content edge of the card. Since `.card` has a `padding: 1.5rem`
+  //    (24 px), the distance to the card's outer edge must not exceed
+  //    that value plus a small subpixel buffer.
   const cardRight = cardBox.x + cardBox.width
   const rightPadding = 32
   expect(cardRight - (btnClosed.x + btnClosed.width)).toBeLessThan(rightPadding)
@@ -983,51 +989,59 @@ test('Report-Button sitzt fest direkt unter der Run-ID (rechtsbündig) — Detai
   expect(consoleClosed.width).toBeGreaterThan(btnClosed.width)
   expect(jsonClosed.width).toBeGreaterThan(btnClosed.width)
 
-  // 4) Initialposition des Buttons merken (alle <details> zu).
-  const initialY = btnClosed.y
-  const initialX = btnClosed.x
+  // 4) Initialposition des Buttons merken (alle <details> zu). Wir
+  //    messen die Position RELATIV zum Header — sonst haengt das
+  //    Ergebnis am Page-Scroll (das Aufklappen der Details
+  //    verlaengert die Seite und aendert die Viewport-Y, obwohl der
+  //    Button im Layout wirklich an der gleichen Stelle sitzt).
+  const readBtnRel = () => page.evaluate(() => {
+    const btn = document.querySelector('.report-btn')
+    const header = document.querySelector('.result-header')
+    if (!btn || !header) throw new Error('report-btn or .result-header not found')
+    const b = btn.getBoundingClientRect()
+    const h = header.getBoundingClientRect()
+    return { dx: b.left - h.left, dy: b.top - h.top }
+  })
+  const initialRel = await readBtnRel()
 
   // 5) k6-Konsolenausgabe aufklappen — Button darf nicht mitwandern.
   await consoleDetails.locator('summary').click()
   await expect(consoleDetails).toHaveAttribute('open', '')
-  const btnAfterConsole = await reportBtn.boundingBox()
-  if (!btnAfterConsole) throw new Error('Bounding-Box nicht verfuegbar')
-  expect(Math.abs(btnAfterConsole.y - initialY)).toBeLessThan(1.5)
-  expect(Math.abs(btnAfterConsole.x - initialX)).toBeLessThan(1.5)
+  const afterConsoleRel = await readBtnRel()
+  expect(Math.abs(afterConsoleRel.dy - initialRel.dy)).toBeLessThan(1.5)
+  expect(Math.abs(afterConsoleRel.dx - initialRel.dx)).toBeLessThan(1.5)
 
   // 6) k6-JSON-Rohdaten zusaetzlich aufklappen — Button bleibt fix.
   await jsonDetails.locator('summary').click()
   await expect(jsonDetails).toHaveAttribute('open', '')
-  const btnAfterBoth = await reportBtn.boundingBox()
-  if (!btnAfterBoth) throw new Error('Bounding-Box nicht verfuegbar')
-  expect(Math.abs(btnAfterBoth.y - initialY)).toBeLessThan(1.5)
-  expect(Math.abs(btnAfterBoth.x - initialX)).toBeLessThan(1.5)
+  const afterBothRel = await readBtnRel()
+  expect(Math.abs(afterBothRel.dy - initialRel.dy)).toBeLessThan(1.5)
+  expect(Math.abs(afterBothRel.dx - initialRel.dx)).toBeLessThan(1.5)
 
   // 7) Beide Details wieder zuklappen — Button immer noch am selben Ort.
   await consoleDetails.locator('summary').click()
   await jsonDetails.locator('summary').click()
-  const btnFinal = await reportBtn.boundingBox()
-  if (!btnFinal) throw new Error('Bounding-Box nicht verfuegbar')
-  expect(Math.abs(btnFinal.y - initialY)).toBeLessThan(1.5)
-  expect(Math.abs(btnFinal.x - initialX)).toBeLessThan(1.5)
+  const finalRel = await readBtnRel()
+  expect(Math.abs(finalRel.dy - initialRel.dy)).toBeLessThan(1.5)
+  expect(Math.abs(finalRel.dx - initialRel.dx)).toBeLessThan(1.5)
 })
 
 test('report page renders the ramp-grafik for a completed ramping-vus run', async ({ page }) => {
-  // Diese Suite setzt voraus, dass ein k6-fähiger Container läuft und
-  // ein Ramping-VUs-Lauf in der jüngeren Vergangenheit abgeschlossen
-  // wurde. Wir erzeugen den Lauf, warten auf COMPLETED, öffnen den
-  // Report und prüfen, dass die Ramp-Grafik gerendert wird.
+  // This suite assumes that a k6-enabled container is running and
+  // that a ramping-vus run has completed in the recent past. We
+  // create the run, wait for COMPLETED, open the report and check
+  // that the ramp chart renders.
   await importDemo(page)
 
-  // Ramping-VUs-Profil auswählen.
+  // Select the ramping-vus profile.
   const profileSelect = page.locator('.profile-type-select')
   await profileSelect.selectOption('ramping-vus')
   await page.locator('[data-testid="load-profile-editor"]').getByRole('button', { name: 'Spike', exact: true }).click()
 
   // 200 ms reichen, damit der Demo-Endpunkt unter lasttest/demo-api
   // antwortet; Stages sind 0/2s, 800/10s, 800/30s, 0/2s ≈ 44 s.
-  // Wir verkürzen die Stages für den E2E-Test, indem wir die
-  // Editor-Werte direkt ändern.
+  // We shorten the stages for the E2E test by changing the editor
+  // values directly.
   const stageRows = page.locator('.stages-table tbody tr')
   await expect(stageRows).toHaveCount(4)
   // Setze alle Durations auf 1 s → Lauf dauert ~4 s.
@@ -1037,10 +1051,11 @@ test('report page renders the ramp-grafik for a completed ramping-vus run', asyn
   }
 
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
-  // Warten bis der Run-Status COMPLETED ist.
-  await expect(page.getByText('COMPLETED', { exact: false })).toBeVisible({ timeout: 60_000 })
+  // Warten bis der Run-Status PASSED ist (das Badge zeigt "PASSED"
+  // bzw. "FAILED", nicht den internen Status "COMPLETED").
+  await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 60_000 })
 
-  // Report-Link öffnen.
+  // Open the report link.
   const reportLink = page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })
   const [reportPage] = await Promise.all([page.context().waitForEvent('page'), reportLink.click()])
 
@@ -1064,8 +1079,8 @@ test('report page renders the ramp-grafik for a completed ramping-vus run', asyn
 // Klick auf „k6-Lasttest starten“ im Haupt-Editor erscheinen.
 
 test('shows the live progress card while a k6 run is QUEUED or RUNNING', async ({ page }) => {
-  // Wählt einen etwas längeren Lauf, damit die Polling-Animation
-  // mit Sicherheit mindestens einen RUNNING-Frame einfängt.
+  // Picks a slightly longer run so that the polling animation is
+  // guaranteed to capture at least one RUNNING frame.
   await importDemo(page)
   await page.getByLabel('Virtual Users').fill('1')
   await page.getByLabel('Dauer (Sekunden)').fill('5')
@@ -1073,11 +1088,12 @@ test('shows the live progress card while a k6 run is QUEUED or RUNNING', async (
 
   // Status-Badge ist sichtbar. Da der Test asynchron auf den Lauf
   // wartet, kann die Karte sowohl RUNNING als auch schon COMPLETED
-  // sein — wir prüfen daher nur die Zeitanzeige-Komponente.
+  // so we only check the time-display component.
   await expect(page.locator('.status.running, .status.queued, .status-badge.is-pass').first()).toBeVisible({ timeout: 30_000 })
 
-  // .run-progress ist da, solange der Test läuft, ODER .run-summary-cards
-  // ist da, wenn er schon fertig ist. Mindestens eines davon.
+  // .run-progress is present while the test is running, OR
+  // .run-summary-cards is present when it is already finished. At
+  // least one of them.
   const progress = page.locator('.run-progress')
   const summary = page.locator('.run-summary-cards')
   await expect(progress.or(summary)).toBeVisible()
@@ -1104,7 +1120,7 @@ test('renders a compact summary card grid after a successful smoke test complete
 })
 
 test('renders a typed failure card with DNS error when the target host cannot be resolved', async ({ page }) => {
-  // Spezifikation, die auf einen nicht auflösbaren Host zeigt.
+  // Specification that points to a host that cannot be resolved.
   const unreachableSpec = `openapi: 3.0.3
 info:
   title: DNS Failure
@@ -1136,14 +1152,13 @@ paths:
   await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 60_000 })
   await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
 
-  // Die Diagnose "DNS-Auflösung" wird im threshold-notice gezeigt, wenn
-  // die http_req_failed-Rate ueber 5 % liegt (was bei DNS-Fehler der
-  // Fall ist). Andernfalls wird die .run-failure-Karte angezeigt.
-  // Wir akzeptieren beides und pruefen nur, dass die Diagnose im DOM
-  // sichtbar ist.
-  const thresholdNotice = page.getByText(/verletzt|Threshold/)
-  const failureCard = page.locator('.run-failure')
-  await expect(thresholdNotice.or(failureCard)).toBeVisible()
+  // The "DNS resolution" diagnosis is shown in the .run-failure
+  // card. On a DNS error, k6 also produces a threshold violation
+  // (http_req_failed.value=1), so the threshold notice also appears
+  // — both are legitimate and should be visible at the same time.
+  await expect(page.locator('.run-failure-label')).toHaveText('DNS-Auflösung')
+  await expect(page.locator('.run-failure')).toBeVisible()
+  await expect(page.getByText(/verletzt|Threshold/)).toBeVisible()
 })
 
 test('renders a typed failure card with connection-refused when the port is not open', async ({ page }) => {
@@ -1175,9 +1190,12 @@ paths:
 
   await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 60_000 })
 
-  // FAILED-Pille + Summary-Cards (rote Einfärbung wegen Threshold-Verletzung).
+  // Bei einem Connection Refused liefert k6 zwar Threshold-Metriken,
+  // aber der Run war technisch nicht erfolgreich. Die UI priorisiert
+  // daher die typed-failure-Karte mit Label "Verbindung abgelehnt".
   await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
-  await expect(page.locator('.run-summary-cards')).toBeVisible()
+  await expect(page.locator('.run-failure-label')).toHaveText('Verbindung abgelehnt')
+  await expect(page.locator('.run-failure')).toBeVisible()
 })
 
 test('the completed summary card grid is also visible in the report popup', async ({ page }) => {
@@ -1187,8 +1205,8 @@ test('the completed summary card grid is also visible in the report popup', asyn
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
 
-  // Report-Popup öffnen und prüfen, dass die ausführliche
-  // Zusammenfassung (Cards + Thresholds) sichtbar ist.
+  // Open the report popup and check that the detailed summary
+  // (cards + thresholds) is visible.
   const popupPromise = page.context().waitForEvent('page')
   await page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i }).click()
   const report = await popupPromise
@@ -1871,12 +1889,12 @@ test.describe('D) Live-Run-Szenarien', () => {
     await expandOperation(page, 'updateProduct')
     await page.getByLabel('Endpunkt PUT /products/{id} auswählen').check()
     await page.getByLabel('updateProduct: id').fill('7')
-    await page.getByLabel('updateProduct: JSON Request-Body').fill('{"name":"updated","price":1.5}')
+    await page.getByLabel('updateProduct: JSON Request-Body').fill('{"name":"updated","price":1.5,"category":"books","available":true}')
     await page.getByLabel('Virtual Users').fill('1')
     await page.getByLabel('Dauer (Sekunden)').fill('1')
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 30_000 })
-    // FAILED-Pille und Summary-Cards (rote Einfärbung wegen Threshold-Verletzung).
+    // FAILED pill and summary cards (red highlight due to threshold violation).
     await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
     await expect(page.locator('.run-summary-cards')).toBeVisible()
   })
@@ -1938,10 +1956,12 @@ paths:
     await page.getByLabel('Dauer (Sekunden)').fill('2')
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 30_000 })
-    // FAILED-Pille + Summary-Cards (rote Einfärbung wegen Threshold-Verletzung).
+    // FAILED pill + typed failure card. Connection-refused is a hard
+    // infrastructure failure, so the UI prioritises the typed block
+    // over the threshold cards.
     await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
-    await expect(page.locator('.run-summary-cards')).toBeVisible()
     const failureCard = page.locator('.run-failure')
+    await expect(failureCard).toBeVisible()
     await expect(failureCard.locator('.run-failure-label')).toHaveText('Verbindung abgelehnt')
   })
 

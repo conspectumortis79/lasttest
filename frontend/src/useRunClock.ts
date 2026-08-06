@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { TestRun } from './k6Report.ts'
 
-// Halten einen eigenen „now"-Timestamp, der im 500-ms-Takt aktualisiert
-// wird, solange der Run in QUEUED oder RUNNING ist. Sobald der Run
-// terminal ist (COMPLETED / FAILED), wird der Ticker gestoppt, damit
-// nach dem Ende keine unsichtbaren Re-Renders mehr passieren.
+// Keep a local "now" timestamp that is refreshed every 500 ms while
+// the run is QUEUED or RUNNING. Once the run reaches a terminal state
+// (COMPLETED / FAILED) the ticker is stopped so no invisible re-renders
+// happen after the run has ended.
 //
-// Ausgelagert in eine eigene Datei, damit die React-Komponenten in
-// `runStatusView.tsx` unter `only-export-components` sauber bleiben.
+// Extracted into its own file so the React components in
+// `runStatusView.tsx` stay clean under `only-export-components`.
 
 const TICK_INTERVAL_MS = 500
 

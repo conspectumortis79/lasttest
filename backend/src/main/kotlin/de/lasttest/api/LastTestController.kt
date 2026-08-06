@@ -68,11 +68,11 @@ class LastTestController(
     }
 
     /**
-     * Liefert Time-Series-Daten (VUs + RPS) für die Ramp-Grafik im
-     * Report. Liest aus InfluxDB; bei Fehlern werden leere Arrays
-     * zurückgegeben, damit der Report zumindest die Soll-Linie
-     * rendert. Liefert 404, wenn der Run unbekannt ist oder noch
-     * läuft (startedAt/finishedAt fehlen).
+     * Returns time-series data (VUs + RPS) for the ramp chart in the
+     * report. Reads from InfluxDB; on errors, empty arrays are returned
+     * so the report can still render the target line. Returns 404 if
+     * the run is unknown or still running (startedAt/finishedAt
+     * missing).
      */
     @GetMapping("/test-runs/{id}/time-series")
     fun timeSeries(

@@ -17,12 +17,12 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * Tests, die ausschließlich Branches in `LocalK6TestRunService` abdecken,
- * die in `LocalK6TestRunServiceTest` nicht abgedeckt sind:
+ * Tests that exclusively cover branches in `LocalK6TestRunService`
+ * which are not covered in `LocalK6TestRunServiceTest`:
  *
- *  - `buildK6Process` mit/ohne InfluxDB-Output
- *  - `truncateForError` für leere und lange Outputs
- *  - `resolveLoadProfile` für alle Legacy-Fallback-Pfade
+ *  - `buildK6Process` with/without InfluxDB output
+ *  - `truncateForError` for empty and long outputs
+ *  - `resolveLoadProfile` for all legacy fallback paths
  */
 class LocalK6TestRunServiceBranchesTest {
     private val specification =
@@ -107,9 +107,9 @@ class LocalK6TestRunServiceBranchesTest {
 
     @Test
     fun `legacy fallback defaults useIterations to false when null`() {
-        // Wenn useIterations null ist, fällt der Elvis-Operator auf
-        // false zurück → es wird constant-vus gebaut. Dieser Test
-        // deckt den Elvis-Branch in resolveLoadProfile.
+        // When useIterations is null, the Elvis operator falls back to
+        // false → constant-vus is built. This test covers the Elvis
+        // branch in resolveLoadProfile.
         val run =
             service().create(
                 CreateTestRunRequest(
@@ -146,8 +146,8 @@ class LocalK6TestRunServiceBranchesTest {
 
     @Test
     fun `legacy fallback rejects request with virtualUsers but no durationSeconds`() {
-        // Test, der den zweiten requireNotNull(duration) triggert —
-        // der erste (vus) ist hier gesetzt, der zweite (duration) nicht.
+        // Test that triggers the second requireNotNull(duration) —
+        // the first (vus) is set here, the second (duration) is not.
         val ex =
             assertFailsWith<IllegalArgumentException> {
                 service().create(
@@ -221,16 +221,16 @@ class LocalK6TestRunServiceBranchesTest {
 
     @Test
     fun `buildK6Process with influxdb enabled sets K6_INFLUXDB_USER and K6_INFLUXDB_PWD env vars`() {
-        // Indirekter Test: wir prüfen, dass das Backend ohne Fehler einen
-        // Run startet (execute() wird im Executor.run() aufgerufen, ist
-        // aber noop hier). Wichtiger ist, dass die Validierung und die
-        // Service-Konstruktion funktioniert, was die Code-Pfade in
-        // buildK6Process abdeckt.
+        // Indirect test: we verify that the backend starts a run without
+        // errors (execute() is invoked inside Executor.run() but is a
+        // no-op here). More importantly, validation and service
+        // construction must work, which covers the code paths in
+        // buildK6Process.
         val svc = service(influxDbEnabled = true)
-        // buildK6Process ist private; die Konstruktion und der create()
-        // decken die Code-Pfade ab. Der eigentliche k6-Aufruf würde
-        // ohne installiertes k6 fehlschlagen, aber das passiert im
-        // Executor und wird von execute() abgefangen.
+        // buildK6Process is private; the construction and create()
+        // cover the code paths. The actual k6 invocation would fail
+        // without k6 installed, but that happens in the executor and
+        // is caught by execute().
         val run =
             svc.create(
                 CreateTestRunRequest(
@@ -286,7 +286,7 @@ class LocalK6TestRunServiceBranchesTest {
         assertTrue(result.endsWith("x".repeat(100)))
     }
 
-    // --- buildK6Process: direkter Test der InfluxDB-Verzweigung ---
+    // --- buildK6Process: direct test of the InfluxDB branch ---
 
     @Test
     fun `buildK6Process skips the influxdb output when disabled`() {

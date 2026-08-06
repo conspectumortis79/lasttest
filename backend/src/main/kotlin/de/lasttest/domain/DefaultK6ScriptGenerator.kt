@@ -182,12 +182,12 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                     require(stage.durationSeconds in 1..MAX_DURATION_SECONDS) {
                         "Stage ${index + 1}: Dauer muss zwischen 1 und $MAX_DURATION_SECONDS Sekunden liegen."
                     }
-                    // Aufeinanderfolgende Stages mit demselben Ziel sind
-                    // erlaubt: sie modellieren ein Plateau (z. B. 50 VUs
-                    // für 5 min halten), was ein klassisches Lasttest-
-                    // Muster ist. Nur Stages mit Ziel == 0 UND Dauer == 0
-                    // wären redundant — aber Dauer wird oben bereits
-                    // gegen [1, MAX_DURATION_SECONDS] validiert.
+                    // Consecutive stages with the same target are allowed:
+                    // they model a plateau (e.g. hold 50 VUs for 5 min),
+                    // which is a classic load-test pattern. Only stages
+                    // with target == 0 AND duration == 0 would be
+                    // redundant — but duration is already validated against
+                    // [1, MAX_DURATION_SECONDS] above.
                 }
             }
             LoadProfileType.CONSTANT_ARRIVAL_RATE -> {

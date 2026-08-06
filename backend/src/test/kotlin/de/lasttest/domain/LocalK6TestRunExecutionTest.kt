@@ -45,12 +45,12 @@ class LocalK6TestRunExecutionTest {
         assertEquals(TestRunStatus.COMPLETED, completed.status)
         assertEquals(0, completed.exitCode)
         assertContains(completed.summary?.get("raw").toString(), "checks")
-        // Bei erfolgreichem Run ist error = null, weil es nichts zu
-        // berichten gibt. Das ist eine bewusste Designentscheidung
-        // (siehe LocalK6TestRunService.execute).
+        // On a successful run, error is null because there is nothing
+        // to report. This is a deliberate design decision
+        // (see LocalK6TestRunService.execute).
         assertNull(completed.error)
-        // Die k6-Konsolenausgabe wird auch im Erfolgsfall gespeichert,
-        // damit die UI sie einblenden kann.
+        // The k6 console output is also persisted on success so the
+        // UI can display it.
         assertEquals("successful k6 output", completed.consoleOutput)
         assertNotNull(completed.startedAt)
         assertNotNull(completed.finishedAt)
@@ -75,8 +75,8 @@ class LocalK6TestRunExecutionTest {
         assertEquals(TestRunStatus.FAILED, failed.status)
         assertEquals(7, failed.exitCode)
         assertEquals("k6 failed", failed.error)
-        // Bei threshold-/Prozess-Fehlern tragen `error` und
-        // `consoleOutput` denselben k6-Output.
+        // On threshold/process failures `error` and
+        // `consoleOutput` carry the same k6 output.
         assertEquals("k6 failed", failed.consoleOutput)
         assertNull(failed.summary)
     }
@@ -90,8 +90,8 @@ class LocalK6TestRunExecutionTest {
 
         assertEquals(TestRunStatus.COMPLETED, completed.status)
         assertNull(completed.error)
-        // Bei komplett leerem k6-Output ist auch die Konsole leer —
-        // kein "k6-Konsolenausgabe"-Block in der UI.
+        // When the k6 output is completely empty, the console is also
+        // empty — no "k6 console output" block in the UI.
         assertNull(completed.consoleOutput)
         assertNull(completed.summary)
     }
@@ -104,8 +104,8 @@ class LocalK6TestRunExecutionTest {
 
         assertEquals(TestRunStatus.FAILED, failed.status)
         assertNotNull(failed.error)
-        // Wenn k6 gar nicht starten konnte, gibt es keine
-        // Konsolenausgabe — nur die Fehlermeldung.
+        // If k6 could not start at all, there is no console
+        // output — only the error message.
         assertNull(failed.consoleOutput)
         assertNotNull(failed.finishedAt)
     }

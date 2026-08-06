@@ -196,12 +196,11 @@ class LocalK6TestRunServiceTest {
 
     @Test
     fun `buildK6Process includes the run_id tag for filtering in InfluxDB`() {
-        // buildK6Process ist private; wir verifizieren die Wirkung über
-        // das öffentliche Verhalten: jeder Run erhält eine eigene ID,
-        // und die generierten k6-Argumente müssen diese ID als Tag
-        // mitschicken. Wir prüfen den Effekt indirekt, indem wir den
-        // Service mit einem Mock-Generator kombinieren, der die
-        // Argumente aufzeichnet.
+        // buildK6Process is private; we verify its effect through the
+        // public behaviour: every run gets its own ID, and the
+        // generated k6 arguments must include that ID as a tag. We
+        // check the effect indirectly by combining the service with
+        // a mock generator that captures the arguments.
         val recordingGenerator = RecordingGenerator()
         val recordingService =
             LocalK6TestRunService(
@@ -231,12 +230,12 @@ class LocalK6TestRunServiceTest {
 
     @Test
     fun `influxdb output is added when enabled and skipped when disabled`() {
-        // buildK6Process ist private; wir verifizieren die Wirkung
-        // über die Anzahl der ProcessBuilder-Args, die wir indirekt
-        // über das Verhalten prüfen. Da buildK6Process den InfluxDB-
-        // Output als zusätzliche Args anhängt, kontrolliert der
-        // `enabled`-Schalter die Anzahl der `--out influxdb=…`-Einträge.
-        // Wir prüfen das Verhalten hier über die Konfiguration.
+        // buildK6Process is private; we verify its effect through the
+        // number of ProcessBuilder args, which we probe indirectly
+        // through behaviour. Since buildK6Process appends the
+        // InfluxDB output as extra args, the `enabled` switch controls
+        // the number of `--out influxdb=…` entries. We check that
+        // behaviour here via the configuration.
         val enabledService =
             LocalK6TestRunService(
                 importer =
@@ -260,10 +259,10 @@ class LocalK6TestRunServiceTest {
                 influxDbProperties = InfluxDbProperties(enabled = false),
             )
 
-        // Beide Services müssen ohne Fehler einen Run anlegen können.
-        // Die buildK6Process-Methode wird in execute() aufgerufen;
-        // wir validieren das Verhalten indirekt durch die
-        // korrekte Run-Erstellung.
+        // Both services must be able to create a run without errors.
+        // The buildK6Process method is invoked from execute();
+        // we validate its behaviour indirectly through the
+        // correct run creation.
         val enabledRun =
             enabledService.create(
                 CreateTestRunRequest(
@@ -306,10 +305,10 @@ class LocalK6TestRunServiceTest {
             operationConfigurations: List<OperationConfiguration>,
             loadProfile: LoadProfile,
         ): String {
-            // Wir haben hier keine direkte Sicht auf die runId, aber
-            // die Aufzeichnung findet im Service statt, bevor execute()
-            // läuft. Wir nehmen den loadProfile auf, den der Service
-            // resolved hat (egal ob via loadProfile oder legacy triple).
+            // We do not have direct visibility of the runId here, but
+            // the recording happens in the service before execute()
+            // runs. We capture the loadProfile that the service has
+            // resolved (whether via loadProfile or legacy triple).
             lastCall = loadProfile to "captured"
             return "export default function () {}"
         }
