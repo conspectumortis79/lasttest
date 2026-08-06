@@ -21,6 +21,8 @@ import {
   operationDisplayPath,
   parseK6Summary,
   progressHint,
+  renderPayloadStrategyHelp,
+  renderPayloadStrategyLabel,
   runElapsedSeconds,
   runRemainingSeconds,
   statusDistribution,
@@ -121,6 +123,7 @@ test('builds the displayed endpoint from path and query values', () => {
       { name: 'unused', location: 'query', value: '' },
     ],
     bearerTokenConfigured: false,
+    payloads: [],
   }
 
   equal(operationDisplayPath(operation), '/pets/42?expand=owner')
@@ -138,6 +141,7 @@ test('keeps unresolved paths and omits empty queries', () => {
       { name: 'X-Tenant', location: 'header', value: 'demo' },
     ],
     bearerTokenConfigured: false,
+    payloads: [],
   }
 
   equal(operationDisplayPath(operation), '/pets/{id}')
@@ -1560,5 +1564,27 @@ test('summariseThresholds returns no failures when the run has no k6 summary at 
   const result = summariseThresholds(run)
   equal(result.passed, false)
   deepEqual(result.failedMetrics, [])
+})
+
+// ---- renderPayloadStrategyLabel / renderPayloadStrategyHelp ------------
+
+test('renderPayloadStrategyLabel maps every wire value to a user-facing string', () => {
+  equal(renderPayloadStrategyLabel('random'), 'Zufällig')
+  equal(renderPayloadStrategyLabel('sequential'), 'Sequenziell')
+  // Legacy runs that pre-date the pool feature arrive without a
+  // strategy field; the label must still be a sensible default.
+  equal(renderPayloadStrategyLabel(null), 'Sequenziell')
+  equal(renderPayloadStrategyLabel(undefined), 'Sequenziell')
+  // Unknown values fall through to the raw string so the user can
+  // still spot a typo or a future enum member.
+  equal(renderPayloadStrategyLabel('fancy'), 'fancy')
+})
+
+test('renderPayloadStrategyHelp describes what the strategy did during the run', () => {
+  equal(renderPayloadStrategyHelp('random'), 'Pro Iteration ein zufälliger Payload aus dem Pool des Endpunkts.')
+  equal(renderPayloadStrategyHelp('sequential'), '1, 2, …, letzter, dann wieder 1 — Round-Robin mit Wrap-Around.')
+  equal(renderPayloadStrategyHelp(null), 'Standard-Verhalten: jeder Endpunkt mit einem einzigen Datensatz.')
+  equal(renderPayloadStrategyHelp(undefined), 'Standard-Verhalten: jeder Endpunkt mit einem einzigen Datensatz.')
+  equal(renderPayloadStrategyHelp('fancy'), '')
 })
 

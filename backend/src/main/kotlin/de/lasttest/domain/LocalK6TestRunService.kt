@@ -8,6 +8,7 @@ import de.lasttest.api.ImportedSpecification
 import de.lasttest.api.LoadProfile
 import de.lasttest.api.LoadProfileType
 import de.lasttest.api.OperationConfiguration
+import de.lasttest.api.OperationPayload
 import de.lasttest.api.ParameterValue
 import de.lasttest.api.TestRun
 import de.lasttest.api.TestRunConfiguration
@@ -114,27 +115,45 @@ class LocalK6TestRunService(
             apiVersion = specification.version,
             baseUrl = request.baseUrl,
             loadProfile = loadProfile,
+            payloadStrategy = loadProfile.payloadStrategy,
             operations = selectedOperations.map { operation -> operation.toRunConfiguration(configurations[operation.operationId]) },
         )
     }
 
     private fun ApiOperation.toRunConfiguration(configuration: OperationConfiguration?): TestRunOperationConfiguration {
         val configuredParameters = configuration?.parameterValues.orEmpty().associateBy { parameterKey(it.location, it.name) }
+        // Resolve the full pool so the report can show every entry —
+        // the flat fields below stay in sync with the first payload so
+        // single-payload reports keep rendering the same as before.
+        val payloads = configuration?.payloads.orEmpty()
+        val primary =
+            payloads.firstOrNull()
+                ?: configuration?.let { c ->
+                    OperationPayload(
+                        parameterValues = c.parameterValues,
+                        requestBodyJson = c.requestBodyJson,
+                        bearerToken = c.bearerToken,
+                    )
+                }
         return TestRunOperationConfiguration(
             operationId = operationId,
             method = method,
             path = path,
             summary = summary,
+            payloads = payloads,
             parameterValues =
                 parameters.map { parameter ->
                     ParameterValue(
                         name = parameter.name,
                         location = parameter.location,
-                        value = configuredParameters[parameterKey(parameter.location, parameter.name)]?.value ?: parameter.reportValue(),
+                        value =
+                            (primary?.parameterValues?.firstOrNull { it.name == parameter.name && it.location.equals(parameter.location, ignoreCase = true) }?.value)
+                                ?: configuredParameters[parameterKey(parameter.location, parameter.name)]?.value
+                                ?: parameter.reportValue(),
                     )
                 },
-            requestBodyJson = reportRequestBody(configuration),
-            bearerTokenConfigured = !configuration?.bearerToken.isNullOrBlank(),
+            requestBodyJson = primary?.requestBodyJson ?: reportRequestBody(configuration),
+            bearerTokenConfigured = !primary?.bearerToken.isNullOrBlank() || !configuration?.bearerToken.isNullOrBlank(),
         )
     }
 

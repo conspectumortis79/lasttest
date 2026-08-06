@@ -1,7 +1,9 @@
-export type ReportParameterValue = {
-  name: string
-  location: string
-  value: string
+export type ReportParameterValue = { name: string, location: string, value: string }
+
+export type ReportPayload = {
+  parameterValues: ReportParameterValue[]
+  requestBodyJson?: string
+  bearerTokenConfigured?: boolean
 }
 
 export type ReportOperation = {
@@ -12,6 +14,53 @@ export type ReportOperation = {
   parameterValues: ReportParameterValue[]
   requestBodyJson?: string
   bearerTokenConfigured: boolean
+  /**
+   * All payloads that were configured for this endpoint at the time
+   * the run was started. The report lists every entry so the user
+   * can see exactly which datasets k6 cycled through or sampled
+   * from. Empty for legacy runs that pre-date the pool feature —
+   * the report falls back to the flat `parameterValues` /
+   * `requestBodyJson` fields in that case.
+   */
+  payloads: ReportPayload[]
+}
+
+export type ReportPayloadStrategy = 'sequential' | 'random'
+
+/**
+ * Renders the human-readable label for the payload strategy the run
+ * was started with. Falls back to a sensible default for legacy runs
+ * that pre-date the pool feature.
+ */
+export function renderPayloadStrategyLabel(strategy: ReportPayloadStrategy | string | null | undefined): string {
+  switch (strategy) {
+    case 'random':
+      return 'Zufällig'
+    case 'sequential':
+    case null:
+    case undefined:
+      return 'Sequenziell'
+    default:
+      return strategy
+  }
+}
+
+/**
+ * One-line description of the strategy so the user can see at a
+ * glance what the generator actually did during the run.
+ */
+export function renderPayloadStrategyHelp(strategy: ReportPayloadStrategy | string | null | undefined): string {
+  switch (strategy) {
+    case 'random':
+      return 'Pro Iteration ein zufälliger Payload aus dem Pool des Endpunkts.'
+    case 'sequential':
+      return '1, 2, …, letzter, dann wieder 1 — Round-Robin mit Wrap-Around.'
+    case null:
+    case undefined:
+      return 'Standard-Verhalten: jeder Endpunkt mit einem einzigen Datensatz.'
+    default:
+      return ''
+  }
 }
 
 // Wire shape of a load profile. Mirrors `LoadProfile` from
@@ -45,6 +94,14 @@ export type TestRunConfiguration = {
   apiVersion: string
   baseUrl: string
   loadProfile: ReportLoadProfile
+  /**
+   * Echo of the load profile's payload strategy at the time the run
+   * was started. `null` (or missing on the wire) means the run was
+   * started before the pool feature shipped; the report renders
+   * those as `Sequenziell` (default) with a note that the pool is
+   * not in play.
+   */
+  payloadStrategy?: ReportPayloadStrategy | string | null
   operations: ReportOperation[]
 }
 

@@ -5,6 +5,7 @@ import {
   createOperationSettings,
   hasMultipleServers,
   isOperationValid,
+  migrateOperationSettings,
   parameterKey,
   validateJsonValue,
   validateOperationSettings,
@@ -12,6 +13,7 @@ import {
   validateRequestBody,
   type ApiServer,
   type Operation,
+  type OperationPayload,
   type OperationSettings,
   type ParameterSchema,
   type RequestBodySchema,
@@ -56,14 +58,24 @@ test('creates editable settings from OpenAPI examples', () => {
 
 test('builds endpoint-specific parameter, body, and bearer overrides', () => {
   const settings = createOperationSettings([getOperation, postOperation])
-  settings.getPet.parameterValues['path:id'] = '42'
-  settings.getPet.bearerToken = 'secret-token'
-  settings.createPet.requestBodyJson = '{"name":"Luna"}'
+  settings.getPet.payloads[0].parameterValues['path:id'] = '42'
+  settings.getPet.payloads[0].bearerToken = 'secret-token'
+  settings.createPet.payloads[0].requestBodyJson = '{"name":"Luna"}'
 
   const configurations = buildOperationConfigurations([getOperation, postOperation], new Set(['getPet', 'createPet']), settings)
 
   deepEqual(configurations[0], {
     operationId: 'getPet',
+    payloads: [
+      {
+        parameterValues: [
+          { name: 'id', location: 'path', value: '42' },
+          { name: 'expand', location: 'query', value: 'owner' },
+        ],
+        requestBodyJson: undefined,
+        bearerToken: 'secret-token',
+      },
+    ],
     parameterValues: [
       { name: 'id', location: 'path', value: '42' },
       { name: 'expand', location: 'query', value: 'owner' },
@@ -72,18 +84,20 @@ test('builds endpoint-specific parameter, body, and bearer overrides', () => {
     bearerToken: 'secret-token',
   })
   equal(configurations[1].requestBodyJson, '{"name":"Luna"}')
+  equal(configurations[1].payloads.length, 1)
+  equal(configurations[1].payloads[0].requestBodyJson, '{"name":"Luna"}')
 })
 
 test('rejects an empty required parameter and malformed JSON', () => {
   const settings = createOperationSettings([getOperation, postOperation])
-  settings.getPet.parameterValues['path:id'] = ''
+  settings.getPet.payloads[0].parameterValues['path:id'] = ''
 
   throws(
     () => buildOperationConfigurations([getOperation], new Set(['getPet']), settings),
     /Pflichtparameter/,
   )
 
-  settings.createPet.requestBodyJson = '{invalid}'
+  settings.createPet.payloads[0].requestBodyJson = '{invalid}'
   throws(
     () => buildOperationConfigurations([postOperation], new Set(['createPet']), settings),
     /kein gültiges JSON/,
@@ -115,7 +129,7 @@ test('rejects missing settings and an empty required body', () => {
   )
 
   const settings = createOperationSettings([postOperation])
-  settings.createPet.requestBodyJson = ''
+  settings.createPet.payloads[0].requestBodyJson = ''
   throws(
     () => buildOperationConfigurations([postOperation], new Set(['createPet']), settings),
     /Pflicht-Request-Body/,
@@ -130,7 +144,7 @@ test('returns no configuration when no operation is selected', () => {
 
 test('defaults a missing optional setting to an empty value', () => {
   const settings = createOperationSettings([getOperation])
-  delete settings.getPet.parameterValues['query:expand']
+  delete settings.getPet.payloads[0].parameterValues['query:expand']
 
   const configuration = buildOperationConfigurations([getOperation], new Set(['getPet']), settings)[0]
 
@@ -148,7 +162,7 @@ test('allows an optional request body to be empty', () => {
 
 test('allows an optional parameter to be cleared', () => {
   const settings = createOperationSettings([getOperation])
-  settings.getPet.parameterValues['query:expand'] = ''
+  settings.getPet.payloads[0].parameterValues['query:expand'] = ''
 
   const configurations = buildOperationConfigurations([getOperation], new Set(['getPet']), settings)
 
@@ -395,16 +409,16 @@ test('validateOperationSettings aggregates parameter and request body errors', (
     bearerAuth: false,
   }
   const settings = createOperationSettings([operation])
-  settings.createItem.parameterValues['query:tag'] = 'abc'
-  settings.createItem.requestBodyJson = '{"name":""}'
+  settings.createItem.payloads[0].parameterValues['query:tag'] = 'abc'
+  settings.createItem.payloads[0].requestBodyJson = '{"name":""}'
 
   const validation = validateOperationSettings(operation, settings.createItem)
   equal(validation.parameterErrors['query:tag'], 'Ungültig: erwartet eine Ganzzahl (long).')
   equal(validation.bodyError, 'Ungültig: Feld „name“ – mindestens 1 Zeichen erforderlich.')
   equal(isOperationValid(validation), false)
 
-  settings.createItem.parameterValues['query:tag'] = '5'
-  settings.createItem.requestBodyJson = '{"name":"Luna"}'
+  settings.createItem.payloads[0].parameterValues['query:tag'] = '5'
+  settings.createItem.payloads[0].requestBodyJson = '{"name":"Luna"}'
   equal(isOperationValid(validateOperationSettings(operation, settings.createItem)), true)
 })
 
@@ -423,7 +437,7 @@ test('validateOperationSettings returns no errors when the operation has no sche
   }
 
   deepEqual(validateOperationSettings(operation, undefined), { parameterErrors: {} })
-  deepEqual(validateOperationSettings(operation, { parameterValues: {}, requestBodyJson: '', bearerToken: '' }), { parameterErrors: {} })
+  deepEqual(validateOperationSettings(operation, { payloads: [], parameterValues: {}, requestBodyJson: '', bearerToken: '' }), { parameterErrors: {} })
 })
 
 test('validateOperationSettings treats missing parameter values as empty strings and skips valid results', () => {
@@ -441,7 +455,7 @@ test('validateOperationSettings treats missing parameter values as empty strings
     requestBodyRequired: false,
     bearerAuth: false,
   }
-  const settings: OperationSettings = { parameterValues: {}, requestBodyJson: '', bearerToken: '' }
+  const settings: OperationSettings = { payloads: [], parameterValues: {}, requestBodyJson: '', bearerToken: '' }
 
   deepEqual(validateOperationSettings(operation, settings), { parameterErrors: {} })
 })
@@ -460,13 +474,249 @@ test('validateOperationSettings flags an empty required request body as an error
     requestBodyRequired: true,
     bearerAuth: false,
   }
-  const settings: OperationSettings = { parameterValues: {}, requestBodyJson: '   ', bearerToken: '' }
+  const settings: OperationSettings = { payloads: [], parameterValues: {}, requestBodyJson: '   ', bearerToken: '' }
 
   deepEqual(validateOperationSettings(operation, settings), {
     parameterErrors: {},
     bodyError: 'Ungültig: Pflicht-Request-Body ist leer.',
   })
 })
+
+// ---- OperationPayload / migrateOperationSettings ----------------------------
+
+test('createOperationSettings seeds a single payload whose fields mirror the legacy values', () => {
+  const settings = createOperationSettings([getOperation, postOperation])
+
+  equal(settings.getPet.payloads.length, 1)
+  equal(settings.createPet.payloads.length, 1)
+
+  const getPetPayload = settings.getPet.payloads[0]
+  equal(getPetPayload.parameterValues[parameterKey(getOperation.parameters[0])], '7')
+  equal(getPetPayload.parameterValues[parameterKey(getOperation.parameters[1])], 'owner')
+  equal(getPetPayload.requestBodyJson, '')
+  equal(getPetPayload.bearerToken, '')
+
+  const createPetPayload = settings.createPet.payloads[0]
+  equal(createPetPayload.requestBodyJson, '{\n  "name": "Fido"\n}')
+  equal(createPetPayload.bearerToken, '')
+})
+
+test('createOperationSettings seeds payloads[0] and the legacy fields with the same initial values', () => {
+  // The pool is the single source of truth: `buildOperationConfigurations`
+  // and `validateOperationSettings` both read from `payloads[0]`. The
+  // legacy flat fields are seeded with the same initial values so
+  // existing callers (and the report builder) can still read them
+  // without going through the migration, but the two views are
+  // independent — mutating one does not silently rewrite the other.
+  const settings = createOperationSettings([getOperation])
+
+  // Initial values are mirrored.
+  equal(settings.getPet.payloads[0].parameterValues['path:id'], settings.getPet.parameterValues['path:id'])
+  equal(settings.getPet.payloads[0].requestBodyJson, settings.getPet.requestBodyJson)
+  equal(settings.getPet.payloads[0].bearerToken, settings.getPet.bearerToken)
+
+  // But the underlying objects are not the same reference: mutating
+  // one view does not rewrite the other.
+  settings.getPet.payloads[0].parameterValues['path:id'] = '99'
+  equal(settings.getPet.parameterValues['path:id'], '7')
+})
+
+test('migrateOperationSettings is a no-op when payloads is already populated', () => {
+  const settings: OperationSettings = {
+    payloads: [{ parameterValues: { 'path:id': '42' }, requestBodyJson: '{"x":1}', bearerToken: 't' }],
+    parameterValues: { 'legacy:key': 'legacy-value' },
+    requestBodyJson: 'legacy-body',
+    bearerToken: 'legacy-token',
+  }
+
+  const migrated = migrateOperationSettings(settings)
+
+  // Same object reference: migration should not allocate a new object
+  // when there is nothing to do.
+  equal(migrated, settings)
+  equal(migrated.payloads.length, 1)
+  equal(migrated.payloads[0].parameterValues['path:id'], '42')
+  equal(migrated.parameterValues['legacy:key'], 'legacy-value')
+})
+
+test('migrateOperationSettings synthesises a single payload from legacy fields when payloads is empty', () => {
+  const settings: OperationSettings = {
+    payloads: [],
+    parameterValues: { 'path:id': '42', 'query:expand': 'owner' },
+    requestBodyJson: '{"name":"Luna"}',
+    bearerToken: 'secret',
+  }
+
+  const migrated = migrateOperationSettings(settings)
+
+  equal(migrated.payloads.length, 1)
+  equal(migrated.payloads[0].parameterValues['path:id'], '42')
+  equal(migrated.payloads[0].parameterValues['query:expand'], 'owner')
+  equal(migrated.payloads[0].requestBodyJson, '{"name":"Luna"}')
+  equal(migrated.payloads[0].bearerToken, 'secret')
+  // Legacy fields are preserved on the migrated object so any consumer
+  // still reading them continues to work.
+  equal(migrated.parameterValues['path:id'], '42')
+  equal(migrated.requestBodyJson, '{"name":"Luna"}')
+  equal(migrated.bearerToken, 'secret')
+})
+
+test('migrateOperationSettings is idempotent when called twice', () => {
+  const settings: OperationSettings = {
+    payloads: [],
+    parameterValues: { 'path:id': '7' },
+    requestBodyJson: '',
+    bearerToken: '',
+  }
+
+  const once = migrateOperationSettings(settings)
+  const twice = migrateOperationSettings(once)
+
+  deepEqual(twice, once)
+  equal(twice.payloads.length, 1)
+})
+
+test('migrateOperationSettings clones the legacy parameterValues to decouple mutation', () => {
+  const legacy: Record<string, string> = { 'path:id': '42' }
+  const settings: OperationSettings = {
+    payloads: [],
+    parameterValues: legacy,
+    requestBodyJson: '',
+    bearerToken: '',
+  }
+
+  const migrated = migrateOperationSettings(settings)
+  // Mutate the migrated payload — the original legacy map must not change.
+  migrated.payloads[0].parameterValues['path:id'] = '99'
+  equal(legacy['path:id'], '42')
+  equal(migrated.payloads[0].parameterValues['path:id'], '99')
+})
+
+test('buildOperationConfigurations migrates legacy settings before reading the active payload', () => {
+  // Hand a pre-pool settings object directly (no createOperationSettings
+  // call) to verify the migration is triggered inside
+  // buildOperationConfigurations.
+  const legacySettings: OperationSettings = {
+    payloads: [],
+    parameterValues: { 'path:id': '99' },
+    requestBodyJson: '',
+    bearerToken: '',
+  }
+  const configurations = buildOperationConfigurations([getOperation], new Set(['getPet']), { getPet: legacySettings })
+
+  equal(configurations[0].parameterValues[0].value, '99')
+})
+
+test('buildOperationConfigurations reads from payloads[0] when the pool is populated', () => {
+  const settings = createOperationSettings([getOperation])
+  settings.getPet.payloads[0].parameterValues['path:id'] = '55'
+
+  const configurations = buildOperationConfigurations([getOperation], new Set(['getPet']), settings)
+
+  equal(configurations[0].parameterValues[0].value, '55')
+})
+
+test('buildOperationConfigurations forwards the bearer token from payloads[0]', () => {
+  const settings = createOperationSettings([getOperation])
+  settings.getPet.payloads[0].bearerToken = 'pool-bearer'
+
+  const configurations = buildOperationConfigurations([getOperation], new Set(['getPet']), settings)
+
+  equal(configurations[0].bearerToken, 'pool-bearer')
+})
+
+test('buildOperationConfigurations forwards the request body from payloads[0]', () => {
+  const settings = createOperationSettings([postOperation])
+  settings.createPet.payloads[0].requestBodyJson = '{"name":"Luna"}'
+
+  const configurations = buildOperationConfigurations([postOperation], new Set(['createPet']), settings)
+
+  equal(configurations[0].requestBodyJson, '{"name":"Luna"}')
+})
+
+test('buildOperationConfigurations still rejects an empty required payload field after migration', () => {
+  const legacySettings: OperationSettings = {
+    payloads: [],
+    parameterValues: {},
+    requestBodyJson: '',
+    bearerToken: '',
+  }
+
+  throws(
+    () => buildOperationConfigurations([postOperation], new Set(['createPet']), { createPet: legacySettings }),
+    /Pflicht-Request-Body/,
+  )
+})
+
+test('buildOperationConfigurations still rejects a malformed JSON body after migration', () => {
+  const legacySettings: OperationSettings = {
+    payloads: [],
+    parameterValues: {},
+    requestBodyJson: '{invalid}',
+    bearerToken: '',
+  }
+
+  throws(
+    () => buildOperationConfigurations([postOperation], new Set(['createPet']), { createPet: legacySettings }),
+    /kein gültiges JSON/,
+  )
+})
+
+test('OperationPayload is a plain value object carrying per-request data', () => {
+  // Compile-time shape check: a payload is exactly the three fields
+  // the k6 generator needs for one HTTP call.
+  const payload: OperationPayload = {
+    parameterValues: { 'path:id': '42' },
+    requestBodyJson: '{"name":"Luna"}',
+    bearerToken: 'secret',
+  }
+
+  equal(payload.parameterValues['path:id'], '42')
+  equal(payload.requestBodyJson, '{"name":"Luna"}')
+  equal(payload.bearerToken, 'secret')
+})
+
+test('buildOperationConfigurations serialises every payload in the pool (not just payloads[0])', () => {
+  // Regression: the legacy wire format only carried one payload per
+  // endpoint, so an early buildOperationConfigurations implementation
+  // accidentally dropped payloads[1..N] before sending the request
+  // to the backend. The backend then fell back to the single-dataset
+  // legacy path, the report lost every entry after the first, and
+  // the user saw a "this run pre-dates the pool feature" hint
+  // instead of the actual pool.
+  const settings = createOperationSettings([getOperation])
+  addPayload(settings.getPet, 'getPet')
+  addPayload(settings.getPet, 'getPet')
+  settings.getPet.payloads[0].parameterValues['path:id'] = '42'
+  settings.getPet.payloads[1].parameterValues['path:id'] = '17'
+  settings.getPet.payloads[2].parameterValues['path:id'] = '99'
+
+  const [configuration] = buildOperationConfigurations([getOperation], new Set(['getPet']), { getPet: settings.getPet })
+
+  // All three payloads are present on the wire — this is what
+  // reached the backend before the fix.
+  equal(configuration.payloads.length, 3)
+  equal(configuration.payloads[0].parameterValues[0].value, '42')
+  equal(configuration.payloads[1].parameterValues[0].value, '17')
+  equal(configuration.payloads[2].parameterValues[0].value, '99')
+  // Legacy flat fields are kept in sync with payloads[0] for
+  // backward compatibility.
+  equal(configuration.parameterValues[0].value, '42')
+  equal(configuration.requestBodyJson, undefined)
+})
+
+// Minimal addPayload helper for the multi-payload regression test
+// above. Mirrors the production addPayload in App.tsx but is kept in
+// the test file so the unit test does not need a React render to
+// set up a multi-row pool.
+function addPayload(settings: OperationSettings, _operationId: string): void {
+  const seed = settings.payloads[0]
+  settings.payloads.push({
+    parameterValues: { ...seed.parameterValues },
+    requestBodyJson: seed.requestBodyJson,
+    bearerToken: seed.bearerToken,
+  })
+}
 
 test('validateOperationSettings allows an empty optional request body', () => {
   const operation: Operation = {
@@ -482,7 +732,7 @@ test('validateOperationSettings allows an empty optional request body', () => {
     requestBodyRequired: false,
     bearerAuth: false,
   }
-  const settings: OperationSettings = { parameterValues: {}, requestBodyJson: '', bearerToken: '' }
+  const settings: OperationSettings = { payloads: [], parameterValues: {}, requestBodyJson: '', bearerToken: '' }
 
   deepEqual(validateOperationSettings(operation, settings), { parameterErrors: {} })
 })

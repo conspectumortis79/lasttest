@@ -29,9 +29,8 @@ import {
   validateRequestBody,
   type ImportedSpecification,
   type Operation,
+  type OperationPayload,
   type OperationSettings,
-  type ParameterSchema,
-  type RequestBodySchema,
 } from './operationConfiguration.ts'
 import { type FetchedSpecification, validateSpecificationUrl } from './specificationSource.ts'
 import { fetchWithRetry } from './retryFetch.ts'
@@ -221,19 +220,72 @@ function LoadTestApp() {
     })
   }
 
-  function updateParameter(operationId: string, key: string, value: string) {
-    updateSettings(operationId, settings => ({
-      ...settings,
-      parameterValues: { ...settings.parameterValues, [key]: value },
-    }))
+  /**
+   * Edits a single field on a single payload inside the pool of one
+   * operation. The legacy `parameterValues` / `requestBodyJson` /
+   * `bearerToken` flat fields stay in sync with `payloads[0]` so the
+   * rest of the pipeline (validation, k6 config builder) keeps
+   * working without further changes.
+   */
+  function updatePayloadField(
+    operationId: string,
+    payloadIndex: number,
+    field: 'parameterValues' | 'requestBodyJson' | 'bearerToken',
+    patch: Record<string, string> | string,
+  ) {
+    updateSettings(operationId, settings => {
+      const next = settings.payloads.map((payload, index) => {
+        if (index !== payloadIndex) return payload
+        if (field === 'parameterValues' && typeof patch === 'object') {
+          return { ...payload, parameterValues: { ...payload.parameterValues, ...patch } }
+        }
+        if (field === 'requestBodyJson' && typeof patch === 'string') {
+          return { ...payload, requestBodyJson: patch }
+        }
+        if (field === 'bearerToken' && typeof patch === 'string') {
+          return { ...payload, bearerToken: patch }
+        }
+        return payload
+      })
+      const primary = next[0] ?? settings.payloads[0]
+      return {
+        ...settings,
+        payloads: next,
+        parameterValues: { ...primary.parameterValues },
+        requestBodyJson: primary.requestBodyJson,
+        bearerToken: primary.bearerToken,
+      }
+    })
   }
 
-  function updateRequestBody(operationId: string, requestBodyJson: string) {
-    updateSettings(operationId, settings => ({ ...settings, requestBodyJson }))
+  function addPayload(operationId: string) {
+    updateSettings(operationId, settings => {
+      const seed = settings.payloads[0]
+      const clone: OperationPayload = {
+        parameterValues: { ...seed.parameterValues },
+        requestBodyJson: seed.requestBodyJson,
+        bearerToken: seed.bearerToken,
+      }
+      return { ...settings, payloads: [...settings.payloads, clone] }
+    })
   }
 
-  function updateBearerToken(operationId: string, bearerToken: string) {
-    updateSettings(operationId, settings => ({ ...settings, bearerToken }))
+  function removePayload(operationId: string, payloadIndex: number) {
+    updateSettings(operationId, settings => {
+      // Invariant: at least one payload must remain so the legacy
+      // single-dataset layout and the validation pipeline keep
+      // working. Removing the last payload is a no-op.
+      if (settings.payloads.length <= 1) return settings
+      const next = settings.payloads.filter((_, index) => index !== payloadIndex)
+      const primary = next[0]
+      return {
+        ...settings,
+        payloads: next,
+        parameterValues: { ...primary.parameterValues },
+        requestBodyJson: primary.requestBodyJson,
+        bearerToken: primary.bearerToken,
+      }
+    })
   }
 
   return <main>
@@ -292,9 +344,9 @@ function LoadTestApp() {
             expanded={!collapsed.has(operation.operationId)}
             onToggle={() => toggle(operation.operationId)}
             onToggleExpand={() => toggleExpanded(operation.operationId)}
-            onParameterChange={(key, value) => updateParameter(operation.operationId, key, value)}
-            onRequestBodyChange={value => updateRequestBody(operation.operationId, value)}
-            onBearerTokenChange={value => updateBearerToken(operation.operationId, value)}
+            onPayloadField={(payloadIndex, field, patch) => updatePayloadField(operation.operationId, payloadIndex, field, patch)}
+            onAddPayload={() => addPayload(operation.operationId)}
+            onRemovePayload={payloadIndex => removePayload(operation.operationId, payloadIndex)}
           />)}
         </div>
       </section>
@@ -302,32 +354,77 @@ function LoadTestApp() {
       <section className="card">
         <div className="step">3</div>
         <h2>Lastprofil</h2>
-        {hasMultipleServers(imported.servers) && (
-          <div className="server-selector">
-            <label htmlFor="base-url-select">Server auswählen</label>
-            <select
-              id="base-url-select"
-              value={baseUrl}
-              onChange={event => setBaseUrl(event.target.value)}
-            >
-              {(() => {
-                const known = imported.servers.some(server => server.url === baseUrl)
-                const options = imported.servers.map(server => (
-                  <option key={server.url} value={server.url}>
-                    {server.url}{server.description ? ` — ${server.description}` : ''}
-                  </option>
-                ))
-                if (!known && baseUrl) {
-                  options.push(<option key="__custom__" value={baseUrl}>{baseUrl} — Eigene URL</option>)
-                }
-                return options
-              })()}
-            </select>
-            <small>Die Eingabe unten überschreibt die Auswahl und erlaubt eigene URLs.</small>
+        <div className="lastprofil-row">
+          <div className="lastprofil-left">
+            {hasMultipleServers(imported.servers) && (
+              <div className="server-selector">
+                <label htmlFor="base-url-select">Server auswählen</label>
+                <select
+                  id="base-url-select"
+                  value={baseUrl}
+                  onChange={event => setBaseUrl(event.target.value)}
+                >
+                  {(() => {
+                    const known = imported.servers.some(server => server.url === baseUrl)
+                    const options = imported.servers.map(server => (
+                      <option key={server.url} value={server.url}>
+                        {server.url}{server.description ? ` — ${server.description}` : ''}
+                      </option>
+                    ))
+                    if (!known && baseUrl) {
+                      options.push(<option key="__custom__" value={baseUrl}>{baseUrl} — Eigene URL</option>)
+                    }
+                    return options
+                  })()}
+                </select>
+                <small>Die Eingabe unten überschreibt die Auswahl und erlaubt eigene URLs.</small>
+              </div>
+            )}
+            <label className="base-url-label">Base URL<input value={baseUrl} onChange={event => setBaseUrl(event.target.value)} /></label>
           </div>
-        )}
-        <div className="grid">
-          <label>Base URL<input value={baseUrl} onChange={event => setBaseUrl(event.target.value)} /></label>
+          <fieldset className="strategy-box">
+            <legend className="sr-only">Payload-Strategie</legend>
+            <div className="strategy-box-title">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                <path d="M2 4h12M2 8h12M2 12h12" strokeLinecap="round" />
+                <circle cx="5" cy="4" r="1.3" fill="currentColor" stroke="none" />
+                <circle cx="10" cy="8" r="1.3" fill="currentColor" stroke="none" />
+                <circle cx="7" cy="12" r="1.3" fill="currentColor" stroke="none" />
+              </svg>
+              <span>Payload-Strategie</span>
+            </div>
+            <div className="strategy-options">
+              <label>
+                <input
+                  type="radio"
+                  name="payloadStrategy"
+                  value="sequential"
+                  checked={loadProfile.payloadStrategy !== 'random'}
+                  onChange={() => setLoadProfile({ ...loadProfile, payloadStrategy: 'sequential' })}
+                />
+                <span>
+                  <span className="opt-name">Sequenziell</span>
+                  <span className="opt-desc">1, 2, …, letzter, dann wieder 1 — Round-Robin mit Wrap-Around</span>
+                </span>
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="payloadStrategy"
+                  value="random"
+                  checked={loadProfile.payloadStrategy === 'random'}
+                  onChange={() => setLoadProfile({ ...loadProfile, payloadStrategy: 'random' })}
+                />
+                <span>
+                  <span className="opt-name">Zufällig</span>
+                  <span className="opt-desc">pro Iteration ein zufälliger Payload aus dem Pool</span>
+                </span>
+              </label>
+            </div>
+            <small className="strategy-box-hint">
+              Bei nur <code>1</code> Payload sind beide Modi identisch.
+            </small>
+          </fieldset>
         </div>
         <LoadProfileEditor profile={loadProfile} onChange={setLoadProfile} disabled={busy} />
         {(() => {
@@ -448,9 +545,9 @@ type OperationEditorProps = {
   expanded: boolean
   onToggle: () => void
   onToggleExpand: () => void
-  onParameterChange: (key: string, value: string) => void
-  onRequestBodyChange: (value: string) => void
-  onBearerTokenChange: (value: string) => void
+  onPayloadField: (payloadIndex: number, field: 'parameterValues' | 'requestBodyJson' | 'bearerToken', patch: Record<string, string> | string) => void
+  onAddPayload: () => void
+  onRemovePayload: (payloadIndex: number) => void
 }
 
 function OperationEditor({
@@ -460,11 +557,35 @@ function OperationEditor({
   settings,
   onToggle,
   onToggleExpand,
-  onParameterChange,
-  onRequestBodyChange,
-  onBearerTokenChange,
+  onPayloadField,
+  onAddPayload,
+  onRemovePayload,
 }: OperationEditorProps) {
   if (!settings) return null
+
+  // Aggregate validation across the whole pool. The first payload with
+  // a problem decides which error is shown; this keeps the UX simple
+  // without losing information (each error message still names the
+  // specific field that failed).
+  const poolValidation = settings.payloads.map((payload, index) => {
+    const parameterErrors: Record<string, string> = {}
+    for (const parameter of operation.parameters) {
+      const key = parameterKey(parameter)
+      const value = payload.parameterValues[key] ?? ''
+      const result = validateParameterValue(value, parameter.schema)
+      if (!result.valid) parameterErrors[key] = result.message
+    }
+    const bodyResult = operation.hasRequestBody
+      ? validateRequestBody(payload.requestBodyJson, operation.requestBodySchema, operation.requestBodyRequired)
+      : { valid: true as const }
+    return {
+      index,
+      parameterErrors,
+      bodyError: bodyResult.valid ? undefined : bodyResult.message,
+    }
+  })
+  const firstProblem = poolValidation.find(v => v.bodyError !== undefined || Object.keys(v.parameterErrors).length > 0)
+  const hasPoolError = firstProblem !== undefined
 
   return <article className={`operation-card ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''}`}>
     {operation.destructive && <span className="destructive-badge" title="Schreibender Endpunkt">schreibend</span>}
@@ -476,6 +597,7 @@ function OperationEditor({
     </label>
     <div className="operation-meta">
       <span className="operation-id" aria-label={`Operation ${operation.operationId}`}>{operation.operationId}</span>
+      <span className="type-hint">{settings.payloads.length} Payload{settings.payloads.length === 1 ? '' : 's'}</span>
       {operation.summary && <p className="operation-summary">{operation.summary}</p>}
     </div>
 
@@ -494,84 +616,126 @@ function OperationEditor({
       </svg>
     </button>
 
-    {expanded && <div className="configuration-grid">
-      {operation.parameters.map(parameter => {
-        const key = parameterKey(parameter)
-        const value = settings.parameterValues[key] ?? ''
-        const validation = validateParameterValue(value, parameter.schema)
-        const errorMessage = validation.valid ? undefined : validation.message
-        const errorId = errorMessage ? `${operation.operationId}-${parameter.name}-error` : undefined
-        return <label className={`parameter-box ${errorMessage ? 'has-error' : ''}`} key={key}>
-          <span className="field-heading">
-            <strong>{parameter.name}</strong>
-            <code>{parameter.location}</code>
-            {parameter.schema && <span className="type-hint">{formatParameterType(parameter.schema)}</span>}
-            {parameter.required && <em>Pflicht</em>}
-          </span>
-          {errorMessage && <div className="parameter-error" role="alert" id={errorId}>{errorMessage}</div>}
-          <input
-            aria-label={`${operation.operationId}: ${parameter.name}`}
-            aria-invalid={errorMessage ? true : undefined}
-            aria-describedby={errorId}
-            value={value}
-            onChange={event => onParameterChange(key, event.target.value)}
-          />
-        </label>
-      })}
-
-      {operation.hasRequestBody && (() => {
-        const bodyResult = validateRequestBody(settings.requestBodyJson, operation.requestBodySchema, operation.requestBodyRequired)
-        const bodyError = bodyResult.valid ? undefined : bodyResult.message
-        const bodyErrorId = bodyError ? `${operation.operationId}-body-error` : undefined
-        return <label className={`parameter-box body-box ${bodyError ? 'has-error' : ''}`}>
-          <span className="field-heading">
-            <strong>JSON Request-Body</strong>
-            <code>body</code>
-            {operation.requestBodySchema && <span className="type-hint">{formatRequestBodyType(operation.requestBodySchema)}</span>}
-            {operation.requestBodyRequired && <em>Pflicht</em>}
-          </span>
-          {bodyError && <div className="parameter-error" role="alert" id={bodyErrorId}>{bodyError}</div>}
-          <textarea
-            className="request-body"
-            aria-label={`${operation.operationId}: JSON Request-Body`}
-            aria-invalid={bodyError ? true : undefined}
-            aria-describedby={bodyErrorId}
-            value={settings.requestBodyJson}
-            onChange={event => onRequestBodyChange(event.target.value)}
-            spellCheck={false}
-          />
-        </label>
-      })()}
-
-      <label className={`parameter-box auth-box ${operation.bearerAuth ? 'documented-auth' : ''}`}>
-        <span className="field-heading">
-          <strong>Bearer-Token</strong>
-          <code>Authorization</code>
-          {operation.bearerAuth && <em>Swagger / OpenAPI Auth</em>}
-        </span>
-        <input
-          type="password"
-          autoComplete="off"
-          aria-label={`${operation.operationId}: Bearer-Token`}
-          placeholder={operation.bearerAuth ? 'Token ohne „Bearer “' : 'Optional für diesen Endpunkt'}
-          value={settings.bearerToken}
-          onChange={event => onBearerTokenChange(event.target.value)}
-        />
-      </label>
+    {expanded && <div className="payload-pool">
+      <p className="pool-hint">
+        Jede Zeile ist ein kompletter Datensatz. Mit der Strategie im Lastprofil
+        wählst du, ob der Pool der Reihe nach durchlaufen oder zufällig gezogen wird.
+      </p>
+      <div className="pool-table-wrap">
+        <table className="pool-table" aria-label={`Payload-Pool für ${operation.operationId}`}>
+          <thead>
+            <tr>
+              <th className="pool-col-index">#</th>
+              {operation.parameters.map(parameter => {
+                const typeLabel = formatParameterType(parameter.schema)
+                return (
+                  <th key={parameterKey(parameter)}>
+                    <div className="pool-th-name">{parameter.name}</div>
+                    <div className="pool-th-meta">
+                      <span className="pool-th-loc">{parameter.location}</span>
+                      {typeLabel && <span className="type-hint">{typeLabel}</span>}
+                      {parameter.required && <em className="pool-th-req">Pflicht</em>}
+                    </div>
+                  </th>
+                )
+              })}
+              {operation.hasRequestBody && <th className="col-wide">JSON-Body</th>}
+              <th>Bearer</th>
+              <th className="col-actions" aria-label="Aktionen"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {settings.payloads.map((payload, payloadIndex) => {
+              const validation = poolValidation[payloadIndex]
+              return (
+                <tr key={payloadIndex}>
+                  <th scope="row" className="pool-col-index">{payloadIndex + 1}</th>
+                  {operation.parameters.map(parameter => {
+                    const key = parameterKey(parameter)
+                    const value = payload.parameterValues[key] ?? ''
+                    const errorMessage = validation.parameterErrors[key]
+                    const errorId = errorMessage ? `${operation.operationId}-p${payloadIndex}-${parameter.name}-error` : undefined
+                    return (
+                      <td key={key}>
+                        <input
+                          aria-label={`${operation.operationId} · Payload ${payloadIndex + 1}: ${parameter.name}`}
+                          aria-invalid={errorMessage ? true : undefined}
+                          aria-describedby={errorId}
+                          value={value}
+                          onChange={event => onPayloadField(payloadIndex, 'parameterValues', { [key]: event.target.value })}
+                        />
+                        {errorMessage && <div className="parameter-error" role="alert" id={errorId}>{errorMessage}</div>}
+                      </td>
+                    )
+                  })}
+                  {operation.hasRequestBody && (
+                    <td>
+                      <textarea
+                        className="request-body"
+                        aria-label={`${operation.operationId} · Payload ${payloadIndex + 1}: JSON Request-Body`}
+                        aria-invalid={validation.bodyError ? true : undefined}
+                        value={payload.requestBodyJson}
+                        onChange={event => onPayloadField(payloadIndex, 'requestBodyJson', event.target.value)}
+                        spellCheck={false}
+                      />
+                      {validation.bodyError && <div className="parameter-error" role="alert">{validation.bodyError}</div>}
+                    </td>
+                  )}
+                  <td>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      aria-label={`${operation.operationId} · Payload ${payloadIndex + 1}: Bearer-Token`}
+                      placeholder={operation.bearerAuth ? 'Token' : 'Optional'}
+                      value={payload.bearerToken}
+                      onChange={event => onPayloadField(payloadIndex, 'bearerToken', event.target.value)}
+                    />
+                  </td>
+                  <td className="col-actions">
+                    <button
+                      type="button"
+                      className="row-remove"
+                      aria-label={`Payload ${payloadIndex + 1} entfernen`}
+                      disabled={settings.payloads.length <= 1}
+                      onClick={() => onRemovePayload(payloadIndex)}
+                      title={settings.payloads.length <= 1 ? 'Mindestens 1 Payload erforderlich' : 'Payload entfernen'}
+                    >×</button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <button type="button" className="pool-add" onClick={onAddPayload}>+ Payload hinzufügen</button>
+      {hasPoolError && (
+        <div className="parameter-error" role="alert" style={{ marginTop: '.6rem' }}>
+          {firstProblem!.bodyError ?? `Payload ${firstProblem!.index + 1}: Pflichtparameter oder Body ist ungültig.`}
+        </div>
+      )}
     </div>}
   </article>
 }
 
-function formatParameterType(schema: ParameterSchema): string {
-  if (schema.enum) return `${schema.type} enum`
-  if (schema.format) return schema.format
-  return schema.type
-}
-
-function formatRequestBodyType(schema: RequestBodySchema): string {
-  const requiredCount = schema.required?.length ?? 0
-  if (requiredCount === 0) return 'object'
-  return `object · ${requiredCount} Pflicht`
+/**
+ * Renders a short, human-readable type label for a parameter so the
+ * user can see at a glance what validation the input field will be
+ * checked against. Enum values and explicit `format` win over the raw
+ * `type` because they tell the user the most about what is accepted.
+ */
+function formatParameterType(schema: unknown): string | undefined {
+  if (schema == null || typeof schema !== 'object') return undefined
+  const candidate = schema as { type?: unknown, format?: unknown, enum?: unknown }
+  if (Array.isArray(candidate.enum) && candidate.enum.length > 0) {
+    return `${typeof candidate.type === 'string' ? candidate.type : 'string'} enum`
+  }
+  if (typeof candidate.format === 'string' && candidate.format.length > 0) {
+    return candidate.format
+  }
+  if (typeof candidate.type === 'string' && candidate.type.length > 0) {
+    return candidate.type
+  }
+  return undefined
 }
 
 export default App

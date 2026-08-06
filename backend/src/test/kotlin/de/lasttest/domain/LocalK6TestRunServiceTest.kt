@@ -7,7 +7,9 @@ import de.lasttest.api.ImportedSpecification
 import de.lasttest.api.LoadProfile
 import de.lasttest.api.LoadProfileType
 import de.lasttest.api.OperationConfiguration
+import de.lasttest.api.OperationPayload
 import de.lasttest.api.ParameterValue
+import de.lasttest.api.PayloadStrategy
 import de.lasttest.api.TestRunStatus
 import de.lasttest.config.InfluxDbProperties
 import java.util.concurrent.Executor
@@ -312,5 +314,121 @@ class LocalK6TestRunServiceTest {
             lastCall = loadProfile to "captured"
             return "export default function () {}"
         }
+    }
+
+    // ---- payload pool + strategy in the run configuration --------------
+
+    @Test
+    fun `run configuration carries the full payload pool and the strategy from the load profile`() {
+        val pool =
+            listOf(
+                OperationPayload(
+                    parameterValues = listOf(ParameterValue("id", "path", "42")),
+                    requestBodyJson = """{"name":"Luna"}""",
+                    bearerToken = "t1",
+                ),
+                OperationPayload(
+                    parameterValues = listOf(ParameterValue("id", "path", "17")),
+                    requestBodyJson = """{"name":"Rocky"}""",
+                    bearerToken = "t2",
+                ),
+            )
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("createPet"),
+                    operationConfigurations =
+                        listOf(
+                            OperationConfiguration(
+                                operationId = "createPet",
+                                payloads = pool,
+                            ),
+                        ),
+                    loadProfile =
+                        LoadProfile(
+                            type = LoadProfileType.CONSTANT_VUS,
+                            virtualUsers = 1,
+                            durationSeconds = 10,
+                            payloadStrategy = PayloadStrategy.RANDOM,
+                        ),
+                ),
+            )
+
+        val configuration = assertNotNull(run.configuration)
+        assertEquals(PayloadStrategy.RANDOM, configuration.payloadStrategy)
+
+        val createPet = configuration.operations.single { it.operationId == "createPet" }
+        // The full pool is preserved verbatim so the report can list
+        // every entry the generator cycled through or sampled.
+        assertEquals(2, createPet.payloads.size)
+        assertEquals("""{"name":"Luna"}""", createPet.payloads[0].requestBodyJson)
+        assertEquals("t1", createPet.payloads[0].bearerToken)
+        assertEquals("""{"name":"Rocky"}""", createPet.payloads[1].requestBodyJson)
+        assertEquals("t2", createPet.payloads[1].bearerToken)
+        // The flat fields are kept in sync with payloads[0] so the
+        // existing report layout keeps rendering single-payload runs
+        // (and the first entry of multi-payload runs) unchanged.
+        assertEquals("""{"name":"Luna"}""", createPet.requestBodyJson)
+        assertTrue(createPet.bearerTokenConfigured)
+    }
+
+    @Test
+    fun `run configuration defaults payloadStrategy to null when the load profile omits it`() {
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    operationConfigurations =
+                        listOf(
+                            OperationConfiguration(
+                                operationId = "getPet",
+                                parameterValues = listOf(ParameterValue("id", "path", "42")),
+                            ),
+                        ),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10),
+                ),
+            )
+
+        val configuration = assertNotNull(run.configuration)
+        assertEquals(null, configuration.payloadStrategy)
+    }
+
+    @Test
+    fun `run configuration migrates legacy flat fields into a single-payload entry for the report`() {
+        // A legacy request without `payloads` must still surface in the
+        // new shape so the report can render the single entry
+        // uniformly.
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    operationConfigurations =
+                        listOf(
+                            OperationConfiguration(
+                                operationId = "getPet",
+                                parameterValues = listOf(ParameterValue("id", "path", "42")),
+                                requestBodyJson = """{"x":1}""",
+                                bearerToken = "legacy-token",
+                            ),
+                        ),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10),
+                ),
+            )
+
+        val configuration = assertNotNull(run.configuration)
+        val getPet = configuration.operations.single { it.operationId == "getPet" }
+        // The flat fields are populated from the synthetic single
+        // payload (the legacy request had no explicit pool). The
+        // report falls back to these fields when `payloads` is empty.
+        assertEquals(0, getPet.payloads.size)
+        assertEquals("42", getPet.parameterValues.single { it.name == "id" }.value)
+        assertEquals("""{"x":1}""", getPet.requestBodyJson)
+        assertTrue(getPet.bearerTokenConfigured)
     }
 }

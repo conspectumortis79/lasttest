@@ -45,6 +45,13 @@ data class LoadProfile(
     val timeUnit: Int? = null,
     val preAllocatedVUs: Int? = null,
     val maxVUs: Int? = null,
+    /**
+     * How the generator picks the next payload from each
+     * [OperationConfiguration.payloads] pool on every k6 iteration.
+     * `null` (the default) is treated as [PayloadStrategy.SEQUENTIAL] for
+     * backward compatibility with clients that pre-date the pool feature.
+     */
+    val payloadStrategy: PayloadStrategy? = null,
 )
 
 enum class LoadProfileType {
@@ -78,6 +85,31 @@ enum class LoadProfileType {
             } ?: throw IllegalArgumentException(
                 "Unbekannter LoadProfileType: $value (erwartet: constant-vus, shared-iterations, ramping-vus, constant-arrival-rate)",
             )
+    }
+}
+
+/**
+ * How the generator picks the next payload from a per-endpoint pool
+ * each time k6 runs an iteration. Mirrors the frontend `PayloadStrategy`
+ * union so the wire format (`"sequential" | "random"`) is identical on
+ * both sides. `null` is treated as `SEQUENTIAL` for backward compatibility
+ * — a single-payload pool is identical under both strategies.
+ */
+enum class PayloadStrategy {
+    SEQUENTIAL,
+    RANDOM,
+    ;
+
+    fun jsonName(): String = name.lowercase()
+
+    companion object {
+        @JvmStatic
+        @com.fasterxml.jackson.annotation.JsonCreator
+        fun fromJson(value: String): PayloadStrategy =
+            entries.firstOrNull { it.jsonName() == value.lowercase() }
+                ?: throw IllegalArgumentException(
+                    "Unbekannte PayloadStrategy: $value (erwartet: sequential, random)",
+                )
     }
 }
 
@@ -161,6 +193,45 @@ data class ParameterValue(
 
 data class OperationConfiguration(
     val operationId: String,
+    /**
+     * Pool of complete request datasets for this endpoint. The generator
+     * picks the next payload from this list on every k6 iteration
+     * according to the `payloadStrategy` configured on the [LoadProfile].
+     * Empty by default for backward compatibility with clients that still
+     * send the legacy flat-field layout below.
+     */
+    val payloads: List<OperationPayload> = emptyList(),
+    /** @deprecated Derived from `payloads[0]` via [primaryPayload] when `payloads` is empty. */
+    val parameterValues: List<ParameterValue> = emptyList(),
+    /** @deprecated Derived from `payloads[0]` via [primaryPayload] when `payloads` is empty. */
+    val requestBodyJson: String? = null,
+    /** @deprecated Derived from `payloads[0]` via [primaryPayload] when `payloads` is empty. */
+    val bearerToken: String? = null,
+) {
+    /**
+     * Returns the first payload from [payloads], or synthesises one from
+     * the legacy flat fields when the pool is empty. This is the single
+     * point where pre-pool requests get migrated to the new shape; the
+     * generator and the report builder both go through this helper so
+     * the two views stay in lockstep.
+     */
+    fun primaryPayload(): OperationPayload =
+        payloads.firstOrNull()
+            ?: OperationPayload(
+                parameterValues = parameterValues,
+                requestBodyJson = requestBodyJson,
+                bearerToken = bearerToken,
+            )
+}
+
+/**
+ * One complete request dataset: the parameter overrides, the optional
+ * JSON body and the optional bearer token. Multiple
+ * [OperationPayload] entries inside a single
+ * [OperationConfiguration.payloads] list represent the different
+ * datasets a user wants to cycle or pick at random.
+ */
+data class OperationPayload(
     val parameterValues: List<ParameterValue> = emptyList(),
     val requestBodyJson: String? = null,
     val bearerToken: String? = null,
@@ -187,6 +258,14 @@ data class TestRunConfiguration(
     val apiVersion: String,
     val baseUrl: String,
     val loadProfile: LoadProfile,
+    /**
+     * Echo of `LoadProfile.payloadStrategy` at the time the run was
+     * started, so the report can explain whether the generator cycled
+     * through the payload pool or picked at random. `null` means the
+     * run was started before the pool feature shipped and the
+     * strategy is implicitly `sequential`.
+     */
+    val payloadStrategy: PayloadStrategy? = null,
     val operations: List<TestRunOperationConfiguration>,
 )
 
@@ -195,9 +274,25 @@ data class TestRunOperationConfiguration(
     val method: String,
     val path: String,
     val summary: String,
-    val parameterValues: List<ParameterValue>,
-    val requestBodyJson: String?,
-    val bearerTokenConfigured: Boolean,
+    /**
+     * All payloads that were configured for this endpoint at the time
+     * the run was started. The report lists every entry so the user
+     * can see exactly which datasets k6 cycled through or picked
+     * from. The list is empty for legacy runs that pre-date the pool
+     * feature — the report falls back to the flat fields below in
+     * that case.
+     */
+    val payloads: List<OperationPayload> = emptyList(),
+    /**
+     * Flat-field view of the *first* payload, kept so the report can
+     * render single-payload runs without a nested layout. With
+     * multiple payloads this is the entry that was actually baked
+     * into the static request block; the other entries only show up
+     * under [payloads].
+     */
+    val parameterValues: List<ParameterValue> = emptyList(),
+    val requestBodyJson: String? = null,
+    val bearerTokenConfigured: Boolean = false,
 )
 
 enum class TestRunStatus {

@@ -20,6 +20,8 @@ import {
   parseK6Summary,
   profileSummary,
   profileTotalSeconds,
+  renderPayloadStrategyHelp,
+  renderPayloadStrategyLabel,
   statusDistribution,
   type K6Metric,
   type K6Summary,
@@ -243,10 +245,11 @@ function Threshold({ passed, name, children }: { passed: boolean, name: string, 
   </div>
 }
 
-function ReportInfo({ label, value, code = false }: { label: string, value: string, code?: boolean }) {
+function ReportInfo({ label, value, code = false, help }: { label: string, value: string, code?: boolean, help?: string }) {
   return <div className="report-info">
     <span>{label}</span>
     {code ? <code>{value}</code> : <strong>{value}</strong>}
+    {help && <small className="report-info-help">{help}</small>}
   </div>
 }
 
@@ -268,6 +271,11 @@ function TestConfiguration({ run }: { run: TestRun }) {
           })()}
         />
         <ReportInfo label="Ausgewählte Operationen" value={configuration.operations.length.toString()} />
+        <ReportInfo
+          label="Payload-Strategie"
+          value={renderPayloadStrategyLabel(configuration.payloadStrategy)}
+          help={renderPayloadStrategyHelp(configuration.payloadStrategy)}
+        />
       </div>
       <h3>Getestete Endpunkte</h3>
       <div className="report-operations">
@@ -278,19 +286,48 @@ function TestConfiguration({ run }: { run: TestRun }) {
 }
 
 function ReportOperationCard({ operation }: { operation: ReportOperation }) {
+  // When the run was started with the pool feature, `payloads` carries
+  // every dataset the generator cycled through or sampled from. The
+  // report lists all of them so the user can see exactly which request
+  // shapes hit the target. When `payloads` is empty (legacy runs that
+  // pre-date the pool feature) we fall back to the flat fields, which
+  // keep rendering exactly like before.
+  const hasPool = operation.payloads.length > 1
+  const singlePayloadFallback = operation.payloads.length === 0
   return <article className="report-operation">
     <div className="report-operation-title">
       <span className={`method ${operation.method.toLowerCase()}`}>{operation.method}</span>
       <code>{operationDisplayPath(operation)}</code>
+      {hasPool && <span className="report-operation-pill">{operation.payloads.length} Payloads im Pool</span>}
     </div>
     <p><strong>{operation.operationId}</strong>{operation.summary ? ` · ${operation.summary}` : ''}</p>
-    {operation.parameterValues.length > 0 && <div className="report-parameter-list">
-      {operation.parameterValues.map(parameter => <div key={`${parameter.location}:${parameter.name}`}>
-        <span>{parameter.location}</span><strong>{parameter.name}</strong><code>{parameter.value || 'leer / nicht gesendet'}</code>
-      </div>)}
-    </div>}
-    <p>Bearer-Token: <strong>{operation.bearerTokenConfigured ? 'konfiguriert (aus Sicherheitsgründen ausgeblendet)' : 'nicht konfiguriert'}</strong></p>
-    {operation.requestBodyJson != null && <details><summary>JSON Request-Body</summary><pre>{operation.requestBodyJson || 'Kein Request-Body gesendet'}</pre></details>}
+    {hasPool ? (
+      <div className="report-payload-list">
+        {operation.payloads.map((payload, index) => (
+          <div key={index} className="report-payload-card">
+            <h4>Payload {index + 1}</h4>
+            {payload.parameterValues.length > 0 && <div className="report-parameter-list">
+              {payload.parameterValues.map(parameter => <div key={`${parameter.location}:${parameter.name}`}>
+                <span>{parameter.location}</span><strong>{parameter.name}</strong><code>{parameter.value || 'leer / nicht gesendet'}</code>
+              </div>)}
+            </div>}
+            <p>Bearer-Token: <strong>{payload.bearerTokenConfigured === true ? 'konfiguriert (aus Sicherheitsgründen ausgeblendet)' : 'nicht konfiguriert'}</strong></p>
+            {payload.requestBodyJson != null && <details><summary>JSON Request-Body</summary><pre>{payload.requestBodyJson || 'Kein Request-Body gesendet'}</pre></details>}
+          </div>
+        ))}
+      </div>
+    ) : (
+      <>
+        {operation.parameterValues.length > 0 && <div className="report-parameter-list">
+          {operation.parameterValues.map(parameter => <div key={`${parameter.location}:${parameter.name}`}>
+            <span>{parameter.location}</span><strong>{parameter.name}</strong><code>{parameter.value || 'leer / nicht gesendet'}</code>
+          </div>)}
+        </div>}
+        <p>Bearer-Token: <strong>{operation.bearerTokenConfigured ? 'konfiguriert (aus Sicherheitsgründen ausgeblendet)' : 'nicht konfiguriert'}</strong></p>
+        {operation.requestBodyJson != null && <details><summary>JSON Request-Body</summary><pre>{operation.requestBodyJson || 'Kein Request-Body gesendet'}</pre></details>}
+        {singlePayloadFallback && <p className="report-legacy-note">Hinweis: Dieser Testlauf wurde vor dem Payload-Pool-Feature gestartet; die oben gezeigten Werte entsprechen dem einzelnen Datensatz, der an den Endpunkt gesendet wurde.</p>}
+      </>
+    )}
   </article>
 }
 
@@ -356,6 +393,10 @@ function StatusCodeDistribution({ summary, run }: { summary: K6Summary, run: Tes
 function renderCodeHeader(code: string): string {
   return code
 }
+
+// ----- Payload-Strategie-Labels -----------------------------------------
+// Implementation lives in `./k6Report.ts` so the helper is unit-tested
+// and covered by the npm test coverage gate.
 
 function headerClassForCode(code: string): string {
   if (FALLBACK_CODES.includes(code as typeof FALLBACK_CODES[number])) return `status-header-${code}`
