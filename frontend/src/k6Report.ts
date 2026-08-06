@@ -6,6 +6,53 @@ export type ReportPayload = {
   bearerTokenConfigured?: boolean
 }
 
+export type ReportPayloadUsage = {
+  /** Zero-based index into the operation's `payloads` list. */
+  index: number
+  /** How many times k6 actually picked this payload during the run. */
+  count: number
+}
+
+/**
+ * Reads the per-payload call counters from a k6 summary. The k6
+ * generator emits one counter per payload index per operation
+ * (`lt_payload_<i>_<safe>`); the export exposes them under
+ * `metrics.<name>.count`. Returns an empty array when no counters
+ * are present (single-payload runs, legacy runs, or runs that
+ * crashed before any iteration).
+ */
+export function extractPayloadUsage(run: TestRun, operationId: string): ReportPayloadUsage[] {
+  const raw = run.summary?.raw
+  if (typeof raw !== 'string' || raw.length === 0) return []
+  let summary: { metrics?: Record<string, { count?: number }> }
+  try {
+    summary = JSON.parse(raw) as { metrics?: Record<string, { count?: number }> }
+  } catch {
+    return []
+  }
+  const prefix = `lt_payload_`
+  const suffix = `_${operationId}`
+  const usages: ReportPayloadUsage[] = []
+  for (const [name, value] of Object.entries(summary.metrics ?? {})) {
+    if (!name.startsWith(prefix) || !name.endsWith(suffix)) continue
+    const middle = name.slice(prefix.length, name.length - suffix.length)
+    // parseInt returns NaN for non-numeric middles. Both `NaN` and
+    // negative integers are out of range, so we guard with a single
+    // `Number.isInteger && >= 0` check.
+    const index = Number.parseInt(middle, 10)
+    if (!Number.isInteger(index) || index < 0) continue
+    // `value.count` is typed `number | undefined`. Guarding with
+    // Number.isFinite first (which accepts number | undefined in
+    // our local cast below) and falling back to zero mirrors the
+    // behaviour we want without leaning on `as`.
+    const rawCount: number | undefined = value.count
+    const count = typeof rawCount === 'number' && Number.isFinite(rawCount) ? rawCount : 0
+    usages.push({ index, count })
+  }
+  usages.sort((a, b) => a.index - b.index)
+  return usages
+}
+
 export type ReportOperation = {
   operationId: string
   method: string

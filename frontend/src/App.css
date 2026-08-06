@@ -93,7 +93,7 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 .lastprofil-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 1rem; align-items: stretch; }
 .lastprofil-left { display: flex; flex-direction: column; gap: .85rem; min-width: 0; }
 .lastprofil-left .server-selector { margin-bottom: 0; }
-.lastprofil-left .server-selector select { max-width: 22rem; }
+.lastprofil-left .server-selector select { max-width: 100%; }
 .base-url-label { display: block; color: #aeb9ca; font-size: .85rem; min-width: 0; }
 .base-url-label input { display: block; width: 100%; margin-top: .4rem; padding: .7rem; border: 1px solid #33425b; border-radius: 8px; color: white; background: #080d14; }
 .strategy-box { display: grid; grid-template-rows: auto 1fr auto; gap: .35rem; padding: .7rem .9rem; border: 1px solid #463a8c; border-left: 4px solid #7d63ff; border-radius: 9px; background: linear-gradient(135deg, #1a1d3a 0%, #111b29 100%); color: #dbe5f3; min-width: 0; position: relative; margin: 0; height: 100%; }
@@ -607,6 +607,20 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .report-payload-card { padding: .85rem 1rem; border: 1px solid #e9d7fe; border-left: 4px solid #6941c6; border-radius: 8px; background: #fff; }
 .report-payload-card h4 { margin: 0 0 .5rem; color: #6941c6; font-size: .78rem; font-weight: 800; letter-spacing: .04rem; text-transform: uppercase; }
 .report-payload-card p { margin: .4rem 0 0; }
+.report-payload-card-count { margin-left: .6rem; padding: .1rem .45rem; border-radius: 999px; background: #f4eeff; color: #6941c6; font-size: .68rem; font-weight: 700; letter-spacing: .04rem; text-transform: none; }
+
+/* Per-payload call distribution (Sequenziell vs. Zufällig im
+   ausführlichen Testbericht). The actual numbers come straight from
+   the k6 per-payload counter, not from a guess. */
+.report-payload-usage { margin: .65rem 0 0; }
+.report-payload-usage h4 { margin: 0 0 .25rem; color: #101828; font-size: .82rem; font-weight: 800; letter-spacing: .04rem; text-transform: uppercase; }
+.report-payload-usage-hint { margin: 0 0 .5rem; color: #667085; font-size: .75rem; }
+.report-usage-table { font-size: .82rem; }
+.report-usage-table thead th { background: #f2f4f7; color: #344054; }
+.report-usage-table tfoot th, .report-usage-table tfoot td { background: #f9fafb; color: #101828; }
+.report-usage-bar-row { position: relative; display: block; min-height: 1.4rem; }
+.report-usage-percent { position: relative; z-index: 1; display: inline-block; padding-right: .45rem; color: #101828; font-weight: 700; }
+.report-usage-bar { position: absolute; left: 0; top: 50%; transform: translateY(-50%); display: block; height: .75rem; background: #d4c1ff; border-radius: 4px; }
 .report-legacy-note { margin-top: .65rem; padding: .5rem .7rem; border: 1px dashed #c4b5fd; border-radius: 6px; color: #6941c6; background: #f5f3ff; font-size: .78rem; }
 .report-parameter-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
 .report-parameter-list > div { display: grid; grid-template-columns: auto 1fr; gap: .25rem .5rem; padding: .65rem; border: 1px solid #e9d7fe; border-radius: 8px; background: #fff; }

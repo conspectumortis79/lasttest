@@ -7,6 +7,7 @@ import {
   completedRequestCount,
   copyTextToClipboard,
   extractErrorLine,
+  extractPayloadUsage,
   formatBytes,
   formatDurationHuman,
   formatDurationSeconds,
@@ -1586,5 +1587,89 @@ test('renderPayloadStrategyHelp describes what the strategy did during the run',
   equal(renderPayloadStrategyHelp(null), 'Standard-Verhalten: jeder Endpunkt mit einem einzigen Datensatz.')
   equal(renderPayloadStrategyHelp(undefined), 'Standard-Verhalten: jeder Endpunkt mit einem einzigen Datensatz.')
   equal(renderPayloadStrategyHelp('fancy'), '')
+})
+
+// ---- extractPayloadUsage -------------------------------------------------
+
+test('extractPayloadUsage reads the per-payload counters and returns them sorted by index', () => {
+  const run = {
+    summary: {
+      raw: JSON.stringify({
+        metrics: {
+          'lt_payload_0_listProducts': { count: 7 },
+          'lt_payload_1_listProducts': { count: 3 },
+          'lt_payload_2_listProducts': { count: 0 },
+          // Other counters that should be ignored: status codes,
+          // network-error bucket, and a counter for a different
+          // operation that we must not attribute to listProducts.
+          'lt_status_200_listProducts': { count: 10 },
+          'lt_status_err_listProducts': { count: 0 },
+          'lt_payload_0_otherOp': { count: 99 },
+          'http_reqs': { count: 10 },
+        },
+      }),
+    },
+  } as unknown as TestRun
+  const usage = extractPayloadUsage(run, 'listProducts')
+  equal(usage.length, 3)
+  equal(usage[0].index, 0)
+  equal(usage[0].count, 7)
+  equal(usage[1].index, 1)
+  equal(usage[1].count, 3)
+  equal(usage[2].index, 2)
+  equal(usage[2].count, 0)
+})
+
+test('extractPayloadUsage returns an empty array when the summary is missing or malformed', () => {
+  equal(extractPayloadUsage({} as TestRun, 'listProducts').length, 0)
+  equal(extractPayloadUsage({ summary: { raw: 'not-json' } } as unknown as TestRun, 'listProducts').length, 0)
+  equal(extractPayloadUsage({ summary: { raw: '' } } as unknown as TestRun, 'listProducts').length, 0)
+  // Summary that parses but carries no `metrics` key — the ?? {}
+  // fallback path is the one exercised here.
+  equal(extractPayloadUsage({ summary: { raw: '{"foo": 1}' } } as unknown as TestRun, 'listProducts').length, 0)
+})
+
+test('extractPayloadUsage ignores counters that do not match the lt_payload_<i>_<op> pattern', () => {
+  const run = {
+    summary: {
+      raw: JSON.stringify({
+        metrics: {
+          'lt_payload_-1_listProducts': { count: 99 }, // negative index → ignored
+          'lt_payload_abc_listProducts': { count: 99 }, // not an integer → ignored
+          // Same suffix but a non-integer middle part so the parseInt
+          // branch (returning NaN) is exercised end-to-end.
+          'lt_payload_NaN_listProducts': { count: 99 },
+          'lt_status_200_listProducts': { count: 5 },
+        },
+      }),
+    },
+  } as unknown as TestRun
+  const usage = extractPayloadUsage(run, 'listProducts')
+  equal(usage.length, 0)
+})
+
+test('extractPayloadUsage treats a missing or non-numeric count as zero', () => {
+  const run = {
+    summary: {
+      raw: JSON.stringify({
+        metrics: {
+          'lt_payload_0_listProducts': {},                  // count missing → 0
+          'lt_payload_1_listProducts': { count: 'oops' },   // count not a number → 0
+          'lt_payload_2_listProducts': { count: null },    // count null → 0
+          'lt_payload_3_listProducts': { count: 5 },         // count a number → 5
+          // NaN passes the typeof number check but is a degenerate
+          // value — it should fall through to the default branch.
+          'lt_payload_4_listProducts': { count: Number.NaN },
+        },
+      }),
+    },
+  } as unknown as TestRun
+  const usage = extractPayloadUsage(run, 'listProducts')
+  equal(usage.length, 5)
+  equal(usage[0].count, 0)
+  equal(usage[1].count, 0)
+  equal(usage[2].count, 0)
+  equal(usage[3].count, 5)
+  equal(usage[4].count, 0)
 })
 

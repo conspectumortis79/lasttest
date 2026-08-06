@@ -1182,4 +1182,50 @@ class DefaultK6ScriptGeneratorTest {
         // top-level function without redeclaring anything.
         assertContains(script, "const __lt_idx_getPet = __lt_next_getPet();")
     }
+
+    @Test
+    fun `emits a per-payload counter declaration and increments it inside the dispatch branch`() {
+        // Each multi-payload branch must increment its own counter so
+        // the report can show the real call distribution, not a guess
+        // derived from executor duration and VU count.
+        val configuration =
+            OperationConfiguration(
+                operationId = "getPet",
+                payloads =
+                    listOf(
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42"))),
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "17"))),
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "99"))),
+                    ),
+            )
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 10,
+                payloadStrategy = PayloadStrategy.SEQUENTIAL,
+            )
+
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+
+        // One Counter declaration per payload index at the top of the
+        // generated script. The same Counter names are referenced from
+        // the dispatch branches below.
+        assertContains(script, "new Counter('lt_payload_0_getPet')")
+        assertContains(script, "new Counter('lt_payload_1_getPet')")
+        assertContains(script, "new Counter('lt_payload_2_getPet')")
+
+        // Each branch starts with the increment of its own counter so
+        // the summary export records the exact count per payload.
+        assertContains(script, "lt_payload_0_getPet.add(1)")
+        assertContains(script, "lt_payload_1_getPet.add(1)")
+        assertContains(script, "lt_payload_2_getPet.add(1)")
+
+        // No `lt_payload_*` counter for a single-payload operation:
+        // the request count is identical and would only add noise.
+        val singleProfile =
+            LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+        val singleScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), singleProfile)
+        assertTrue(!singleScript.contains("lt_payload_0_getPet"))
+    }
 }

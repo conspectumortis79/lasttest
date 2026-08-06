@@ -44,6 +44,12 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         require(configurations.keys.all(selectedOperationIds::contains)) { "Die Konfiguration enthält einen nicht ausgewählten oder unbekannten Endpunkt." }
 
         val strategy = loadProfile.payloadStrategy ?: PayloadStrategy.SEQUENTIAL
+        // Map of operationId → effective pool size, used both by
+        // [collectPoolSelectors] (to know when to emit a counter) and
+        // by the per-operation counter declarations above. Computed
+        // once here so the two consumers see the same numbers.
+        val configurationPoolSizes: Map<String, Int> =
+            configurations.mapValues { (_, configuration) -> effectivePayloads(configuration).size }
         val calls =
             selected.joinToString("\n") { operation ->
                 requestCode(operation, configurations[operation.operationId], strategy)
@@ -59,6 +65,13 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         // user still sees the unexpected bucket instead of silently
         // dropping responses. `err` is separate so network errors
         // (status === 0) cannot be confused with a real HTTP 0.
+        //
+        // Multi-payload operations additionally get one counter per
+        // payload index (`lt_payload_<i>_<opId>`) so the report can
+        // show how many times each payload was actually picked
+        // during the run. Single-payload operations skip the per-
+        // payload counter because the count is identical to the
+        // per-operation request count and would only add noise.
         val counterDeclarations =
             selected
                 .joinToString("\n") { operation ->
@@ -70,7 +83,17 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                     val fallback =
                         "const lt_status_err_$safe = new Counter('lt_status_err_$safe');\n" +
                             "const lt_status_other_$safe = new Counter('lt_status_other_$safe');"
-                    "$tracked\n$fallback"
+                    val payloadCounters =
+                        configurationPoolSizes[operation.operationId]?.let { size ->
+                            if (size <= 1) {
+                                ""
+                            } else {
+                                (0 until size).joinToString("\n") { index ->
+                                    "const lt_payload_${index}_$safe = new Counter('lt_payload_${index}_$safe');"
+                                }
+                            }
+                        } ?: ""
+                    listOf(tracked, fallback, payloadCounters).filter { it.isNotEmpty() }.joinToString("\n")
                 }
         // k6 v1+ removed the top-level `gracefulStop` option; graceful stop
         // is now a scenario-level setting. The `vus` and `duration`/`iterations`
@@ -242,13 +265,21 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         // here can simply call the next() function. Keeping the
         // counter at module level is what makes the round-robin
         // sequence stable across iterations of the same VU.
+        //
+        // Each if/else branch starts with `lt_payload_<i>_<safe>.add(1)`
+        // so the summary export records how many times each payload
+        // was actually picked during the run. The report reads these
+        // counters and shows a per-payload call count next to the
+        // configured payloads.
         val firstBlock = singlePayloadRequestBlock(operation, payloads[0], safe).trim()
-        val subsequentBlocks =
+        val firstBranch =
+            "  if (__lt_idx_$safe === 0) { lt_payload_0_$safe.add(1); $firstBlock }"
+        val subsequentBranches =
             payloads.drop(1).mapIndexed { index, payload ->
                 val block = singlePayloadRequestBlock(operation, payload, safe).trim()
-                "  else if (__lt_idx_$safe === ${index + 1}) { $block }"
+                "  else if (__lt_idx_$safe === ${index + 1}) { lt_payload_${index + 1}_$safe.add(1); $block }"
             }
-        return "  const __lt_idx_$safe = __lt_next_$safe();\n  if (__lt_idx_$safe === 0) { $firstBlock }\n" + subsequentBlocks.joinToString("\n")
+        return "  const __lt_idx_$safe = __lt_next_$safe();\n$firstBranch\n" + subsequentBranches.joinToString("\n")
     }
 
     /**

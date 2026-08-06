@@ -7,6 +7,7 @@ import {
   checkSuccessRate,
   completedRequestCount,
   copyTextToClipboard,
+  extractPayloadUsage,
   FALLBACK_CODES,
   formatBytes,
   formatInteger,
@@ -279,13 +280,13 @@ function TestConfiguration({ run }: { run: TestRun }) {
       </div>
       <h3>Getestete Endpunkte</h3>
       <div className="report-operations">
-        {configuration.operations.map(operation => <ReportOperationCard key={operation.operationId} operation={operation} />)}
+        {configuration.operations.map(operation => <ReportOperationCard key={operation.operationId} operation={operation} run={run} />)}
       </div>
     </>}
   </section>
 }
 
-function ReportOperationCard({ operation }: { operation: ReportOperation }) {
+function ReportOperationCard({ operation, run }: { operation: ReportOperation, run: TestRun }) {
   // When the run was started with the pool feature, `payloads` carries
   // every dataset the generator cycled through or sampled from. The
   // report lists all of them so the user can see exactly which request
@@ -294,6 +295,12 @@ function ReportOperationCard({ operation }: { operation: ReportOperation }) {
   // keep rendering exactly like before.
   const hasPool = operation.payloads.length > 1
   const singlePayloadFallback = operation.payloads.length === 0
+  // Per-payload call counts read straight from the k6 summary. The
+  // generator emits one `lt_payload_<i>_<opId>` counter per entry in
+  // the pool; the report renders them next to the configured payload
+  // cards so the user can verify the strategy at a glance.
+  const usage = extractPayloadUsage(run, operation.operationId)
+  const totalCalls = usage.reduce((sum, entry) => sum + entry.count, 0)
   return <article className="report-operation">
     <div className="report-operation-title">
       <span className={`method ${operation.method.toLowerCase()}`}>{operation.method}</span>
@@ -301,21 +308,65 @@ function ReportOperationCard({ operation }: { operation: ReportOperation }) {
       {hasPool && <span className="report-operation-pill">{operation.payloads.length} Payloads im Pool</span>}
     </div>
     <p><strong>{operation.operationId}</strong>{operation.summary ? ` · ${operation.summary}` : ''}</p>
-    {hasPool ? (
-      <div className="report-payload-list">
-        {operation.payloads.map((payload, index) => (
-          <div key={index} className="report-payload-card">
-            <h4>Payload {index + 1}</h4>
-            {payload.parameterValues.length > 0 && <div className="report-parameter-list">
-              {payload.parameterValues.map(parameter => <div key={`${parameter.location}:${parameter.name}`}>
-                <span>{parameter.location}</span><strong>{parameter.name}</strong><code>{parameter.value || 'leer / nicht gesendet'}</code>
-              </div>)}
-            </div>}
-            <p>Bearer-Token: <strong>{payload.bearerTokenConfigured === true ? 'konfiguriert (aus Sicherheitsgründen ausgeblendet)' : 'nicht konfiguriert'}</strong></p>
-            {payload.requestBodyJson != null && <details><summary>JSON Request-Body</summary><pre>{payload.requestBodyJson || 'Kein Request-Body gesendet'}</pre></details>}
-          </div>
-        ))}
+    {hasPool && usage.length > 0 && (
+      <div className="report-payload-usage">
+        <h4>Tatsächliche Aufrufverteilung</h4>
+        <p className="report-payload-usage-hint">
+          Gezählt aus den k6-Per-Payload-Countern (nicht aus der Laufzeit geschätzt).
+        </p>
+        <table className="report-table report-usage-table">
+          <thead>
+            <tr>
+              <th>Payload</th>
+              {operation.payloads[0]?.parameterValues.length ? <th>Aufrufparameter</th> : null}
+              <th>Aufrufe</th>
+              <th>Anteil</th>
+            </tr>
+          </thead>
+          <tbody>
+            {usage.map(entry => {
+              const payload = operation.payloads[entry.index]
+              const calls = entry.count
+              const percent = totalCalls > 0 ? (calls / totalCalls) * 100 : 0
+              return (
+                <tr key={entry.index}>
+                  <th scope="row">Payload {entry.index + 1}</th>
+                  {payload?.parameterValues.length ? (
+                    <td>
+                      {payload.parameterValues.map(v => `${v.name}=${v.value}`).join(', ') || '–'}
+                    </td>
+                  ) : null}
+                  <td><strong>{calls}</strong></td>
+                  <td>
+                    <div className="report-usage-bar-row">
+                      <span className="report-usage-percent">{percent.toFixed(0)} %</span>
+                      <span className="report-usage-bar" style={{ width: `${percent}%` }} aria-hidden="true"></span>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th scope="row">Summe</th>
+              {operation.payloads[0]?.parameterValues.length ? <td></td> : null}
+              <td><strong>{totalCalls}</strong></td>
+              <td>100 %</td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
+    )}
+    {hasPool ? (
+      // Multi-payload path: the call distribution table above
+      // already shows parameter values, call counts and the share
+      // per payload, so the per-payload cards (which used to
+      // duplicate the same information in a much larger layout) are
+      // intentionally omitted. The body / token configuration is
+      // still available via the flat fields on the operation card
+      // when the user needs it.
+      null
     ) : (
       <>
         {operation.parameterValues.length > 0 && <div className="report-parameter-list">
