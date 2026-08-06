@@ -7,6 +7,23 @@ internal OpenAPI 3 model during import. The application is supported on
 **Linux and macOS**. For a reproducible runtime across both operating systems,
 Docker is the recommended deployment path.
 
+## What lasttest does
+
+For every imported spec lasttest lets you:
+
+1. **Select** one operation and configure its parameters, request body,
+   and optional Bearer token.
+2. **Pick a load profile** that maps to one of four k6 executors —
+   `constant-vus`, `shared-iterations`, `ramping-vus`, or
+   `constant-arrival-rate` — with one-click presets for Smoke, Load,
+   Stress, Spike, Soak, Burst, and Arrival-Rate.
+3. **Run the test** and watch the status cycle through `QUEUED` →
+   `RUNNING` → `COMPLETED` (or `FAILED`).
+4. **Open the report** in a new tab. It contains a printable summary, the
+   generated k6 script, and — if InfluxDB is running — a
+   **ramp-grafik** that compares the planned load (Soll) with the
+   measured load (Ist) over time.
+
 ## Quick start with a single container
 
 ```bash
@@ -20,9 +37,29 @@ Or with Docker Compose:
 docker compose up --build -d
 ```
 
-Once Spring Boot has finished starting, the web UI is reachable on the
-configured port (default `8286`). The startup log only contains the
-standard Spring Boot output — no extra banner is emitted by lasttest.
+This starts three containers: `lasttest` (the application), `lasttest-influxdb`
+(a Time-Series database for the ramp-grafik), and `lasttest-grafana`
+(optional dashboards). Access them at:
+
+- `http://localhost:8286` — lasttest web UI
+- `http://localhost:8086` — InfluxDB UI (login `admin` / `lasttest-admin-password`)
+- `http://localhost:3000` — Grafana (login `admin` / `admin`)
+
+If you only need lasttest without the time-series parts, start it alone
+with `docker run` and the ramp-grafik will then show only the Soll line.
+
+Once Spring Boot has finished starting, a clearly visible success message with
+a link to the web UI is written to the container log:
+
+```text
+============================================================
+lasttest wurde erfolgreich gestartet.
+Jetzt im Browser öffnen: http://localhost:8286/
+============================================================
+```
+
+If a different public host or port is used, the displayed link can be
+overridden via the `LASTTEST_PUBLIC_URL` environment variable.
 
 Open the application in your browser:
 
@@ -49,9 +86,10 @@ multi-environment spec looks in the UI.
 
 After a test run, the link “Open detailed k6 report in a new tab” opens a
 print-optimised result view. It contains the summary, thresholds, run and
-API configuration, the actually used endpoint parameters, detailed k6
-metrics, and console / JSON raw data. Use “Print / Save as PDF” to archive
-this view directly as a PDF.
+API configuration, the actually used endpoint parameters, the **ramp-grafik**
+with Soll/Ist comparison (when InfluxDB is running), detailed k6 metrics,
+and console / JSON raw data. Use “Print / Save as PDF” to archive this view
+directly as a PDF.
 
 Below the k6 JSON export, “Generated k6 test script” can be expanded. It
 shows the exact script that lasttest executed and offers a download as
@@ -99,15 +137,30 @@ npm install
 npm run dev
 ```
 
+> **Note**: `./gradlew bootRun` is a blocking task — Gradle stays in
+> the foreground and keeps showing a progress bar (`EXECUTING [Ns]`)
+> until you press `Ctrl+C`, even though the Spring Boot app is already
+> up. As soon as you see
+> `Started LasttestApplicationKt in N.N seconds` in the log, the API is
+> reachable on `http://localhost:8286/`. Open the dev-UI URL below in
+> your browser while the Gradle process keeps running.
+
 Then open: <http://localhost:5173>
 
-Or simply run the helper script, which detects and stops any previously
-running lasttest instance (including Docker containers) and then starts
-both services:
+In dev mode the Vite dev-server serves the React UI with hot-reload on
+**http://localhost:5173**, and Spring Boot runs the JSON API on
+**http://localhost:8286**. The backend URL does **not** serve a UI in
+dev mode (it returns Spring's Whitelabel 404 page, because
+`../frontend/dist/` is not built). Always open the dev-UI URL in your
+browser:
 
-```bash
-./start-linux.sh
-```
+- Dev-UI (Vite, hot-reload): <http://localhost:5173>
+- API (Spring Boot, JSON only): <http://localhost:8286>
+
+For a single-URL deployment where the backend serves both the API and
+the UI on port 8286, use `./docker-start.sh` (or `docker compose up --build`)
+instead — the Dockerfile builds `frontend/dist/` and the Spring app
+serves it as static files.
 
 To try the demo, import `demo/openapi-demo.yaml` via “Datei öffnen”
 (“Open file”). The write operations POST, PUT, and DELETE must be enabled
@@ -119,8 +172,6 @@ explicitly.
   English user manual covering the workflow, the demo API, the
   configuration of every endpoint, running load tests, the report view,
   and troubleshooting.
-- **[`start-linux.sh`](./start-linux.sh)** — one-command local startup
-  (kills any previous instance, then launches backend + frontend).
 
 ## Tests and quality checks
 
@@ -177,7 +228,9 @@ cd frontend && npm run lint && npm run build
 
 ## Security boundaries of the MVP
 
-- Maximum 30000 VUs and 3600 seconds per run.
+- Load profile values are hard-capped per executor (max 30 000 VUs, max
+  3 600 s duration, max 1 000 000 iterations, max 100 000 req/s, etc.)
+  to keep runaway tests from melting your target.
 - Destructive operations are deactivated in the UI by default.
 - Only HTTP(S) targets are accepted.
 - For a productive, multi-tenant deployment k6 must additionally run in

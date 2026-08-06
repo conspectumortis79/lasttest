@@ -5,14 +5,14 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RestController
 
 /**
- * Liefert eine Swagger-UI-Seite, die ihre Spezifikation über die bestehende
- * Demo-Route `/api/demo-specification` lädt. Damit lässt sich der
- * "URL zur Swagger-UI"-Workflow End-to-End testen, ohne dass ein externes
- * System benötigt wird.
+ * Serves a Swagger UI page that loads its specification through the
+ * existing demo route `/api/demo-specification`. This lets us test
+ * the "URL to Swagger UI" workflow end-to-end without needing an
+ * external system.
  *
- * Die Swagger-UI-Bibliothek wird zur Laufzeit vom unpkg-CDN geladen. Wenn
- * das Build offline laufen muss, kann die URL über `lasttest.swagger-ui-cdn`
- * überschrieben werden.
+ * The Swagger UI library is loaded at runtime from the unpkg CDN. If
+ * the build has to run offline, the URL can be overridden via
+ * `lasttest.swagger-ui-cdn`.
  */
 @RestController
 class DemoSwaggerUiController {

@@ -45,10 +45,13 @@ class LocalK6TestRunExecutionTest {
         assertEquals(TestRunStatus.COMPLETED, completed.status)
         assertEquals(0, completed.exitCode)
         assertContains(completed.summary?.get("raw").toString(), "checks")
-        // Successful runs do not surface the captured k6 output as an error.
-        // The summary JSON is the authoritative result; see USER_GUIDE §9.2
-        // and the implementation comment in LocalK6TestRunService.execute().
+        // On a successful run, error is null because there is nothing
+        // to report. This is a deliberate design decision
+        // (see LocalK6TestRunService.execute).
         assertNull(completed.error)
+        // The k6 console output is also persisted on success so the
+        // UI can display it.
+        assertEquals("successful k6 output", completed.consoleOutput)
         assertNotNull(completed.startedAt)
         assertNotNull(completed.finishedAt)
         assertNull(service.find("missing"))
@@ -72,6 +75,9 @@ class LocalK6TestRunExecutionTest {
         assertEquals(TestRunStatus.FAILED, failed.status)
         assertEquals(7, failed.exitCode)
         assertEquals("k6 failed", failed.error)
+        // On threshold/process failures `error` and
+        // `consoleOutput` carry the same k6 output.
+        assertEquals("k6 failed", failed.consoleOutput)
         assertNull(failed.summary)
     }
 
@@ -84,6 +90,9 @@ class LocalK6TestRunExecutionTest {
 
         assertEquals(TestRunStatus.COMPLETED, completed.status)
         assertNull(completed.error)
+        // When the k6 output is completely empty, the console is also
+        // empty — no "k6 console output" block in the UI.
+        assertNull(completed.consoleOutput)
         assertNull(completed.summary)
     }
 
@@ -95,6 +104,9 @@ class LocalK6TestRunExecutionTest {
 
         assertEquals(TestRunStatus.FAILED, failed.status)
         assertNotNull(failed.error)
+        // If k6 could not start at all, there is no console
+        // output — only the error message.
+        assertNull(failed.consoleOutput)
         assertNotNull(failed.finishedAt)
     }
 
@@ -172,13 +184,12 @@ class LocalK6TestRunExecutionTest {
                         baseUrl: String,
                         operationIds: Set<String>,
                         operationConfigurations: List<OperationConfiguration>,
-                        virtualUsers: Int,
-                        durationSeconds: Int,
-                        useIterations: Boolean,
+                        loadProfile: de.lasttest.api.LoadProfile,
                     ): String = "export default function () {}"
                 },
             executor = Executor(Runnable::run),
             k6Command = command,
+            influxDbProperties = de.lasttest.config.InfluxDbProperties(enabled = false),
         )
 
     private fun request(): CreateTestRunRequest =
@@ -186,6 +197,12 @@ class LocalK6TestRunExecutionTest {
             specification = "openapi document",
             baseUrl = "https://example.test",
             operationIds = setOf("listPets"),
+            loadProfile =
+                de.lasttest.api.LoadProfile(
+                    type = de.lasttest.api.LoadProfileType.CONSTANT_VUS,
+                    virtualUsers = 1,
+                    durationSeconds = 1,
+                ),
         )
 
     private fun specification(): ImportedSpecification =

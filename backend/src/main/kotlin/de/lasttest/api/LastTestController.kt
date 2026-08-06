@@ -5,6 +5,7 @@ import de.lasttest.domain.InvalidSpecificationException
 import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
 import de.lasttest.domain.TestRunService
+import de.lasttest.domain.TimeSeriesReader
 import jakarta.validation.Valid
 import org.springframework.http.ContentDisposition
 import org.springframework.http.HttpHeaders
@@ -28,6 +29,7 @@ class LastTestController(
     private val testRuns: TestRunService,
     private val demoSpecificationProvider: DemoSpecificationProvider,
     private val remoteFetcher: RemoteSpecificationFetcher,
+    private val timeSeriesReader: TimeSeriesReader,
 ) {
     @GetMapping("/demo-specification", produces = [DEMO_SPECIFICATION_MEDIA_TYPE])
     fun demoSpecification(): String = demoSpecificationProvider.load()
@@ -63,6 +65,38 @@ class LastTestController(
             .contentType(k6ScriptMediaType)
             .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
             .body(script)
+    }
+
+    /**
+     * Returns time-series data (VUs + RPS) for the ramp chart in the
+     * report. Reads from InfluxDB; on errors, empty arrays are returned
+     * so the report can still render the target line. Returns 404 if
+     * the run is unknown or still running (startedAt/finishedAt
+     * missing).
+     */
+    @GetMapping("/test-runs/{id}/time-series")
+    fun timeSeries(
+        @PathVariable id: String,
+    ): ResponseEntity<TimeSeriesResponse> {
+        val run = testRuns.find(id) ?: return ResponseEntity.notFound().build()
+        val started = run.startedAt ?: return ResponseEntity.notFound().build()
+        val finished = run.finishedAt ?: return ResponseEntity.notFound().build()
+        val vus =
+            timeSeriesReader
+                .readVusOverTime(id, started, finished)
+                .map { TimeSeriesPoint(time = it.time, value = it.value) }
+        val rps =
+            timeSeriesReader
+                .readRequestsPerSecond(id, started, finished)
+                .map { TimeSeriesPoint(time = it.time, value = it.value) }
+        return ResponseEntity.ok(
+            TimeSeriesResponse(
+                runId = id,
+                resolutionSeconds = 1,
+                vus = vus,
+                requestsPerSecond = rps,
+            ),
+        )
     }
 
     @ExceptionHandler(InvalidSpecificationException::class, IllegalArgumentException::class)

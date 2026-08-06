@@ -4,11 +4,20 @@ import { TestRunReportPage } from './TestRunReport.tsx'
 import {
   buildMetricRow,
   parseK6Summary,
-  progressHint,
   summarizeFailure,
   type TestRun,
 } from './k6Report.ts'
-import { MAX_DURATION_SECONDS, MAX_VIRTUAL_USERS, validateLoadProfile } from './loadProfile.ts'
+import { RunStatusView } from './runStatusView.tsx'
+import { useRunClock } from './useRunClock.ts'
+import { LoadProfileEditor } from './LoadProfileEditor.tsx'
+import {
+  defaultLoadProfile,
+  serialiseLoadProfile,
+  validateLoadProfile,
+  type LoadProfile,
+} from './loadProfile.ts'
+// MAX_DURATION_SECONDS / MAX_VIRTUAL_USERS are no longer needed
+// directly in App.tsx — the limits now live in LoadProfileEditor.
 import {
   buildOperationConfigurations,
   createOperationSettings,
@@ -63,22 +72,24 @@ function LoadTestApp() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [operationSettings, setOperationSettings] = useState<Record<string, OperationSettings>>({})
   const [baseUrl, setBaseUrl] = useState('')
-  const [vus, setVus] = useState(1)
-  const [duration, setDuration] = useState(10)
-  const [useIterations, setUseIterations] = useState(false)
+  const [loadProfile, setLoadProfile] = useState<LoadProfile>(defaultLoadProfile())
   const [run, setRun] = useState<TestRun>()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [lastFetched, setLastFetched] = useState<FetchedSpecification | undefined>()
+  // Local ticker for the runtime display. It only ticks while the
+  // run is QUEUED or RUNNING; the hook forwards the current `now`
+  // to <RunStatusView>.
+  const runNow = useRunClock(run)
 
   useEffect(() => {
     let cancelled = false
 
     async function loadDemo() {
-      // Retry mit Backoff, damit ein noch hochfahrendes Backend nicht zu
-      // ECONNREFUSED-Einträgen im Vite-Proxy-Log führt. Bei dauerhaftem
-      // Fehlschlag (z. B. Backend antwortet mit 5xx) bleibt das eingebettete
-      // Sample im Textarea stehen.
+      // Retry with backoff so that a backend still starting up does
+      // not produce ECONNREFUSED entries in the Vite proxy log. On
+      // persistent failure (e.g. backend responds with 5xx), the
+      // embedded sample in the textarea remains.
       try {
         const response = await fetchWithRetry(
           '/api/demo-specification',
@@ -89,7 +100,7 @@ function LoadTestApp() {
         const content = await response.text()
         if (!cancelled && content.trim() !== '') setSpecification(content)
       } catch {
-        // Fallback auf eingebettetes Sample, falls Backend nicht erreichbar ist.
+        // Fallback to the embedded sample if the backend is not reachable.
       }
     }
 
@@ -156,7 +167,7 @@ function LoadTestApp() {
 
   async function startTest() {
     if (!imported) return
-    const profileError = validateLoadProfile(vus, duration)
+    const profileError = validateLoadProfile(loadProfile)
     if (profileError) {
       setError(profileError)
       return
@@ -173,9 +184,7 @@ function LoadTestApp() {
           baseUrl,
           operationIds: [...selected],
           operationConfigurations,
-          virtualUsers: vus,
-          durationSeconds: duration,
-          useIterations,
+          loadProfile: serialiseLoadProfile(loadProfile),
         }),
       })
       const data = await response.json()
@@ -251,7 +260,7 @@ function LoadTestApp() {
           übernommen und kann vor dem Import noch bearbeitet werden.
         </small>
       </label>
-      <textarea aria-label="Swagger / OpenAPI-Dokumentation" value={specification} onChange={event => setSpecification(event.target.value)} spellCheck={false} />
+      <textarea className="specification-textarea" aria-label="Swagger / OpenAPI-Dokumentation" value={specification} onChange={event => setSpecification(event.target.value)} spellCheck={false} />
       <div className="actions">
         <label className="upload">Datei öffnen<input type="file" accept=".yaml,.yml,.json" onChange={async event => {
           const file = event.target.files?.[0]
@@ -319,22 +328,8 @@ function LoadTestApp() {
         )}
         <div className="grid">
           <label>Base URL<input value={baseUrl} onChange={event => setBaseUrl(event.target.value)} /></label>
-          <label>Virtual Users<input type="number" min="1" max={MAX_VIRTUAL_USERS} step="1" value={vus} aria-describedby="virtual-users-hint" onChange={event => setVus(Number(event.target.value))} /><small id="virtual-users-hint">1 bis {MAX_VIRTUAL_USERS}</small></label>
-          <label>Dauer (Sekunden)<input type="number" min="1" max={MAX_DURATION_SECONDS} step="1" value={duration} aria-describedby="duration-hint" disabled={useIterations} onChange={event => setDuration(Number(event.target.value))} /><small id="duration-hint">1 bis {MAX_DURATION_SECONDS} Sekunden{useIterations ? ' · im Iterations-Modus deaktiviert' : ''}</small></label>
         </div>
-        <label className="iterations-toggle">
-          <input
-            type="checkbox"
-            checked={useIterations}
-            onChange={event => setUseIterations(event.target.checked)}
-          />
-          <span>
-            <strong>Statt Dauer: N Anfragen, so schnell wie möglich</strong>
-            <small>
-              Jeder Virtual User feuert genau eine Iteration. Die Gesamtlaufzeit ist die Zeit, bis die letzte Antwort eingetroffen ist.
-            </small>
-          </span>
-        </label>
+        <LoadProfileEditor profile={loadProfile} onChange={setLoadProfile} disabled={busy} />
         {(() => {
           const selectedOperation = imported.operations.find(operation => selected.has(operation.operationId))
           const selectedValidation = selectedOperation
@@ -358,13 +353,39 @@ function LoadTestApp() {
     </>}
 
     {run && <section className="card result">
-      <div className="step">4</div>
-      <h2>Testlauf</h2>
+      <header className="result-header">
+        <div className="result-header-top">
+          <div className="step">4</div>
+          <h2>Testlauf</h2>
+          {/* Run-ID sitzt immer oben rechts in der Karte, sowohl während
+              k6 läuft als auch im Ergebnis. Direkt darunter (rechtsbündig)
+              erscheint der Report-Button, sobald der Test beendet ist
+              (COMPLETED oder FAILED) — unabhängig davon, ob k6 Output
+              oder einen Summary geliefert hat. So bekommen die Details
+              unten die volle Kartenbreite, und der Report-Link ist auch
+              dann verfügbar, wenn ein sauberer Run ohne Summary
+              zurueckkommt. Waehrend RUNNING/QUEUED bleibt der Button
+              korrekterweise weg (Negativfall). */}
+          <span className="result-run-id">Run-ID: <code>{run.id}</code></span>
+        </div>
+        {(run.status === 'COMPLETED' || run.status === 'FAILED') && (
+          <div className="result-header-actions">
+            <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">Ausführlicher K6-Testbericht</a>
+          </div>
+        )}
+      </header>
       <TestRunSummary run={run} />
-      <p>Run-ID: <code>{run.id}</code></p>
-      <a className="report-link" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">Ausführlichen k6-Testbericht in neuem Tab öffnen ↗</a>
-      {run.error && <details><summary>k6-Konsolenausgabe</summary><pre>{run.error}</pre></details>}
-      {run.summary && <details><summary>k6-JSON-Rohdaten</summary><pre>{run.summary.raw}</pre></details>}
+      <RunStatusView run={run} now={runNow} />
+      {/* Untere Zeile: k6-Konsolenausgabe + k6-JSON-Rohdaten. Nimmt jetzt
+          die volle Kartenbreite, weil der Report-Button oben in den
+          Header gewandert ist. Nur sichtbar, wenn k6 überhaupt Output
+          oder einen Summary geliefert hat. */}
+      {((run.consoleOutput ?? run.error) || run.summary) && <div className="result-extras">
+        <div className="result-extras-details">
+          {(run.consoleOutput ?? run.error) && <details><summary>k6-Konsolenausgabe</summary><pre>{run.consoleOutput ?? run.error}</pre></details>}
+          {run.summary && <details><summary>k6-JSON-Rohdaten</summary><pre>{run.summary.raw}</pre></details>}
+        </div>
+      </div>}
     </section>}
   </main>
 }
@@ -376,22 +397,32 @@ type TestRunSummaryProps = {
 function TestRunSummary({ run }: TestRunSummaryProps) {
   const summary = parseK6Summary(run)
   const failure = summarizeFailure(run)
-  const hint = progressHint(run)
   const metricItems = buildMetricRow(run, summary, failure)
+  // As soon as k6 is done, <RunStatusView> takes over the full
+  // result presentation (badge + threshold notice + cards + run
+  // foot). We then hide the metric row and the failure causes here.
+  // As soon as k6 is done, <RunStatusView> takes over the full
+  // result presentation (PASSED/FAILED pill + exit code in the
+  // `ResultHeader` row, threshold notice, cards, run foot). Here at
+  // the top we hide both the status pill and the failure causes so
+  // nothing appears twice. For RUNNING/QUEUED the status pill stays
+  // visible; we keep hiding the time hint ("running since …")
+  // because the three cells below (RUNNING SINCE / REMAINING /
+  // STARTED) show the same information more clearly.
+  const isFinished = run.status === 'COMPLETED' || run.status === 'FAILED'
 
   return (
     <>
-      <div className="status-row">
+      {!isFinished && <div className="status-row">
         <div className={`status ${run.status.toLowerCase()}`}>{run.status}</div>
-        {hint && <span className="status-hint">{hint}</span>}
         {run.status === 'FAILED' && (
           <>
             <span className="status-diagnosis">{failure.diagnosis}</span>
             <span className="status-detail">{failure.detail}</span>
           </>
         )}
-      </div>
-      {metricItems.length > 0 && (
+      </div>}
+      {!isFinished && metricItems.length > 0 && (
         <ul className="metric-row">
           {metricItems.map(item => (
             <li key={item.label} className={`metric-item metric-${item.severity}`}>
@@ -401,7 +432,7 @@ function TestRunSummary({ run }: TestRunSummaryProps) {
           ))}
         </ul>
       )}
-      {run.status === 'FAILED' && failure.reasons.length > 0 && (
+      {!isFinished && run.status === 'FAILED' && failure.reasons.length > 0 && (
         <ul className="failure-reasons">
           {failure.reasons.map(reason => <li key={reason}>{reason}</li>)}
         </ul>

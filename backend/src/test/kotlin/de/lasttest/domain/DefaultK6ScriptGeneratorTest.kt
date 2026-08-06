@@ -3,6 +3,9 @@ package de.lasttest.domain
 import de.lasttest.api.ApiOperation
 import de.lasttest.api.ApiParameter
 import de.lasttest.api.ImportedSpecification
+import de.lasttest.api.LoadProfile
+import de.lasttest.api.LoadProfileType
+import de.lasttest.api.LoadStage
 import de.lasttest.api.OperationConfiguration
 import de.lasttest.api.ParameterValue
 import kotlin.test.Test
@@ -51,7 +54,8 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `generates iterations and omits duration when useIterations is true`() {
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 250, 10, useIterations = true)
+        val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = 250, iterations = 250)
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
 
         assertTrue(script.contains("vus: 250"))
         assertTrue(script.contains("iterations: 250"))
@@ -61,7 +65,8 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `defaults useIterations to false and keeps the duration block`() {
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 2, 15)
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 2, durationSeconds = 15)
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
 
         assertTrue(script.contains("duration: '15s'"))
         assertTrue(!script.contains("iterations:"))
@@ -69,8 +74,10 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `wraps load options in a k6 v2 scenario block with the right executor`() {
-        val durationScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 2, 15)
-        val iterationsScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 250, 10, useIterations = true)
+        val constantVUs = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 2, durationSeconds = 15)
+        val sharedIterations = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = 250, iterations = 250)
+        val durationScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), constantVUs)
+        val iterationsScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), sharedIterations)
 
         // k6 v1+ requires scenarios; the top-level vus/duration shortcuts
         // were removed in v2 alongside gracefulStop. Make sure we emit the
@@ -93,7 +100,8 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `generates selected operation with tags and thresholds`() {
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 2, 15)
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 2, durationSeconds = 15)
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
 
         assertTrue(script.contains("vus: 2"))
         assertTrue(script.contains("duration: '15s'"))
@@ -105,16 +113,18 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `accepts thirty thousand virtual users`() {
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 30000, 10)
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 30000, durationSeconds = 10)
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
 
         assertTrue(script.contains("vus: 30000"))
     }
 
     @Test
     fun `rejects virtual users above thirty thousand with the documented message`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 30001, durationSeconds = 10)
         val exception =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 30001, 10)
+                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
             }
 
         assertTrue(exception.message!!.contains("zwischen 1 und 30000"))
@@ -134,8 +144,9 @@ class DefaultK6ScriptGeneratorTest {
                     ),
                 bearerToken = "secret-token",
             )
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), 1, 10)
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
 
         assertTrue(script.contains("/pets/7?expand=full%20details"))
         assertTrue(script.contains("\"X-Tenant\":\"customer-a\""))
@@ -146,8 +157,9 @@ class DefaultK6ScriptGeneratorTest {
     @Test
     fun `uses an editable JSON request body`() {
         val configuration = OperationConfiguration(operationId = "createPet", requestBodyJson = """{"name":"Luna"}""")
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(specification, "https://example.test", setOf("createPet"), listOf(configuration), 1, 10)
+        val script = generator.generate(specification, "https://example.test", setOf("createPet"), listOf(configuration), profile)
 
         assertTrue(script.contains("JSON.stringify({\"name\":\"Luna\"})"))
         assertTrue(script.contains("\"Content-Type\":\"application/json\""))
@@ -160,8 +172,9 @@ class DefaultK6ScriptGeneratorTest {
                 operationId = "getPet",
                 parameterValues = listOf(ParameterValue("expand", "query", "")),
             )
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), 1, 10)
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
 
         assertTrue(!script.contains("expand="))
     }
@@ -169,15 +182,17 @@ class DefaultK6ScriptGeneratorTest {
     @Test
     fun `rejects malformed JSON request body`() {
         val configuration = OperationConfiguration(operationId = "createPet", requestBodyJson = "{invalid}")
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("createPet"), listOf(configuration), 1, 10)
+            generator.generate(specification, "https://example.test", setOf("createPet"), listOf(configuration), profile)
         }
     }
 
     @Test
     fun `supports http targets empty selections delete calls and documented request bodies`() {
-        val script = generator.generate(specification, "http://example.test", emptySet(), emptyList(), 1, 3600)
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 3600)
+        val script = generator.generate(specification, "http://example.test", emptySet(), emptyList(), profile)
 
         assertContains(script, "vus: 1")
         assertContains(script, "duration: '3600s'")
@@ -187,30 +202,155 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `validates lower virtual user and duration boundaries`() {
-        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 0, 10) }
-        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 1, 0) }
-        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 1, 3601) }
+        val tooFewVUs = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 0, durationSeconds = 10)
+        val tooShortDuration = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 0)
+        val tooLongDuration = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 3601)
+
+        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), tooFewVUs) }
+        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), tooShortDuration) }
+        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), tooLongDuration) }
+    }
+
+    // --- New load profile tests (ramping-vus, constant-arrival-rate) ---
+
+    @Test
+    fun `renders ramping-vus with stages and startVUs`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.RAMPING_VUS,
+                startVUs = 0,
+                stages =
+                    listOf(
+                        LoadStage(target = 0, durationSeconds = 30),
+                        LoadStage(target = 200, durationSeconds = 120),
+                        LoadStage(target = 200, durationSeconds = 300),
+                        LoadStage(target = 0, durationSeconds = 30),
+                    ),
+            )
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+
+        assertTrue(script.contains("executor: 'ramping-vus'"))
+        assertTrue(script.contains("startVUs: 0"))
+        assertTrue(script.contains("stages: ["))
+        assertTrue(script.contains("{ target: 0, duration: '30s' }"))
+        assertTrue(script.contains("{ target: 200, duration: '120s' }"))
+        assertTrue(script.contains("{ target: 200, duration: '300s' }"))
+        // The last stage shares its target with the plateau, so we allow it.
+        // But the second-to-last with the same target as its predecessor is
+        // what the *body* of the stages list should still emit.
+        assertTrue(!script.contains("vus: "))
+        assertTrue(!script.contains("duration: '480s'"))
+    }
+
+    @Test
+    fun `rejects ramping-vus with empty stages`() {
+        val profile = LoadProfile(type = LoadProfileType.RAMPING_VUS, stages = emptyList())
+        assertFailsWith<IllegalArgumentException> {
+            generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        }
+    }
+
+    @Test
+    fun `renders constant-arrival-rate with preAllocated and maxVUs`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 1,
+                durationSeconds = 60,
+                preAllocatedVUs = 10,
+                maxVUs = 100,
+            )
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+
+        assertTrue(script.contains("executor: 'constant-arrival-rate'"))
+        assertTrue(script.contains("rate: 50"))
+        assertTrue(script.contains("timeUnit: '1s'"))
+        assertTrue(script.contains("duration: '60s'"))
+        assertTrue(script.contains("preAllocatedVUs: 10"))
+        assertTrue(script.contains("maxVUs: 100"))
+    }
+
+    @Test
+    fun `rejects constant-arrival-rate with maxVUs below preAllocatedVUs`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 1,
+                durationSeconds = 60,
+                preAllocatedVUs = 100,
+                maxVUs = 50,
+            )
+        assertFailsWith<IllegalArgumentException> {
+            generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        }
+    }
+
+    @Test
+    fun `rejects constant-arrival-rate with an invalid time unit`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 300,
+                durationSeconds = 60,
+                preAllocatedVUs = 10,
+                maxVUs = 100,
+            )
+        val exception =
+            assertFailsWith<IllegalArgumentException> {
+                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+            }
+        assertTrue(exception.message!!.contains("Zeiteinheit"))
+    }
+
+    @Test
+    fun `rejects constant-vus missing required fields`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS)
+        assertFailsWith<IllegalArgumentException> {
+            generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        }
     }
 
     @Test
     fun `rejects duplicate and unknown operation configurations`() {
         val configuration = OperationConfiguration("getPet")
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration, configuration), 1, 10)
+            generator.generate(
+                specification,
+                "https://example.test",
+                setOf("getPet"),
+                listOf(configuration, configuration),
+                LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10),
+            )
         }
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("getPet"), listOf(OperationConfiguration("deletePet")), 1, 10)
+            generator.generate(
+                specification,
+                "https://example.test",
+                setOf("getPet"),
+                listOf(OperationConfiguration("deletePet")),
+                LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10),
+            )
         }
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("getPet"), listOf(OperationConfiguration("missing")), 1, 10)
+            generator.generate(
+                specification,
+                "https://example.test",
+                setOf("getPet"),
+                listOf(OperationConfiguration("missing")),
+                LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10),
+            )
         }
     }
 
     @Test
     fun `rejects duplicate unknown and empty required parameters`() {
         val id = ParameterValue("id", "path", "7")
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("getPet"), listOf(OperationConfiguration("getPet", listOf(id, id))), 1, 10)
+            generator.generate(specification, "https://example.test", setOf("getPet"), listOf(OperationConfiguration("getPet", listOf(id, id))), profile)
         }
         assertFailsWith<IllegalArgumentException> {
             generator.generate(
@@ -218,8 +358,7 @@ class DefaultK6ScriptGeneratorTest {
                 "https://example.test",
                 setOf("getPet"),
                 listOf(OperationConfiguration("getPet", listOf(ParameterValue("unknown", "query", "x")))),
-                1,
-                10,
+                profile,
             )
         }
         assertFailsWith<IllegalArgumentException> {
@@ -228,8 +367,7 @@ class DefaultK6ScriptGeneratorTest {
                 "https://example.test",
                 setOf("getPet"),
                 listOf(OperationConfiguration("getPet", listOf(ParameterValue("id", "PATH", " ")))),
-                1,
-                10,
+                profile,
             )
         }
     }
@@ -238,8 +376,9 @@ class DefaultK6ScriptGeneratorTest {
     fun `uses a default value when a parameter has no example`() {
         val operation = ApiOperation("missingExample", "GET", "/missing", "", false, listOf(ApiParameter("value", "query", false, null)), null)
         val missingExampleSpecification = specification.copy(operations = listOf(operation))
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(missingExampleSpecification, "https://example.test", emptySet(), emptyList(), 1, 10)
+        val script = generator.generate(missingExampleSpecification, "https://example.test", emptySet(), emptyList(), profile)
 
         assertContains(script, "value=test")
     }
@@ -249,8 +388,9 @@ class DefaultK6ScriptGeneratorTest {
         val operation = ApiOperation("jsonList", "POST", "/json", "", true, emptyList(), null, hasRequestBody = true)
         val jsonSpecification = specification.copy(operations = listOf(operation))
         val configuration = OperationConfiguration("jsonList", requestBodyJson = "{\"nothing\":null,\"items\":[1,true]}")
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(jsonSpecification, "https://example.test", emptySet(), listOf(configuration), 1, 10)
+        val script = generator.generate(jsonSpecification, "https://example.test", emptySet(), listOf(configuration), profile)
 
         assertContains(script, "JSON.stringify({\"nothing\":null,\"items\":[1,true]})")
     }
@@ -275,9 +415,10 @@ class DefaultK6ScriptGeneratorTest {
         val collectionSpecification = specification.copy(operations = listOf(collectionOperation))
         val prefixed = OperationConfiguration("collections", bearerToken = "Bearer existing")
         val blank = OperationConfiguration("collections", bearerToken = " ")
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val prefixedScript = generator.generate(collectionSpecification, "https://example.test", emptySet(), listOf(prefixed), 1, 10)
-        val blankScript = generator.generate(collectionSpecification, "https://example.test", emptySet(), listOf(blank), 1, 10)
+        val prefixedScript = generator.generate(collectionSpecification, "https://example.test", emptySet(), listOf(prefixed), profile)
+        val blankScript = generator.generate(collectionSpecification, "https://example.test", emptySet(), listOf(blank), profile)
 
         assertContains(prefixedScript, "\"Authorization\":\"Bearer existing\"")
         assertTrue(!blankScript.contains("Authorization"))
@@ -300,8 +441,9 @@ class DefaultK6ScriptGeneratorTest {
                 hasRequestBody = true,
             )
         val bodySpecification = specification.copy(operations = listOf(bodyOperation))
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(bodySpecification, "https://example.test", emptySet(), emptyList(), 1, 10)
+        val script = generator.generate(bodySpecification, "https://example.test", emptySet(), emptyList(), profile)
 
         assertContains(script, "JSON.stringify([1,true,\"line\\nvalue\"])")
         assertContains(script, "\\b\\f\\n\\r\\t\\u0001")
@@ -313,8 +455,9 @@ class DefaultK6ScriptGeneratorTest {
             ApiOperation("optionalBody", "POST", "/optional", "", true, emptyList(), mapOf("value" to true), hasRequestBody = true)
         val optionalSpecification = specification.copy(operations = listOf(optionalBody))
         val configuration = OperationConfiguration("optionalBody", requestBodyJson = "")
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(optionalSpecification, "https://example.test", emptySet(), listOf(configuration), 1, 10)
+        val script = generator.generate(optionalSpecification, "https://example.test", emptySet(), listOf(configuration), profile)
 
         assertContains(script, "null")
         assertTrue(!script.contains("Content-Type"))
@@ -322,27 +465,31 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `rejects empty and null required request bodies`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("createPet"), listOf(OperationConfiguration("createPet", requestBodyJson = "")), 1, 10)
+            generator.generate(specification, "https://example.test", setOf("createPet"), listOf(OperationConfiguration("createPet", requestBodyJson = "")), profile)
         }
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("createPet"), listOf(OperationConfiguration("createPet", requestBodyJson = "null")), 1, 10)
+            generator.generate(specification, "https://example.test", setOf("createPet"), listOf(OperationConfiguration("createPet", requestBodyJson = "null")), profile)
         }
     }
 
     @Test
     fun `rejects invalid target URL`() {
-        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "file:///etc/passwd", emptySet(), emptyList(), 1, 10) }
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "file:///etc/passwd", emptySet(), emptyList(), profile) }
     }
 
     @Test
     fun `rejects empty selection`() {
-        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("missing"), emptyList(), 1, 10) }
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("missing"), emptyList(), profile) }
     }
 
     @Test
     fun `declares one counter per tracked status code plus err and other per selected operation`() {
-        val script = generator.generate(specification, "https://example.test", setOf("getPet", "createPet"), emptyList(), 1, 10)
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+        val script = generator.generate(specification, "https://example.test", setOf("getPet", "createPet"), emptyList(), profile)
 
         // 19 tracked codes + err + other = 21 Counter declarations per operation.
         val trackedCodes =
@@ -378,7 +525,8 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `uses a switch statement to dispatch the response status to the right counter`() {
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 1, 10)
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
 
         // The status dispatch must be a switch so the generated code
         // stays linear in the number of codes and so the k6 engine can
@@ -397,8 +545,9 @@ class DefaultK6ScriptGeneratorTest {
         val weirdOperation =
             ApiOperation("get-pet:v2", "GET", "/pets", "", false, emptyList(), null)
         val weirdSpecification = specification.copy(operations = listOf(weirdOperation))
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(weirdSpecification, "https://example.test", setOf("get-pet:v2"), emptyList(), 1, 10)
+        val script = generator.generate(weirdSpecification, "https://example.test", setOf("get-pet:v2"), emptyList(), profile)
 
         // Hyphens and colons must be replaced with underscores so the
         // metric name stays a valid JavaScript identifier.
@@ -417,8 +566,9 @@ class DefaultK6ScriptGeneratorTest {
         val leadingDigitOperation =
             ApiOperation("1Pet", "GET", "/pets", "", false, emptyList(), null)
         val leadingDigitSpecification = specification.copy(operations = listOf(leadingDigitOperation))
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(leadingDigitSpecification, "https://example.test", setOf("1Pet"), emptyList(), 1, 10)
+        val script = generator.generate(leadingDigitSpecification, "https://example.test", setOf("1Pet"), emptyList(), profile)
 
         assertContains(script, "new Counter('lt_status_200__1Pet')")
         assertContains(script, "new Counter('lt_status_429__1Pet')")
@@ -437,8 +587,9 @@ class DefaultK6ScriptGeneratorTest {
         val emptyIdOperation =
             ApiOperation("", "GET", "/pets", "", false, emptyList(), null)
         val emptyIdSpecification = specification.copy(operations = listOf(emptyIdOperation))
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(emptyIdSpecification, "https://example.test", setOf(""), emptyList(), 1, 10)
+        val script = generator.generate(emptyIdSpecification, "https://example.test", setOf(""), emptyList(), profile)
 
         assertContains(script, "new Counter('lt_status_200__')")
         assertContains(script, "lt_status_err__.add(1)")
@@ -447,7 +598,8 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `omits status counters for unselected operations`() {
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), 1, 10)
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
 
         // `createPet` and `deletePet` are not in the selected set, so
         // their counters must not be generated.
@@ -456,5 +608,331 @@ class DefaultK6ScriptGeneratorTest {
         assertTrue(!script.contains("lt_status_err_createPet"))
         assertTrue(script.contains("lt_status_200_getPet"))
         assertTrue(script.contains("lt_status_err_getPet"))
+    }
+
+    // ---- Branch coverage for renderScenario and validateLoadProfile ----
+    //
+    // The Elvis operators `?: error("...")` and the `require` /
+    // `requireNotNull` calls throw when invoked with incomplete data.
+    // `validateLoadProfile` is the upstream check; if we bypass it and
+    // call `renderScenario` directly, we hit exactly the otherwise
+    // unreachable default branches.
+    //
+    // `validateLoadProfile` itself has no default case; each
+    // `require` branch is covered by testing with values outside
+    // the valid range.
+
+    @Test
+    fun `renderScenario throws when constant-vus is missing virtualUsers`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, durationSeconds = 30)
+        assertFailsWith<IllegalStateException> { generator.renderScenario(profile) }
+    }
+
+    @Test
+    fun `renderScenario throws when constant-vus is missing durationSeconds`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 10)
+        assertFailsWith<IllegalStateException> { generator.renderScenario(profile) }
+    }
+
+    @Test
+    fun `renderScenario throws when shared-iterations is missing virtualUsers`() {
+        val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, iterations = 100)
+        assertFailsWith<IllegalStateException> { generator.renderScenario(profile) }
+    }
+
+    @Test
+    fun `renderScenario throws when shared-iterations is missing iterations`() {
+        val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = 10)
+        assertFailsWith<IllegalStateException> { generator.renderScenario(profile) }
+    }
+
+    @Test
+    fun `renderScenario throws when ramping-vus is missing stages`() {
+        val profile = LoadProfile(type = LoadProfileType.RAMPING_VUS, startVUs = 0)
+        assertFailsWith<IllegalStateException> { generator.renderScenario(profile) }
+    }
+
+    @Test
+    fun `renderScenario throws when constant-arrival-rate is missing rate`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                timeUnit = 1,
+                durationSeconds = 60,
+                preAllocatedVUs = 10,
+                maxVUs = 100,
+            )
+        assertFailsWith<IllegalStateException> { generator.renderScenario(profile) }
+    }
+
+    @Test
+    fun `renderScenario throws when constant-arrival-rate is missing timeUnit`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                durationSeconds = 60,
+                preAllocatedVUs = 10,
+                maxVUs = 100,
+            )
+        assertFailsWith<IllegalStateException> { generator.renderScenario(profile) }
+    }
+
+    @Test
+    fun `renderScenario throws when constant-arrival-rate is missing durationSeconds`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 1,
+                preAllocatedVUs = 10,
+                maxVUs = 100,
+            )
+        assertFailsWith<IllegalStateException> { generator.renderScenario(profile) }
+    }
+
+    @Test
+    fun `renderScenario throws when constant-arrival-rate is missing preAllocatedVUs`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 1,
+                durationSeconds = 60,
+                maxVUs = 100,
+            )
+        assertFailsWith<IllegalStateException> { generator.renderScenario(profile) }
+    }
+
+    @Test
+    fun `renderScenario throws when constant-arrival-rate is missing maxVUs`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 1,
+                durationSeconds = 60,
+                preAllocatedVUs = 10,
+            )
+        assertFailsWith<IllegalStateException> { generator.renderScenario(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile throws when constant-vus is missing virtualUsers`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, durationSeconds = 30)
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile throws when constant-vus is missing durationSeconds`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 10)
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects virtualUsers below the lower boundary for constant-vus`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 0, durationSeconds = 30)
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects durationSeconds below the lower boundary for constant-vus`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 10, durationSeconds = 0)
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile throws when shared-iterations is missing virtualUsers`() {
+        val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, iterations = 100)
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile throws when shared-iterations is missing iterations`() {
+        val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = 10)
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects iterations below the lower boundary for shared-iterations`() {
+        val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = 10, iterations = 0)
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects virtualUsers above the upper boundary for shared-iterations`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.SHARED_ITERATIONS,
+                virtualUsers = 30_001,
+                iterations = 100,
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects virtualUsers below the lower boundary for shared-iterations`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.SHARED_ITERATIONS,
+                virtualUsers = 0,
+                iterations = 100,
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects startVUs below the lower boundary for ramping-vus`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.RAMPING_VUS,
+                startVUs = -1,
+                stages = listOf(LoadStage(target = 10, durationSeconds = 30)),
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects durationSeconds below the lower boundary for constant-arrival-rate`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 1,
+                durationSeconds = 0,
+                preAllocatedVUs = 10,
+                maxVUs = 100,
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile accepts the boundary values for constant-vus`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 1,
+            )
+        // No throw: valid boundary values must be accepted.
+        generator.validateLoadProfile(profile)
+    }
+
+    @Test
+    fun `validateLoadProfile accepts the upper boundary values for shared-iterations`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.SHARED_ITERATIONS,
+                virtualUsers = 30_000,
+                iterations = 1,
+            )
+        generator.validateLoadProfile(profile)
+    }
+
+    @Test
+    fun `validateLoadProfile accepts a ramping-vus plateau with startVUs equal to first stage target`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.RAMPING_VUS,
+                startVUs = 10,
+                stages =
+                    listOf(
+                        LoadStage(target = 10, durationSeconds = 30),
+                        LoadStage(target = 50, durationSeconds = 60),
+                    ),
+            )
+        generator.validateLoadProfile(profile)
+    }
+
+    @Test
+    fun `validateLoadProfile rejects startVUs above the upper boundary for ramping-vus`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.RAMPING_VUS,
+                startVUs = 30_001,
+                stages = listOf(LoadStage(target = 10, durationSeconds = 30)),
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects durationSeconds above the upper boundary for ramping-vus stages`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.RAMPING_VUS,
+                startVUs = 0,
+                stages = listOf(LoadStage(target = 10, durationSeconds = 3_601)),
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects rate above the upper boundary for constant-arrival-rate`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 100_001,
+                timeUnit = 1,
+                durationSeconds = 60,
+                preAllocatedVUs = 10,
+                maxVUs = 100,
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects timeUnit outside the supported range for constant-arrival-rate`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 61,
+                durationSeconds = 60,
+                preAllocatedVUs = 10,
+                maxVUs = 100,
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects durationSeconds above the upper boundary for constant-arrival-rate`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 1,
+                durationSeconds = 3_601,
+                preAllocatedVUs = 10,
+                maxVUs = 100,
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects preAllocatedVUs above the upper boundary for constant-arrival-rate`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 1,
+                durationSeconds = 60,
+                preAllocatedVUs = 30_001,
+                maxVUs = 30_002,
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    @Test
+    fun `validateLoadProfile rejects maxVUs above the upper boundary for constant-arrival-rate`() {
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_ARRIVAL_RATE,
+                rate = 50,
+                timeUnit = 1,
+                durationSeconds = 60,
+                preAllocatedVUs = 10,
+                maxVUs = 30_001,
+            )
+        assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
     }
 }

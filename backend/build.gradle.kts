@@ -58,6 +58,7 @@ val coverageIncludes =
         "de/lasttest/demo/DemoSwaggerUiController.class",
         "de/lasttest/domain/DefaultK6ScriptGenerator.class",
         "de/lasttest/domain/HttpRemoteSpecificationFetcher.class",
+        "de/lasttest/domain/InfluxDbTimeSeriesReader.class",
         "de/lasttest/domain/JdkRemoteSpecificationClient.class",
         "de/lasttest/domain/LocalK6TestRunService.class",
         "de/lasttest/domain/SwaggerSpecificationImporter.class",
@@ -91,7 +92,15 @@ tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
     includeProductionLogic()
     violationRules {
+        // JaCoCo rule is applied to the filtered set, not to the whole
+        // "bundle lasttest". This makes the 100% threshold refer to the
+        // production-relevant classes listed in `coverageIncludes`
+        // (see above). Single source of truth: DTOs, the Spring bootstrap,
+        // and helper classes with no business logic are excluded so they
+        // cannot dilute the threshold.
         rule {
+            element = "BUNDLE"
+            includes = coverageIncludes
             listOf("INSTRUCTION", "LINE", "BRANCH").forEach { counterName ->
                 limit {
                     counter = counterName

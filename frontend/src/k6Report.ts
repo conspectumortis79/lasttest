@@ -14,13 +14,37 @@ export type ReportOperation = {
   bearerTokenConfigured: boolean
 }
 
+// Wire shape of a load profile. Mirrors `LoadProfile` from
+// `./loadProfile.ts` but stays a structural type so the report module
+// does not need to depend on the editor-side helper. Adding a new
+// executor only requires extending this union, the serialiser and the
+// renderer — the report only reads the discriminator and the fields it
+// already knows about.
+//
+// We accept both spellings for `type`: `RAMPING_VUS` (as serialised
+// by the backend) and `ramping-vus` (kebab-case, executor name). A
+// normalising `type` below ensures that all downstream switch
+// statements can work case-insensitively.
+export type ReportLoadProfile = {
+  type: 'ramping-vus' | 'RAMPING_VUS' | 'constant-vus' | 'CONSTANT_VUS' | 'shared-iterations' | 'SHARED_ITERATIONS' | 'constant-arrival-rate' | 'CONSTANT_ARRIVAL_RATE'
+  virtualUsers?: number
+  durationSeconds?: number
+  iterations?: number
+  startVUs?: number
+  stages?: ReportLoadStage[]
+  rate?: number
+  timeUnitSeconds?: number
+  preAllocatedVUs?: number
+  maxVUs?: number
+}
+
+export type ReportLoadStage = { target: number, durationSeconds: number }
+
 export type TestRunConfiguration = {
   apiTitle: string
   apiVersion: string
   baseUrl: string
-  virtualUsers: number
-  durationSeconds: number
-  useIterations: boolean
+  loadProfile: ReportLoadProfile
   operations: ReportOperation[]
 }
 
@@ -33,6 +57,13 @@ export type TestRun = {
   exitCode?: number
   configuration?: TestRunConfiguration
   summary?: { raw: string }
+  /**
+   * Raw (truncated) k6 output. Populated by the backend in both the
+   * success and failure cases so the UI can always show the
+   * "k6 console" block. `null` if k6 could not be started at all
+   * (the diagnosis is then in `error`).
+   */
+  consoleOutput?: string
   error?: string
 }
 
@@ -54,9 +85,9 @@ export type FailureCategory =
 
 export type FailureSummary = {
   category: FailureCategory
-  // Short headline shown next to the status badge, e.g. "Ziel nicht erreichbar".
+  // Short headline shown next to the status badge, e.g. "Target unreachable".
   diagnosis: string
-  // Concrete value the user can act on, e.g. "Connection refused auf http://127.0.0.1:1".
+  // Concrete value the user can act on, e.g. "Connection refused on http://127.0.0.1:1".
   detail: string
   // Bullet points explaining the conclusion with concrete evidence drawn
   // from run.error and run.summary. Empty when there is nothing useful.
@@ -241,6 +272,388 @@ export function manualK6Command(configuration: TestRunConfiguration | undefined,
   return `k6 run -e BASE_URL=${JSON.stringify(baseUrl)} ${k6ScriptDownloadName(runId)}`
 }
 
+// Total runtime of a load profile, in seconds. Used by the report to show
+// how long the k6 run was actually scheduled for. For constant-vus and
+// arrival-rate this is just the explicit duration; for shared-iterations
+// we return undefined because the test stops as soon as the last iteration
+// completes, which the user already sees via the "completed at" timestamp.
+//
+// Normalises the `type` to kebab-case so the switch works
+// case-insensitively (`RAMPING_VUS` from the backend becomes
+// `ramping-vus`).
+function normalizedType(profile: ReportLoadProfile): string {
+  return profile.type.toLowerCase().replace(/_/g, '-')
+}
+
+export function profileTotalSeconds(profile: ReportLoadProfile): number | undefined {
+  switch (normalizedType(profile)) {
+    case 'constant-vus':
+      return profile.durationSeconds ?? 0
+    case 'constant-arrival-rate':
+      return profile.durationSeconds ?? 0
+    case 'ramping-vus':
+      return (profile.stages ?? []).reduce((sum, stage) => sum + stage.durationSeconds, 0)
+    case 'shared-iterations':
+      return undefined
+    default:
+      return undefined
+  }
+}
+
+export function profileSummary(profile: ReportLoadProfile): string {
+  switch (normalizedType(profile)) {
+    case 'constant-vus':
+      return `Konstante Last · ${profile.virtualUsers ?? '?'} VUs über ${profile.durationSeconds ?? '?'} s`
+    case 'shared-iterations':
+      return `${profile.iterations ?? '?'} parallele Anfragen, so schnell wie möglich`
+    case 'ramping-vus': {
+      const stages = profile.stages ?? []
+      const peak = stages.reduce((max, stage) => Math.max(max, stage.target), profile.startVUs ?? 0)
+      return `Ramping-VUs · ${stages.length} Stages, Spitze ${peak} VUs`
+    }
+    case 'constant-arrival-rate':
+      return `Constant-Arrival-Rate · ${profile.rate ?? '?'} Anfragen/${profile.timeUnitSeconds ?? '?'}s über ${profile.durationSeconds ?? '?'} s`
+    default:
+      return 'Unbekanntes Lastprofil'
+  }
+}
+
+// ---- Runtime display -------------------------------------------------------
+//
+// Pure helpers that compute the user-visible time from
+// `startedAt`/`finishedAt` and the load profile. `now` is an optional
+// parameter so tests can run deterministically — the UI passes its
+// own tick state so the display updates without polling.
+
+const ZERO_SECONDS = 0
+const SECONDS_PER_MINUTE = 60
+const SECONDS_PER_HOUR = 3600
+
+// Seconds as "MM:SS" or "H:MM:SS" (e.g. "01:23", "1:02:03").
+// Negative or NaN values render as "–".
+export function formatDurationSeconds(seconds: number | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '–'
+  const total = Math.floor(seconds)
+  const hours = Math.floor(total / SECONDS_PER_HOUR)
+  const minutes = Math.floor((total % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)
+  const remainder = total % SECONDS_PER_MINUTE
+  if (hours > 0) return `${hours}:${pad(minutes)}:${pad(remainder)}`
+  return `${pad(minutes)}:${pad(remainder)}`
+}
+
+// Seconds as "X min Y s" / "Y s" / "H h M min S s". Used for the
+// long form in cards and hint texts — more compact than "MM:SS" and
+// easier to read in longer prose. Segments with value 0 are skipped
+// so that "1 h 0 min 0 s" becomes "1 h".
+export function formatDurationHuman(seconds: number | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '–'
+  const total = Math.floor(seconds)
+  if (total < SECONDS_PER_MINUTE) return `${total} s`
+  const hours = Math.floor(total / SECONDS_PER_HOUR)
+  const minutes = Math.floor((total % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)
+  const remainder = total % SECONDS_PER_MINUTE
+  const parts: string[] = []
+  if (hours > 0) parts.push(`${hours} h`)
+  if (minutes > 0) parts.push(`${minutes} min`)
+  if (remainder > 0) parts.push(`${remainder} s`)
+  return parts.join(' ')
+}
+
+function pad(value: number): string {
+  return value.toString().padStart(2, '0')
+}
+
+function parseTimestamp(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const milliseconds = new Date(value).getTime()
+  return Number.isFinite(milliseconds) ? milliseconds : undefined
+}
+
+// Seconds since `startedAt`. Returns `undefined` while the run has
+// not started yet (e.g. QUEUED). `now` is the reference (default
+// Date.now()), injected via parameter so tests stay deterministic
+// and the UI hook can pass in its own tick.
+export function runElapsedSeconds(run: TestRun, now: number = Date.now()): number | undefined {
+  const started = parseTimestamp(run.startedAt)
+  if (started == null) return undefined
+  const finished = parseTimestamp(run.finishedAt) ?? now
+  return Math.max(ZERO_SECONDS, (finished - started) / 1000)
+}
+
+// Remaining seconds according to the load profile. Returns `undefined`
+// when the run has not started yet or the profile has no predictable
+// total duration (e.g. shared-iterations). While running, it is
+// computed against `now`; once finished, against `finishedAt`, so
+// downstream status displays never go negative.
+export function runRemainingSeconds(run: TestRun, now: number = Date.now()): number | undefined {
+  if (!run.configuration) return undefined
+  const total = profileTotalSeconds(run.configuration.loadProfile)
+  if (total == null) return undefined
+  const elapsed = runElapsedSeconds(run, now)
+  if (elapsed == null) return undefined
+  return Math.max(ZERO_SECONDS, total - elapsed)
+}
+
+// ---- Failure analysis ------------------------------------------------------
+//
+// k6 writes typical GoError messages to stdout that contain the
+// actual reason for a failed run. We parse the most important
+// patterns and return a typed `FailureReason` so the UI can show a
+// precise label and a targeted recommendation — instead of just the
+// first (often generic) line.
+//
+// To extend: add another pattern in `matchFailurePattern` as a
+// regular expression with `kind`, `buildSummary` and `buildDetail`.
+
+export type FailureKind =
+  | 'dns'
+  | 'connection-refused'
+  | 'connection-timeout'
+  | 'tls'
+  | 'http'
+  | 'script'
+  | 'process'
+  | 'unknown'
+
+export type FailureReason = {
+  kind: FailureKind
+  summary: string
+  detail: string
+  hint?: string
+}
+
+const FAILURE_HINT_BY_KIND: Record<Exclude<FailureKind, 'unknown'>, string> = {
+  dns: 'Prüfe, ob der Hostname in der Base-URL korrekt geschrieben ist und ob DNS aus dem k6-Container erreichbar ist.',
+  'connection-refused': 'Der Zielport ist nicht offen oder die Anwendung läuft nicht. Prüfe Firewall, Portweiterleitung und ob der Dienst gestartet ist.',
+  'connection-timeout': 'Die Anfrage hat das Zeitlimit überschritten. Prüfe Routing, Firewall und ob das Ziel auf eingehende Verbindungen antwortet.',
+  tls: 'Prüfe das Zertifikat des Ziels (Gültigkeit, Aussteller, Hostname). Eventuell fehlt eine CA oder das Zertifikat ist abgelaufen.',
+  http: 'Der Server hat mit einem HTTP-Fehler geantwortet. Prüfe den Statuscode in der k6-Konsolenausgabe.',
+  script: 'Das generierte k6-Skript enthält einen Fehler. Prüfe die k6-Konsolenausgabe auf die genaue Stelle.',
+  process: 'k6 konnte nicht gestartet werden. Prüfe, ob die k6-Binary installiert und im PATH verfügbar ist.',
+}
+
+type FailurePattern = {
+  kind: Exclude<FailureKind, 'unknown'>
+  regex: RegExp
+  buildSummary: (match: RegExpMatchArray) => string
+  buildDetail: (match: RegExpMatchArray) => string
+}
+
+// Order matters: the first matching pattern wins. The script and
+// HTTP patterns are therefore placed last because they are very
+// broad.
+const FAILURE_PATTERNS: readonly FailurePattern[] = [
+  {
+    kind: 'dns',
+    // k6 v0.x / v1.x: "dial tcp[:PORT]: lookup HOST: <reason>"
+    // k6 v2.x: "lookup HOST on <resolver>:<port>: <reason>" (Go's pure DNS error, no dial prefix)
+    regex: /(?:dial tcp(?::\d+)?:\s*)?lookup ([^\s:]+)(?:\s+on\s+[0-9.:a-fA-F[\]]+)?:\s*(no such host|Temporary failure in name resolution|Server misbehaving)/i,
+    buildSummary: match => `DNS-Auflösung fehlgeschlagen für „${match[1]}".`,
+    buildDetail: match => `k6 konnte den Hostnamen ${match[1]} nicht auflösen (${match[2]}).`,
+  },
+  {
+    kind: 'connection-refused',
+    regex: /dial tcp ([0-9.]+|\[[0-9a-fA-F:]+\]|[^:]+):(\d+):\s*connect: connection refused/i,
+    buildSummary: match => `Verbindung abgelehnt (${match[1]}:${match[2]}).`,
+    buildDetail: match => `k6 hat „connection refused" von ${match[1]}:${match[2]} erhalten — der Zielport antwortet nicht.`,
+  },
+  {
+    kind: 'connection-timeout',
+    regex: /dial tcp ([0-9.]+|\[[0-9a-fA-F:]+\]|[^:]+):(\d+):\s*(i\/o timeout|context deadline exceeded)/i,
+    buildSummary: match => `Verbindungs-Timeout zu ${match[1]}:${match[2]}.`,
+    buildDetail: match => `k6 hat innerhalb des Zeitlimits keine Antwort von ${match[1]}:${match[2]} erhalten.`,
+  },
+  {
+    kind: 'tls',
+    regex: /x509:\s*([^\n]+)/i,
+    buildSummary: match => `TLS-Handshake fehlgeschlagen: ${match[1].trim()}.`,
+    buildDetail: match => `Das TLS-Zertifikat des Ziels wurde abgelehnt (${match[1].trim()}).`,
+  },
+  {
+    kind: 'http',
+    regex: /http response error.*?status code (\d{3})/i,
+    buildSummary: match => `HTTP-Fehler ${match[1]} vom Server.`,
+    buildDetail: match => `k6 hat einen HTTP-Status ${match[1]} als Fehler gewertet (Threshold oder harter Fehler).`,
+  },
+  {
+    kind: 'script',
+    regex: /(?:GoError: )?([^\n:]+\.js):(\d+):\d+\s+([^\n]+)/,
+    buildSummary: match => `Skript-Fehler in ${match[1]} (Zeile ${match[2]}): ${match[3].trim()}`,
+    buildDetail: match => `${match[1]}:${match[2]} — ${match[3].trim()}`,
+  },
+  {
+    kind: 'process',
+    regex: /(?:Cannot find k6|Cannot run program "?'?k6"?'?|k6: command not found|no such file or directory)/i,
+    buildSummary: () => 'k6 konnte nicht gestartet werden.',
+    buildDetail: () => 'Die k6-Binary wurde nicht gefunden oder ist nicht ausführbar.',
+  },
+] as const
+
+// Takes the first non-empty line, strips an "ERRO[<seconds>]" prefix
+// (which k6 prepends to every error message) and returns the cleaned
+// text. The caller has already ensured that the input contains at
+// least one non-whitespace character — so "empty" here is only a
+// defensive fallback.
+export function extractErrorLine(text: string): string {
+  // We search from the end for the last non-empty line. This skips
+  // recurring time-series output errors at the start of the k6
+  // output and grabs the last, usually final, error.
+  const lines = text.split(/\r?\n/).reverse()
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.length === 0) continue
+    const stripped = trimmed.replace(/^ERRO\[\d+\]\s*/, '')
+    if (stripped.length > 0) return stripped
+  }
+  return text.trim()
+}
+
+export function summariseFailure(error: string | undefined | null): FailureReason | undefined {
+  if (!error) return undefined
+  const trimmed = error.trim()
+  if (trimmed.length === 0) return undefined
+  // We scan the error lines from the end because k6 output usually
+  // starts with time-series output errors (e.g. InfluxDB writes)
+  // and only later contains the actual test request errors. The
+  // last error is the one that matters.
+  const lines = trimmed.split(/\r?\n/).reverse()
+  for (const pattern of FAILURE_PATTERNS) {
+    for (const line of lines) {
+      const match = line.match(pattern.regex)
+      if (match) {
+        return {
+          kind: pattern.kind,
+          summary: pattern.buildSummary(match),
+          detail: pattern.buildDetail(match),
+          hint: FAILURE_HINT_BY_KIND[pattern.kind],
+        }
+      }
+    }
+  }
+  return {
+    kind: 'unknown',
+    summary: 'Test fehlgeschlagen.',
+    detail: extractErrorLine(trimmed),
+  }
+}
+
+// ---- SVG renderer for the ramp chart ---------------------------------------
+//
+// Pure functions with no React dependency so they can be unit-tested.
+// They return strings that are embedded in an <svg>. The plot area
+// is normalised to [0..width]×[0..height]; the caller adds axis
+// padding (we compute internally against the plot area, not the
+// viewBox).
+
+export type RampPlot = {
+  width: number
+  height: number
+  // Domain (in seconds, VUs/RPS)
+  maxSeconds: number
+  maxValue: number
+  // Target line
+  sollPoints: Array<{ seconds: number, value: number }>
+  // Optional: actual line
+  istPoints?: Array<{ seconds: number, value: number }>
+}
+
+const PLOT_PADDING = 4
+
+export function plotValue(plot: RampPlot, seconds: number, value: number): { x: number, y: number } {
+  const x = (seconds / plot.maxSeconds) * (plot.width - 2 * PLOT_PADDING) + PLOT_PADDING
+  const y = plot.height - PLOT_PADDING - (value / plot.maxValue) * (plot.height - 2 * PLOT_PADDING)
+  return { x, y }
+}
+
+export function buildSollPath(plot: RampPlot): string {
+  if (plot.sollPoints.length === 0) return ''
+  return plot.sollPoints.map((point, index) => {
+    const { x, y } = plotValue(plot, point.seconds, point.value)
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`
+  }).join(' ')
+}
+
+export function buildIstPath(plot: RampPlot): string {
+  if (!plot.istPoints || plot.istPoints.length === 0) return ''
+  return plot.istPoints.map((point, index) => {
+    const { x, y } = plotValue(plot, point.seconds, point.value)
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`
+  }).join(' ')
+}
+
+// Converts ISO-8601 timestamps + values into plot points, normalising
+// to `t0` (first timestamp = 0 s). When [ist] is empty, the function
+// returns an object without `istPoints`, so the renderer only draws
+// the target line.
+export function buildRampPlot(
+  profile: ReportLoadProfile,
+  istVus: ReadonlyArray<{ time: string, value: number }>,
+  options: { width: number, height: number } = { width: 720, height: 220 },
+): RampPlot {
+  const istVusSafe = istVus ?? []
+  const maxSeconds = profileTotalSeconds(profile) ?? 60
+  const sollPoints = buildSollPoints(profile)
+  const peakSoll = sollPoints.reduce((max, point) => Math.max(max, point.value), 0)
+  const peakIst = istVusSafe.reduce((max, point) => Math.max(max, point.value), 0)
+  const maxValue = Math.max(peakSoll, peakIst, 1) * 1.1
+  const t0 = istVusSafe.length > 0 ? new Date(istVusSafe[0].time).getTime() : 0
+  const istPoints = istVusSafe.map(point => ({
+    seconds: Math.max(0, (new Date(point.time).getTime() - t0) / 1000),
+    value: point.value,
+  }))
+  const plot: RampPlot = {
+    width: options.width,
+    height: options.height,
+    maxSeconds,
+    maxValue,
+    sollPoints,
+  }
+  if (istPoints.length > 0) plot.istPoints = istPoints
+  return plot
+}
+
+function buildSollPoints(profile: ReportLoadProfile): Array<{ seconds: number, value: number }> {
+  switch (normalizedType(profile)) {
+    case 'ramping-vus': {
+      const points: Array<{ seconds: number, value: number }> = []
+      const stages = profile.stages ?? []
+      let cursor = 0
+      let previous = profile.startVUs ?? 0
+      for (const stage of stages) {
+        points.push({ seconds: cursor, value: previous })
+        cursor += stage.durationSeconds
+        points.push({ seconds: cursor, value: stage.target })
+        previous = stage.target
+      }
+      return points
+    }
+    case 'constant-vus': {
+      const vus = profile.virtualUsers ?? 0
+      const duration = profile.durationSeconds ?? 0
+      return [
+        { seconds: 0, value: vus },
+        { seconds: duration, value: vus },
+      ]
+    }
+    case 'constant-arrival-rate': {
+      // For the ramp chart, when using arrival-rate we show the
+      // rate as a horizontal line so that actual (RPS) and target
+      // (rate) are directly comparable.
+      const rate = profile.rate ?? 0
+      const duration = profile.durationSeconds ?? 0
+      return [
+        { seconds: 0, value: rate },
+        { seconds: duration, value: rate },
+      ]
+    }
+    case 'shared-iterations':
+      // No meaningful target line because the duration is not predictable.
+      return []
+    default:
+      return []
+  }
+}
+
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
   if (!clipboard?.writeText) return false
@@ -271,7 +684,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // Failure-rate threshold above which a run is reported as failed.
 const FAILURE_RATE_THRESHOLD = 0.05
 // Latency threshold (in ms) above which a run is reported as failed.
-const LATENCY_THRESHOLD_MS = 1000
+export const LATENCY_THRESHOLD_MS = 1000
 // Share of 5xx responses above which the failure is classified as a
 // server-error run rather than a generic threshold failure.
 const SERVER_ERROR_SHARE = 0.05
@@ -646,7 +1059,7 @@ export function buildMetricRow(
 export function progressHint(run: TestRun): string | undefined {
   if (run.status === 'RUNNING') {
     const started = run.startedAt ? new Date(run.startedAt).getTime() : undefined
-    const duration = run.configuration?.durationSeconds
+    const duration = run.configuration?.loadProfile?.durationSeconds
     if (started != null && Number.isFinite(started) && duration != null) {
       const elapsed = Math.max(0, Math.floor((Date.now() - started) / 1000))
       const remaining = Math.max(0, duration - elapsed)
@@ -658,4 +1071,52 @@ export function progressHint(run: TestRun): string | undefined {
     return 'wartet auf Executor (Pool-Größe: 2)'
   }
   return undefined
+}
+
+// ---- Threshold summary for the result banner --------------------------------
+//
+// Decides whether the just-finished run is a pass or a fail, and which
+// metrics crossed the configured thresholds. The UI uses this to render
+// the "Alle N Thresholds eingehalten / N Thresholds verletzt" banner
+// above the summary cards. The list of failed metrics uses the same
+// k6 metric names the user wrote in their load profile, so the banner
+// ties back to the test definition instead of inventing new labels.
+export type ThresholdSummary = {
+  /** True when the run completed and no configured threshold was crossed. */
+  passed: boolean
+  /**
+   * Names of every k6 metric whose threshold was crossed. Empty when
+   * `passed` is true. Returned in the same order the metrics appear
+   * in the k6 summary so the banner is deterministic across renders.
+   */
+  failedMetrics: string[]
+}
+
+export function summariseThresholds(run: TestRun): ThresholdSummary {
+  // A run that is still queued, running, or that did not produce a
+  // k6 summary has no settled thresholds to evaluate yet. We return
+  // `passed: false` so the UI does not accidentally flash a green
+  // banner before the data is in.
+  if (run.status !== 'COMPLETED' && run.status !== 'FAILED') {
+    return { passed: false, failedMetrics: [] }
+  }
+  const summary = parseK6Summary(run)
+  if (!summary) {
+    return { passed: false, failedMetrics: [] }
+  }
+  const failed: string[] = []
+  // Only inspect the two metrics the project actually configures as
+  // thresholds (see TestRunReport.tsx :: <Threshold name="…">). Any
+  // other metric crossing a threshold configured by the user in the
+  // load profile is intentionally ignored here — those surface via
+  // the k6 report link, not the result banner.
+  const failureRate = metric(summary, 'http_req_failed').value
+  if (failureRate != null && Number.isFinite(failureRate) && failureRate > FAILURE_RATE_THRESHOLD) {
+    failed.push('http_req_failed')
+  }
+  const p95 = metric(summary, 'http_req_duration')['p(95)']
+  if (p95 != null && Number.isFinite(p95) && p95 > LATENCY_THRESHOLD_MS) {
+    failed.push('http_req_duration')
+  }
+  return { passed: failed.length === 0, failedMetrics: failed }
 }

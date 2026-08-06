@@ -17,7 +17,14 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 .actions { display: flex; justify-content: space-between; gap: 1rem; margin-top: 1rem; }
 .url-import { display: block; margin-bottom: 1rem; color: #aeb9ca; font-size: .85rem; }
 .url-label { display: block; margin-bottom: .4rem; color: #d7e2f1; font-weight: 700; }
-.url-import input { display: block; width: 100%; padding: .7rem; border: 1px solid #33425b; border-radius: 8px; color: white; background: #080d14; font-family: "SFMono-Regular", Consolas, monospace; font-size: .85rem; }
+.url-import input { display: block; width: 100%; padding: .7rem; border: 1px solid #33425b; border-radius: 8px; color: white; background: #080d14; font-size: .9rem; }
+
+/* Swagger-Textarea: gleiche Schrift wie der Rest der UI (Inter
+   sans-serif statt Monospace) und kleinere, einheitliche Schrift-
+   groesse. Die globale `textarea`-Regel bleibt unveraendert, damit
+   die `.request-body`-Textarea (JSON Body) weiterhin Monospace
+   fuer JSON-Lesbarkeit nutzt. */
+.specification-textarea { font-family: inherit; font-size: .9rem; }
 .url-import input:focus { outline: 2px solid #7d63ff; outline-offset: 1px; border-color: #7d63ff; }
 .url-import small { display: block; margin-top: .35rem; color: #718198; font-size: .78rem; }
 .fetched-info { margin: .75rem 0 0; padding: .55rem .75rem; border: 1px solid #2c4a3b; border-radius: 8px; color: #b8e7c8; background: #142822; font-size: .85rem; }
@@ -121,6 +128,357 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   list-style: none;
   padding-left: .85rem;
 }
+
+
+/* ---- Run-Status-View (App.tsx Section 4) ------------------------------ */
+
+.run-progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .65rem;
+  margin: .9rem 0 .3rem;
+  padding: .8rem 1rem;
+  border: 1px solid #1f2c41;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #131b2a 0%, #0d1320 100%);
+}
+.run-progress-cell { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.run-progress-cell span {
+  color: #79e6c8;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .04rem;
+  text-transform: uppercase;
+}
+.run-progress-cell strong {
+  color: #e8edf5;
+  font-size: 1.4rem;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.run-progress-cell small { color: #93a2b8; font-size: .76rem; }
+.run-progress-cell small code {
+  padding: 0 .25rem;
+  border-radius: 4px;
+  color: #dbe5f3;
+  background: #1a2435;
+  font-size: .72rem;
+}
+
+.run-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .6rem;
+  margin: .9rem 0 .3rem;
+}
+.run-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  min-width: 0;
+  padding: .75rem .9rem;
+  border: 1px solid #233049;
+  border-radius: 10px;
+  background: #111b29;
+}
+.run-summary-card span {
+  color: #79e6c8;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .04rem;
+  text-transform: uppercase;
+}
+.run-summary-card strong {
+  color: #e8edf5;
+  font-size: 1.15rem;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.run-summary-card strong.success { color: #55e6c1; }
+.run-summary-card small { color: #93a2b8; font-size: .76rem; }
+
+/* Pass/Fail variants of the summary card. We colour the whole card
+   (not just the value) so that at a glance you can tell which metric
+   met or breached the threshold. */
+.run-summary-card.is-pass {
+  border-color: #2d6a4f;
+  background: #112219;
+}
+.run-summary-card.is-pass > span { color: #8fe8c1; }
+.run-summary-card.is-pass > strong { color: #8fe8c1; }
+.run-summary-card.is-fail {
+  border-color: #893c50;
+  background: #1f1018;
+}
+.run-summary-card.is-fail > span { color: #ffb5c3; }
+.run-summary-card.is-fail > strong { color: #ffb5c3; }
+
+/* ---- Result-Header, Notice und Foot (Pass + Fail nach k6-Abschluss) ---- */
+
+.run-result-head {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  margin: .9rem 0 .55rem;
+}
+.status-badge {
+  padding: .2rem .6rem;
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .06rem;
+}
+.status-badge.is-pass {
+  background: #163b2a;
+  color: #8fe8c1;
+  border: 1px solid #2d6a4f;
+}
+.status-badge.is-fail {
+  background: #893c50;
+  color: #fff;
+}
+.run-result-exit {
+  color: #93a2b8;
+  font-size: .78rem;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.run-notice {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+  padding: .55rem .85rem;
+  margin: 0 0 1rem;
+  border-radius: 10px;
+  font-size: .85rem;
+}
+.run-notice-check {
+  display: inline-grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  font-size: .7rem;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+.run-notice code {
+  padding: .05rem .3rem;
+  border-radius: 3px;
+  color: #8fdcc8;
+  background: #1c2b3e;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .76rem;
+}
+.run-notice-detail {
+  color: #93a2b8;
+  font-size: .78rem;
+  margin-left: auto;
+}
+.run-notice.is-pass {
+  border: 1px solid #2d6a4f;
+  background: linear-gradient(180deg, #112219 0%, #0e1b16 100%);
+  color: #8fe8c1;
+}
+.run-notice.is-pass .run-notice-check {
+  background: #2d6a4f;
+  color: #c8f5dc;
+}
+.run-notice.is-fail {
+  border: 1px solid #893c50;
+  background: linear-gradient(180deg, #1f1018 0%, #1a1018 100%);
+  color: #ffb5c3;
+}
+.run-notice.is-fail .run-notice-check {
+  background: #893c50;
+  color: #ffd9e0;
+}
+.run-notice.is-fail .run-notice-detail { color: #ffb5c3; }
+.run-notice-chips { white-space: nowrap; }
+.run-notice-sep { color: inherit; opacity: .65; }
+
+.run-result-foot {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: .9rem 0 0;
+  padding-top: .8rem;
+  border-top: 1px dashed #293950;
+}
+.run-result-foot code {
+  padding: .15rem .4rem;
+  border-radius: 4px;
+  color: #8fdcc8;
+  background: #1c2b3e;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .74rem;
+}
+
+/* Untere Zeile: k6-Konsolenausgabe + k6-JSON-Rohdaten. Nutzt jetzt
+   die volle Kartenbreite, weil der Report-Button oben in den
+   Header gewandert ist (siehe .result-header-actions). */
+.result-extras {
+  margin-top: .9rem;
+  padding-top: .8rem;
+  border-top: 1px dashed #293950;
+}
+.result-extras-details { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
+.result-extras-details details > summary { cursor: pointer; color: #dbe5f3; font-size: .85rem; list-style: none; }
+.result-extras-details details > summary::-webkit-details-marker { display: none; }
+.result-extras-details details > summary::before { content: "▸ "; color: #7d63ff; }
+.result-extras-details details[open] > summary::before { content: "▾ "; }
+.result-extras-details pre {
+  margin: .35rem 0 0; padding: .55rem .7rem;
+  border: 1px solid #233049; border-radius: 6px;
+  background: #080d14; color: #cbd6e6;
+  font-family: "SFMono-Regular", Consolas, monospace; font-size: .78rem;
+  max-height: 320px; overflow: auto;
+}
+.report-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .5rem .85rem;
+  border: 1px solid #7d63ff;
+  border-radius: 8px;
+  background: #1a1d3a;
+  color: #c5b8ff;
+  font-size: .82rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+.report-btn:hover { background: #2a2660; color: #fff; }
+.report-btn::after { content: "↗"; font-weight: 500; }
+
+/* ---- Card header with run ID + report button ---------------------------- */
+/* Two rows: top has step + title + run ID (right-aligned), below
+   the report button right-aligned. This way the button does not
+   jump when the details are expanded/collapsed, and the details
+   get the full card width at the bottom. */
+.result-header {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .55rem;
+  margin-bottom: 1.1rem;
+}
+.result-header-top {
+  /* Take the full card width so the step badge sits on the far left
+     and the run ID sits on the far right (margin-left: auto) —
+     without this width the flex container would shrink to its
+     content and the run ID would stick to the right end of the
+     content rather than the card edge. */
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  width: 100%;
+}
+.result-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  /* Im Flex-Column-Parent wird das Item nur dann auf volle Breite
+     gestreckt, wenn es nicht selbst ein Flex-Container ist oder
+     explizit eine Breite hat. Ohne `width: 100%` schrumpft der
+     Container auf den Button und `justify-content: flex-end`
+     schiebt ihn nur an den rechten Rand des Containers — was wie
+     zentriert aussieht, weil der Container genauso breit wie der
+     Button ist. */
+  width: 100%;
+  align-self: stretch;
+}
+.result-header h2 {
+  /* In the flex header `gap` takes over the spacing; the old
+     margin-left for the absolutely positioned step badge is no
+     longer needed here. */
+  margin: 0;
+  flex-shrink: 0;
+}
+.result-header .step {
+  /* Inside the flex header the step badge should be part of the
+     layout, not absolutely positioned over the title. */
+  position: static;
+  top: auto;
+  flex-shrink: 0;
+}
+.result-run-id {
+  margin-left: auto;
+  color: #93a2b8;
+  font-size: .82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.result-run-id code {
+  padding: .15rem .4rem;
+  border-radius: 4px;
+  color: #dbe5f3;
+  background: #1a2435;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .76rem;
+}
+.run-summary-empty {
+  margin: .9rem 0 .3rem;
+  padding: .75rem 1rem;
+  border: 1px dashed #344258;
+  border-radius: 10px;
+  color: #aeb9ca;
+  background: #0d1320;
+  font-size: .85rem;
+}
+.run-summary-empty.warning {
+  border-color: #793b4b;
+  border-style: solid;
+  color: #ffb5c3;
+  background: #2a121b;
+}
+
+.run-failure {
+  margin: .9rem 0 .3rem;
+  padding: .9rem 1rem;
+  border: 1px solid #893c50;
+  border-left-width: 4px;
+  border-radius: 10px;
+  color: #ffd2da;
+  background: #2a121b;
+}
+.run-failure.kind-dns { border-color: #7042b0; background: #1d1432; color: #d8c3ff; }
+.run-failure.kind-connection-refused { border-color: #893c50; background: #2a121b; color: #ffd2da; }
+.run-failure.kind-connection-timeout { border-color: #b35a16; background: #2a1a10; color: #ffd0a8; }
+.run-failure.kind-tls { border-color: #b57316; background: #2a1d10; color: #ffe0a8; }
+.run-failure.kind-http { border-color: #793b4b; background: #2a1018; color: #ffb5c3; }
+.run-failure.kind-script { border-color: #315a83; background: #10182a; color: #b5cfff; }
+.run-failure.kind-process { border-color: #893c50; background: #2a121b; color: #ffd2da; }
+.run-failure-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .55rem; }
+.run-failure-label {
+  padding: .15rem .55rem;
+  border-radius: 999px;
+  background: #0b1018;
+  color: inherit;
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .04rem;
+  text-transform: uppercase;
+}
+.run-failure-head strong { color: inherit; font-size: 1rem; line-height: 1.3; }
+.run-failure-detail {
+  margin: .55rem 0 0;
+  color: inherit;
+  opacity: .85;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.run-failure-hint { margin: .55rem 0 0; color: inherit; opacity: .8; font-size: .8rem; line-height: 1.4; }
+
+@media (max-width: 720px) {
+  .run-progress, .run-summary-cards { grid-template-columns: 1fr; }
+}
+
 .metric-row .metric-item {
   display: inline-flex;
   align-items: baseline;
@@ -146,6 +504,7 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 }
 .failure-reasons li + li { margin-top: .35rem; }
 .failure-reasons code { color: #ffd5dd; font-family: "SFMono-Regular", Consolas, monospace; }
+
 .report-link { display: inline-block; margin: .5rem 0 1rem; padding: .75rem 1rem; border: 1px solid #7d63ff; border-radius: 9px; color: #dcd6ff; font-weight: 800; text-decoration: none; }
 .report-link:hover { background: #7d63ff22; }
 pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; color: #cbd6e6; max-height: 420px; }
@@ -209,6 +568,80 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .script-download { display: inline-block; padding: .75rem 1rem; border-radius: 9px; color: #fff; background: #6941c6; font-weight: 800; text-decoration: none; }
 .script-download:hover { background: #53389e; }
 .script-actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin: 1rem 0; }
+
+/* ---- Ramp-Grafik (Report) ---------------------------------------------- */
+
+.ramp-card {
+  margin-top: 1rem;
+  padding: 1.25rem;
+  border: 1px solid #e4daf6;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #faf7ff 0%, #f4eeff 100%);
+}
+.ramp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+.ramp-title { display: flex; align-items: center; gap: .5rem; }
+.ramp-title h3 { margin: 0; color: #101828; }
+.ramp-title small { color: #6941c6; font-weight: 700; }
+.ramp-legend { display: flex; flex-wrap: wrap; gap: 1rem; font-size: .78rem; color: #475467; }
+.ramp-legend .swatch { display: inline-block; width: 14px; height: 4px; vertical-align: middle; margin-right: .35rem; border-radius: 2px; }
+.ramp-legend .swatch.soll { background: #7d63ff; }
+.ramp-legend .swatch.ist { background: #f79009; }
+.ramp-svg-wrap { background: #fff; border: 1px solid #eaecf0; border-radius: 10px; padding: 1rem; }
+.ramp-svg { width: 100%; height: auto; display: block; }
+.ramp-callout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; margin-top: 1rem; }
+.ramp-callout > div { padding: .8rem 1rem; border: 1px solid #d6bbfb; border-radius: 10px; background: #f9f5ff; }
+.ramp-callout span { color: #6941c6; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04rem; display: block; }
+.ramp-callout strong { display: block; margin-top: .25rem; color: #101828; font-size: 1.15rem; }
+.ramp-callout small { color: #667085; }
+
+@media (max-width: 900px) { .ramp-callout { grid-template-columns: 1fr; } }
+
+/* ---- Load profile editor ----------------------------------------------- */
+
+.load-profile-editor { display: grid; gap: 1rem; margin-top: 1.1rem; }
+.preset-row { display: grid; gap: .45rem; padding: .85rem 1rem; border: 1px solid #293950; border-radius: 10px; background: #111b29; }
+.preset-label { color: #93a2b8; font-size: .72rem; font-weight: 800; letter-spacing: .04rem; text-transform: uppercase; }
+.preset-buttons { display: flex; flex-wrap: wrap; gap: .4rem; }
+.preset-button { padding: .4rem .8rem; border: 1px solid #3a4d6b; border-radius: 8px; background: #1a2638; color: #dbe5f3; font-size: .78rem; font-weight: 700; cursor: pointer; }
+.preset-button:hover { background: #243450; border-color: #7d63ff; color: #fff; }
+.preset-button.hovered { background: #7d63ff; border-color: #9a5df3; color: #fff; box-shadow: 0 6px 18px #7d63ff44; }
+/* The last clicked preset keeps the hover look even after the
+   mouse has left the button. Clicking another preset shifts the
+   highlight. */
+.preset-button.selected { background: #7d63ff; border-color: #9a5df3; color: #fff; box-shadow: 0 6px 18px #7d63ff44; }
+.preset-button:disabled { opacity: .5; cursor: wait; }
+.preset-help { color: #93a2b8; font-size: .78rem; }
+.profile-fields { display: grid; gap: .8rem; margin: 0; padding: 0; border: 0; }
+.profile-fields-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
+.profile-fields-grid > .parameter-box { display: grid; gap: .35rem; }
+.profile-type-select { display: block; width: 100%; margin-top: .55rem; padding: .65rem; border: 1px solid #33425b; border-radius: 7px; color: white; background: #080d14; }
+.profile-summary { color: #93a2b8; font-size: .8rem; line-height: 1.4; }
+.ramping-fields { display: grid; gap: .7rem; }
+.stage-totals { display: flex; align-items: baseline; flex-wrap: wrap; gap: .55rem; padding: .75rem; border: 1px solid #293950; border-radius: 9px; background: #111b29; color: #aeb9ca; }
+.stage-totals strong { color: #dbe5f3; font-size: 1.1rem; }
+.stage-totals small { color: #93a2b8; font-size: .78rem; }
+.stages-table-wrap { display: grid; gap: .5rem; }
+.stages-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.stages-table th, .stages-table td { padding: .55rem; border: 1px solid #293950; text-align: left; }
+.stages-table thead th { color: #93a2b8; background: #111b29; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04rem; }
+.stages-table tbody th { color: #dbe5f3; background: #0d1320; text-align: center; font-weight: 700; width: 2.5rem; }
+.stages-table input[type='number'] { width: 100%; padding: .45rem .55rem; border: 1px solid #33425b; border-radius: 6px; color: white; background: #080d14; }
+.stage-add, .stage-remove { padding: .4rem .8rem; border: 1px solid #3a4d6b; border-radius: 7px; background: #1a2638; color: #dbe5f3; font-size: .8rem; font-weight: 700; cursor: pointer; }
+.stage-add { justify-self: start; }
+.stage-remove { padding: .25rem .55rem; background: #2a1820; border-color: #793b4b; color: #ffae78; }
+.stage-add:hover { background: #243450; border-color: #7d63ff; color: #fff; }
+.stage-remove:hover { background: #3a1820; border-color: #ffae78; color: #fff; }
+.stages-hint { margin: 0; color: #93a2b8; font-size: .8rem; line-height: 1.45; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 720px) { .profile-fields-grid { grid-template-columns: 1fr; } .stages-table th, .stages-table td { padding: .35rem; } }
 
 /* Glassmorphism: zwei versetzte Glas-Panels (Vorderglas + Schatten-Layer dahinter). */
 .script-copy {

@@ -4,6 +4,8 @@ import de.lasttest.demo.DemoSpecificationProvider
 import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
 import de.lasttest.domain.TestRunService
+import de.lasttest.domain.TimeSeriesPoint
+import de.lasttest.domain.TimeSeriesReader
 import org.springframework.http.HttpHeaders
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -12,9 +14,35 @@ import kotlin.test.assertNull
 class LastTestControllerTest {
     private val imported = ImportedSpecification("Test API", "1", "https://example.test", emptyList())
     private val existingRun = TestRun("run-1", TestRunStatus.COMPLETED, "2026-01-01T00:00:00Z")
-    private val service = RecordingTestRunService(existingRun)
+    private val queuedRun = TestRun("run-queued", TestRunStatus.QUEUED, "2026-01-01T00:00:00Z")
+    private val runningRun =
+        TestRun(
+            id = "run-running",
+            status = TestRunStatus.RUNNING,
+            createdAt = "2026-01-01T00:00:00Z",
+            startedAt = "2026-01-01T00:00:01Z",
+        )
+    private val completedRun =
+        TestRun(
+            id = "run-completed",
+            status = TestRunStatus.COMPLETED,
+            createdAt = "2026-01-01T00:00:00Z",
+            startedAt = "2026-01-01T00:00:00Z",
+            finishedAt = "2026-01-01T00:00:30Z",
+        )
+    private val service =
+        RecordingTestRunService(
+            existingRun,
+            additionalRuns =
+                mapOf(
+                    "run-queued" to queuedRun,
+                    "run-running" to runningRun,
+                    "run-completed" to completedRun,
+                ),
+        )
     private val demoSpecificationProvider = DemoSpecificationProvider(resourceName = "/demo/recorded.yaml")
     private val remoteFetcher = RecordingRemoteSpecificationFetcher()
+    private val timeSeriesReader = RecordingTimeSeriesReader()
     private val controller =
         LastTestController(
             importer =
@@ -24,6 +52,7 @@ class LastTestControllerTest {
             testRuns = service,
             demoSpecificationProvider = demoSpecificationProvider,
             remoteFetcher = remoteFetcher,
+            timeSeriesReader = timeSeriesReader,
         )
 
     @Test
@@ -94,8 +123,46 @@ class LastTestControllerTest {
         assertEquals(mapOf("message" to "Ungültige Anfrage"), controller.invalid(IllegalArgumentException()).body)
     }
 
+    @Test
+    fun `returns 404 for an unknown run when querying time series`() {
+        val response = controller.timeSeries("missing")
+        assertEquals(404, response.statusCode.value())
+    }
+
+    @Test
+    fun `returns 404 when the run has not started yet`() {
+        val response = controller.timeSeries(queuedRun.id)
+        assertEquals(404, response.statusCode.value())
+    }
+
+    @Test
+    fun `returns 404 when the run has not finished yet`() {
+        val response = controller.timeSeries(runningRun.id)
+        assertEquals(404, response.statusCode.value())
+    }
+
+    @Test
+    fun `returns the time series for a completed run with data from the reader`() {
+        timeSeriesReader.points[completedRun.id] =
+            listOf(
+                TimeSeriesPoint(time = "2026-01-01T00:00:01Z", value = 5),
+                TimeSeriesPoint(time = "2026-01-01T00:00:02Z", value = 8),
+            )
+
+        val response = controller.timeSeries(completedRun.id)
+        val body = response.body
+
+        assertEquals(200, response.statusCode.value())
+        assertEquals(completedRun.id, body?.runId)
+        assertEquals(1, body?.resolutionSeconds)
+        assertEquals(2, body?.vus?.size)
+        assertEquals(2, body?.requestsPerSecond?.size)
+        assertEquals(5, body?.vus?.get(0)?.value)
+    }
+
     private class RecordingTestRunService(
         private val run: TestRun,
+        private val additionalRuns: Map<String, TestRun> = emptyMap(),
     ) : TestRunService {
         var createdRequest: CreateTestRunRequest? = null
 
@@ -104,7 +171,7 @@ class LastTestControllerTest {
             return run
         }
 
-        override fun find(id: String): TestRun? = run.takeIf { id == it.id }
+        override fun find(id: String): TestRun? = run.takeIf { id == it.id } ?: additionalRuns[id]
 
         override fun script(id: String): String? = "export default function () {}".takeIf { id == run.id }
     }
@@ -118,5 +185,21 @@ class LastTestControllerTest {
             lastUrl = url
             return fetched
         }
+    }
+
+    private class RecordingTimeSeriesReader : TimeSeriesReader {
+        var points: MutableMap<String, List<TimeSeriesPoint>> = mutableMapOf()
+
+        override fun readVusOverTime(
+            runId: String,
+            startedAt: String,
+            finishedAt: String,
+        ): List<TimeSeriesPoint> = points[runId] ?: emptyList()
+
+        override fun readRequestsPerSecond(
+            runId: String,
+            startedAt: String,
+            finishedAt: String,
+        ): List<TimeSeriesPoint> = points[runId] ?: emptyList()
     }
 }

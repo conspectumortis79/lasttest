@@ -1,4 +1,4 @@
-import { deepEqual, equal } from 'node:assert/strict'
+import { deepEqual, equal, ok } from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   activeStatusCodes,
@@ -6,7 +6,10 @@ import {
   checkSuccessRate,
   completedRequestCount,
   copyTextToClipboard,
+  extractErrorLine,
   formatBytes,
+  formatDurationHuman,
+  formatDurationSeconds,
   formatInteger,
   formatNumber,
   formatTimestamp,
@@ -18,8 +21,12 @@ import {
   operationDisplayPath,
   parseK6Summary,
   progressHint,
+  runElapsedSeconds,
+  runRemainingSeconds,
   statusDistribution,
   summarizeFailure,
+  summariseFailure,
+  summariseThresholds,
   TRACKED_STATUS_CODES,
   type K6Summary,
   type ReportOperation,
@@ -97,7 +104,7 @@ test('builds safe script download metadata and manual k6 commands', () => {
   equal(k6ScriptDownloadName('run-1'), 'lasttest-run-1.js')
   equal(manualK6Command(undefined, 'run-1'), 'k6 run -e BASE_URL="https://target.example" lasttest-run-1.js')
   equal(
-    manualK6Command({ apiTitle: 'API', apiVersion: '1', baseUrl: 'https://example.test/path', virtualUsers: 1, durationSeconds: 1, useIterations: false, operations: [] }, 'run-2'),
+    manualK6Command({ apiTitle: 'API', apiVersion: '1', baseUrl: 'https://example.test/path', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] }, 'run-2'),
     'k6 run -e BASE_URL="https://example.test/path" lasttest-run-2.js',
   )
 })
@@ -270,6 +277,340 @@ test('activeStatusCodes returns only the fallback columns when nothing fired', (
   deepEqual(activeStatusCodes(rows), ['err', 'other'])
 })
 
+
+// ---- Merge of the conflict pages -------------------------------------------
+//
+// HEAD (Feature) and ffe00f7ec (Main) are both retained:
+//   HEAD       - formatDuration* / runElapsedSeconds / runRemainingSeconds /
+//                summariseFailure (s) / extractErrorLine
+//   ffe00f7ec  - summarizeFailure (z) / buildMetricRow
+//
+// summariseFailure (z) is called in App.tsx:380,
+// buildMetricRow in App.tsx:382. Both need tests, otherwise the
+// 100% coverage requirement in package.json:scripts.test:coverage fails.
+
+// ---- formatDurationSeconds / formatDurationHuman ----
+
+test('formatDurationSeconds formats MM:SS for values under one hour', () => {
+  equal(formatDurationSeconds(0), '00:00')
+  equal(formatDurationSeconds(7), '00:07')
+  equal(formatDurationSeconds(59), '00:59')
+  equal(formatDurationSeconds(60), '01:00')
+  equal(formatDurationSeconds(83), '01:23')
+  equal(formatDurationSeconds(3599), '59:59')
+})
+
+test('formatDurationSeconds uses H:MM:SS for values >= one hour', () => {
+  equal(formatDurationSeconds(3600), '1:00:00')
+  equal(formatDurationSeconds(3661), '1:01:01')
+  equal(formatDurationSeconds(7_320), '2:02:00')
+})
+
+test('formatDurationSeconds returns the placeholder for invalid or missing values', () => {
+  equal(formatDurationSeconds(undefined), '–')
+  equal(formatDurationSeconds(Number.NaN), '–')
+  equal(formatDurationSeconds(Number.POSITIVE_INFINITY), '–')
+  equal(formatDurationSeconds(-5), '–')
+})
+
+test('formatDurationSeconds floors fractional seconds', () => {
+  equal(formatDurationSeconds(12.9), '00:12')
+})
+
+test('formatDurationHuman formats sub-minute values as seconds only', () => {
+  equal(formatDurationHuman(0), '0 s')
+  equal(formatDurationHuman(7), '7 s')
+  equal(formatDurationHuman(59), '59 s')
+})
+
+test('formatDurationHuman formats minute values and trims trailing seconds when zero', () => {
+  equal(formatDurationHuman(60), '1 min')
+  equal(formatDurationHuman(83), '1 min 23 s')
+  equal(formatDurationHuman(125), '2 min 5 s')
+  equal(formatDurationHuman(3_599), '59 min 59 s')
+})
+
+test('formatDurationHuman collapses the output to the coarsest non-zero segment', () => {
+  equal(formatDurationHuman(3_600), '1 h')
+  equal(formatDurationHuman(3_661), '1 h 1 min 1 s')
+  equal(formatDurationHuman(7_200), '2 h')
+  equal(formatDurationHuman(7_320), '2 h 2 min')
+  equal(formatDurationHuman(0), '0 s')
+})
+
+test('formatDurationHuman returns the placeholder for invalid or missing values', () => {
+  equal(formatDurationHuman(undefined), '–')
+  equal(formatDurationHuman(Number.NaN), '–')
+  equal(formatDurationHuman(Number.POSITIVE_INFINITY), '–')
+  equal(formatDurationHuman(-5), '–')
+})
+
+// ---- runElapsedSeconds ----
+
+test('runElapsedSeconds returns undefined when the run has not started yet', () => {
+  equal(runElapsedSeconds({ id: 'r', status: 'QUEUED', createdAt: '2026-01-01T00:00:00Z' }, 1_700_000_000_000), undefined)
+})
+
+test('runElapsedSeconds returns the seconds between startedAt and now', () => {
+  const started = '2026-01-01T00:00:00Z'
+  const now = new Date(started).getTime() + 12_500
+  equal(runElapsedSeconds({ id: 'r', status: 'RUNNING', createdAt: started, startedAt: started }, now), 12.5)
+})
+
+test('runElapsedSeconds caps at finishedAt when the run already ended', () => {
+  const started = '2026-01-01T00:00:00Z'
+  const finished = '2026-01-01T00:00:10Z'
+  const now = new Date(started).getTime() + 60_000
+  equal(runElapsedSeconds({ id: 'r', status: 'COMPLETED', createdAt: started, startedAt: started, finishedAt: finished }, now), 10)
+})
+
+test('runElapsedSeconds treats invalid timestamps as undefined', () => {
+  equal(runElapsedSeconds({ id: 'r', status: 'RUNNING', createdAt: '2026-01-01T00:00:00Z', startedAt: 'not-a-date' }, 1_700_000_000_000), undefined)
+})
+
+test('runElapsedSeconds clamps negative deltas to zero', () => {
+  // Server clock skew can make finishedAt < startedAt; we want
+  // no negative or NaN display.
+  const started = '2026-01-01T00:00:10Z'
+  const finished = '2026-01-01T00:00:05Z'
+  equal(runElapsedSeconds({ id: 'r', status: 'COMPLETED', createdAt: started, startedAt: started, finishedAt: finished }, new Date(started).getTime() + 1_000), 0)
+})
+
+// ---- runRemainingSeconds ----
+
+test('runRemainingSeconds returns undefined without a configuration', () => {
+  const started = '2026-01-01T00:00:00Z'
+  const now = new Date(started).getTime() + 5_000
+  equal(runRemainingSeconds({ id: 'r', status: 'RUNNING', createdAt: started, startedAt: started }, now), undefined)
+})
+
+test('runRemainingSeconds returns undefined when the run has not started yet', () => {
+  // Configuration is present but startedAt is missing (e.g. QUEUED).
+  // profileTotalSeconds returns a value, but runElapsedSeconds returns
+  // undefined, so we must also return undefined here.
+  const now = 1_700_000_000_000
+  const run: TestRun = {
+    id: 'r',
+    status: 'QUEUED',
+    createdAt: '2026-01-01T00:00:00Z',
+    configuration: { apiTitle: 'A', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 60 }, operations: [] },
+  }
+  equal(runRemainingSeconds(run, now), undefined)
+})
+
+test('runRemainingSeconds returns undefined for shared-iterations profiles', () => {
+  const started = '2026-01-01T00:00:00Z'
+  const now = new Date(started).getTime() + 5_000
+  equal(
+    runRemainingSeconds(
+      { id: 'r', status: 'RUNNING', createdAt: started, startedAt: started, configuration: { apiTitle: 'A', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'shared-iterations', virtualUsers: 1, iterations: 1 }, operations: [] } },
+      now,
+    ),
+    undefined,
+  )
+})
+
+test('runRemainingSeconds subtracts elapsed from the planned total', () => {
+  const started = '2026-01-01T00:00:00Z'
+  const now = new Date(started).getTime() + 10_000
+  const run: TestRun = {
+    id: 'r',
+    status: 'RUNNING',
+    createdAt: started,
+    startedAt: started,
+    configuration: { apiTitle: 'A', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 60 }, operations: [] },
+  }
+  equal(runRemainingSeconds(run, now), 50)
+})
+
+test('runRemainingSeconds clamps to zero once the run has exceeded the plan', () => {
+  const started = '2026-01-01T00:00:00Z'
+  const now = new Date(started).getTime() + 120_000
+  const run: TestRun = {
+    id: 'r',
+    status: 'COMPLETED',
+    createdAt: started,
+    startedAt: started,
+    finishedAt: '2026-01-01T00:02:00Z',
+    configuration: { apiTitle: 'A', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 30 }, operations: [] },
+  }
+  equal(runRemainingSeconds(run, now), 0)
+})
+
+// ---- summariseFailure ----
+
+test('summariseFailure returns undefined for empty, null, or whitespace-only errors', () => {
+  equal(summariseFailure(undefined), undefined)
+  equal(summariseFailure(null), undefined)
+  equal(summariseFailure(''), undefined)
+  equal(summariseFailure('   \n  \n'), undefined)
+})
+
+test('summariseFailure detects DNS resolution failures', () => {
+  const reason = summariseFailure('ERRO[0000] GoError: Get "https://api.example.com/": dial tcp: lookup api.example.com: no such host')
+  ok(reason)
+  equal(reason!.kind, 'dns')
+  ok(reason!.summary.includes('api.example.com'))
+  ok(reason!.summary.includes('DNS-Auflösung'))
+  equal(reason!.hint != null, true)
+})
+
+test('summariseFailure detects DNS failures with a "Temporary failure in name resolution" message', () => {
+  const reason = summariseFailure('dial tcp: lookup broken.test: Temporary failure in name resolution')
+  ok(reason)
+  equal(reason!.kind, 'dns')
+  ok(reason!.detail.includes('Temporary failure in name resolution'))
+})
+
+test('summariseFailure detects DNS failures with a port-prefixed dial tcp string', () => {
+  // The question-mark optional in `(?::\d+)?` of the DNS pattern is
+  // used when k6 embeds a port into the lookup path.
+  const reason = summariseFailure('dial tcp:443: lookup api.example.com: no such host')
+  ok(reason)
+  equal(reason!.kind, 'dns')
+  ok(reason!.summary.includes('api.example.com'))
+})
+
+test('summariseFailure detects connection-refused errors with host and port', () => {
+  const reason = summariseFailure('dial tcp 127.0.0.1:1: connect: connection refused')
+  ok(reason)
+  equal(reason!.kind, 'connection-refused')
+  ok(reason!.summary.includes('127.0.0.1'))
+  ok(reason!.summary.includes('1'))
+})
+
+test('summariseFailure detects connection-refused errors with IPv6 hosts', () => {
+  const reason = summariseFailure('dial tcp [::1]:8080: connect: connection refused')
+  ok(reason)
+  equal(reason!.kind, 'connection-refused')
+  ok(reason!.summary.includes('::1'))
+  ok(reason!.summary.includes('8080'))
+})
+
+test('summariseFailure detects connection-timeout errors', () => {
+  const reason = summariseFailure('dial tcp 10.0.0.99:8080: i/o timeout')
+  ok(reason)
+  equal(reason!.kind, 'connection-timeout')
+  ok(reason!.summary.includes('10.0.0.99'))
+  ok(reason!.summary.includes('8080'))
+})
+
+test('summariseFailure detects context-deadline-exceeded as a timeout', () => {
+  const reason = summariseFailure('dial tcp api.example.com:443: context deadline exceeded')
+  ok(reason)
+  equal(reason!.kind, 'connection-timeout')
+})
+
+test('summariseFailure detects x509 TLS errors and keeps the original message', () => {
+  const reason = summariseFailure('Get "https://expired.badssl.com/": x509: certificate has expired or is not yet valid')
+  ok(reason)
+  equal(reason!.kind, 'tls')
+  ok(reason!.summary.includes('TLS-Handshake'))
+  ok(reason!.detail.includes('certificate has expired'))
+})
+
+test('summariseFailure detects HTTP status code errors', () => {
+  const reason = summariseFailure('http response error: status code 500')
+  ok(reason)
+  equal(reason!.kind, 'http')
+  ok(reason!.summary.includes('500'))
+})
+
+test('summariseFailure detects GoError script errors with file and line', () => {
+  const reason = summariseFailure('GoError: file:///app/test.js:25:5   ReferenceError: foo is not defined')
+  ok(reason)
+  equal(reason!.kind, 'script')
+  ok(reason!.summary.includes('test.js'))
+  ok(reason!.summary.includes('25'))
+  ok(reason!.summary.includes('ReferenceError'))
+})
+
+test('summariseFailure detects missing k6 process errors', () => {
+  const reason = summariseFailure('Cannot run program "k6" (in directory "/tmp"): error=2, No such file or directory')
+  ok(reason)
+  equal(reason!.kind, 'process')
+  ok(reason!.summary.includes('k6'))
+  ok(reason!.hint != null)
+})
+
+test('summariseFailure detects k6 as a missing command in a shell error', () => {
+  // Covers the `k6: command not found` path and the variant without
+  // surrounding quotes.
+  const reason = summariseFailure('/bin/sh: k6: command not found')
+  ok(reason)
+  equal(reason!.kind, 'process')
+})
+
+test('summariseFailure detects a "no such file or directory" error from the OS', () => {
+  // Plain OS error without explicitly mentioning k6 — the fallback in
+  // the process pattern still hits because `no such file or
+  // directory` is part of the error message.
+  const reason = summariseFailure('fork/exec /usr/local/bin/k6: no such file or directory')
+  ok(reason)
+  equal(reason!.kind, 'process')
+})
+
+test('summariseFailure detects connection-refused against a hostname without explicit IP', () => {
+  // The third alternative pattern `[^:]+` matches when neither an
+  // IPv4 nor an IPv6 address is given, but a hostname without a colon
+  // (e.g. when k6 dials a DNS name that points to a port via
+  // /etc/hosts).
+  const reason = summariseFailure('dial tcp myservice:8080: connect: connection refused')
+  ok(reason)
+  equal(reason!.kind, 'connection-refused')
+  ok(reason!.summary.includes('myservice'))
+})
+
+test('summariseFailure returns an unknown reason for unmatched k6 output', () => {
+  const reason = summariseFailure('first noise line\nSomething completely unexpected\nhappened on the line below')
+  ok(reason)
+  equal(reason!.kind, 'unknown')
+  // We scan from the end, so the last lines end up in the
+  // detail — the first lines are often time-series output errors,
+  // which are not the actual cause of the failure.
+  ok(reason!.detail.includes('happened on the line below'))
+})
+
+test('summariseFailure strips the ERRO[] prefix in the unknown fallback', () => {
+  const reason = summariseFailure('ERRO[0002] Something completely unexpected\nERRO[0003] actual last error')
+  ok(reason)
+  equal(reason!.kind, 'unknown')
+  // The last line wins: ERRO[0003] is truncated so the UI shows
+  // the actual text without k6 logging noise.
+  equal(reason!.detail, 'actual last error')
+})
+
+test('summariseFailure prefers the first matching pattern and ignores ERRO[] prefixes', () => {
+  const reason = summariseFailure('ERRO[0001] GoError: dial tcp example.com:80: i/o timeout\nERRO[0001] http response error: status code 503')
+  ok(reason)
+  // Both patterns would match, but time-out comes before http in
+  // the pattern array — so the time-out label wins.
+  equal(reason!.kind, 'connection-timeout')
+})
+
+// ---- extractErrorLine (internal helper, exported for tests) ----
+
+test('extractErrorLine returns the last non-empty line and strips the ERRO[] prefix', () => {
+  // We scan from the end so the final error (not an interleaved
+  // time-series output) wins for the UI.
+  equal(extractErrorLine('ERRO[0001] dial tcp: lookup x: no such host'), 'dial tcp: lookup x: no such host')
+})
+
+test('extractErrorLine prefers the meaningful line at the end of the buffer', () => {
+  // When InfluxDB output errors appear at the beginning and the
+  // actual test-request error at the end, the latter must be extracted.
+  equal(
+    extractErrorLine('ERRO[0000] lookup influxdb: no such host\ntime="…" level=warning msg="Request Failed" error="Get \\"http://127.0.0.1:1/\\": dial tcp 127.0.0.1:1: connect: connection refused"'),
+    'time="…" level=warning msg="Request Failed" error="Get \\"http://127.0.0.1:1/\\": dial tcp 127.0.0.1:1: connect: connection refused"',
+  )
+})
+
+test('extractErrorLine falls back to the trimmed text when every line is just an ERRO[] marker', () => {
+  // Defensive path: each strip yields an empty line. We then take
+  // the last line that still has content.
+  equal(extractErrorLine('ERRO[0000]\nERRO[0001]\n   '), 'ERRO[0000]\nERRO[0001]')
+})
+
 function runWithError(error: string | undefined, summaryRaw?: string): TestRun {
   return {
     id: 'run-1',
@@ -279,9 +620,7 @@ function runWithError(error: string | undefined, summaryRaw?: string): TestRun {
       apiTitle: 'API',
       apiVersion: '1',
       baseUrl: 'http://127.0.0.1:1',
-      virtualUsers: 1,
-      durationSeconds: 10,
-      useIterations: false,
+      loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 10 },
       operations: [],
     },
     summary: summaryRaw ? { raw: summaryRaw } : undefined,
@@ -654,7 +993,7 @@ test('progressHint reports the elapsed and remaining duration while the run is R
     createdAt: startedAt,
     startedAt,
     configuration: {
-      apiTitle: 'API', apiVersion: '1', baseUrl: 'https://x', virtualUsers: 1, durationSeconds: 10, useIterations: false, operations: [],
+      apiTitle: 'API', apiVersion: '1', baseUrl: 'https://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 10 }, operations: [],
     },
   }
   equal(progressHint(run), 'läuft seit 4 s · voraussichtlich noch 6 s')
@@ -707,9 +1046,7 @@ test('summarizeFailure falls back to "Zielhost" when baseUrl is malformed', () =
       apiTitle: 'API',
       apiVersion: '1',
       baseUrl: 'not a valid url',
-      virtualUsers: 1,
-      durationSeconds: 10,
-      useIterations: false,
+      loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 10 },
       operations: [],
     },
     error: 'ERRO[0001] GoError: Getaddrinfo ENOTFOUND',
@@ -1139,5 +1476,89 @@ test('summarizeFailure adds the rate-vs-threshold bullet for a timeout run that 
   equal(failure.category, 'timeout')
   // The bullet must say 'gerissen' when 5xx count is 0.
   equal(failure.reasons.some(r => r.includes('gerissen')), true)
+
+})
+
+// ---- summariseThresholds ----------------------------------------------------
+//
+// Drives the "Alle N Thresholds eingehalten / N Thresholds verletzt" banner
+// above the result cards. The helper must be deterministic, must only look
+// at the two metrics the project actually configures, and must not flash a
+// green "passed" banner before k6 has settled the run.
+
+test('summariseThresholds returns passed=true when both metrics are within limits', () => {
+  const summary = summaryRawWith({
+    http_req_failed: { value: 0.004 },
+    http_req_duration: { 'p(95)': 842 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'COMPLETED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, true)
+  deepEqual(result.failedMetrics, [])
+})
+
+test('summariseThresholds reports http_req_duration when p(95) exceeds 1000 ms', () => {
+  const summary = summaryRawWith({
+    http_req_failed: { value: 0.01 },
+    http_req_duration: { 'p(95)': 2579 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'COMPLETED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, false)
+  deepEqual(result.failedMetrics, ['http_req_duration'])
+})
+
+test('summariseThresholds reports http_req_failed when the rate exceeds 5 %', () => {
+  const summary = summaryRawWith({
+    http_req_failed: { value: 0.179 },
+    http_req_duration: { 'p(95)': 300 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'FAILED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, false)
+  deepEqual(result.failedMetrics, ['http_req_failed'])
+})
+
+test('summariseThresholds reports both metrics when both thresholds are crossed', () => {
+  const summary = summaryRawWith({
+    http_req_failed: { value: 0.179 },
+    http_req_duration: { 'p(95)': 2579 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'FAILED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, false)
+  // The order must match the order in the k6 summary: failure rate, then latency.
+  deepEqual(result.failedMetrics, ['http_req_failed', 'http_req_duration'])
+})
+
+test('summariseThresholds treats a missing or non-finite metric as not-crossed', () => {
+  const summary = summaryRawWith({
+    http_req_failed: {},
+    http_req_duration: { 'p(95)': 500 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'COMPLETED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, true)
+  deepEqual(result.failedMetrics, [])
+})
+
+test('summariseThresholds does not flash a pass banner while the run is still going', () => {
+  const summary = summaryRawWith({
+    http_req_failed: { value: 0.0 },
+    http_req_duration: { 'p(95)': 100 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'RUNNING' as const }
+  const result = summariseThresholds(run)
+  // We deliberately report "not passed" with no failures, so the UI
+  // can show a neutral state instead of a green banner.
+  equal(result.passed, false)
+  deepEqual(result.failedMetrics, [])
+})
+
+test('summariseThresholds returns no failures when the run has no k6 summary at all', () => {
+  const run = { ...runWithError('k6 brach vor dem ersten Request ab'), status: 'FAILED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, false)
+  deepEqual(result.failedMetrics, [])
 })
 
