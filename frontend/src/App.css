@@ -17,7 +17,14 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 .actions { display: flex; justify-content: space-between; gap: 1rem; margin-top: 1rem; }
 .url-import { display: block; margin-bottom: 1rem; color: #aeb9ca; font-size: .85rem; }
 .url-label { display: block; margin-bottom: .4rem; color: #d7e2f1; font-weight: 700; }
-.url-import input { display: block; width: 100%; padding: .7rem; border: 1px solid #33425b; border-radius: 8px; color: white; background: #080d14; font-family: "SFMono-Regular", Consolas, monospace; font-size: .85rem; }
+.url-import input { display: block; width: 100%; padding: .7rem; border: 1px solid #33425b; border-radius: 8px; color: white; background: #080d14; font-size: .9rem; }
+
+/* Swagger-Textarea: gleiche Schrift wie der Rest der UI (Inter
+   sans-serif statt Monospace) und kleinere, einheitliche Schrift-
+   groesse. Die globale `textarea`-Regel bleibt unveraendert, damit
+   die `.request-body`-Textarea (JSON Body) weiterhin Monospace
+   fuer JSON-Lesbarkeit nutzt. */
+.specification-textarea { font-family: inherit; font-size: .9rem; }
 .url-import input:focus { outline: 2px solid #7d63ff; outline-offset: 1px; border-color: #7d63ff; }
 .url-import small { display: block; margin-top: .35rem; color: #718198; font-size: .78rem; }
 .fetched-info { margin: .75rem 0 0; padding: .55rem .75rem; border: 1px solid #2c4a3b; border-radius: 8px; color: #b8e7c8; background: #142822; font-size: .85rem; }
@@ -308,18 +315,15 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   font-size: .74rem;
 }
 
-/* Untere Zeile: k6-Konsolenausgabe + k6-JSON-Rohdaten-Details links,
-   Report-Button rechts auf gleicher Höhe. */
+/* Untere Zeile: k6-Konsolenausgabe + k6-JSON-Rohdaten. Nutzt jetzt
+   die volle Kartenbreite, weil der Report-Button oben in den
+   Header gewandert ist (siehe .result-header-actions). */
 .result-extras {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
   margin-top: .9rem;
   padding-top: .8rem;
   border-top: 1px dashed #293950;
-  flex-wrap: wrap;
 }
-.result-extras-details { display: flex; flex-direction: column; gap: .35rem; min-width: 0; flex: 1 1 auto; }
+.result-extras-details { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
 .result-extras-details details > summary { cursor: pointer; color: #dbe5f3; font-size: .85rem; list-style: none; }
 .result-extras-details details > summary::-webkit-details-marker { display: none; }
 .result-extras-details details > summary::before { content: "▸ "; color: #7d63ff; }
@@ -332,7 +336,6 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   max-height: 320px; overflow: auto;
 }
 .report-btn {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: .45rem;
@@ -344,28 +347,58 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   font-size: .82rem;
   font-weight: 700;
   text-decoration: none;
-  flex: 0 0 auto;
 }
 .report-btn:hover { background: #2a2660; color: #fff; }
 .report-btn::after { content: "↗"; font-weight: 500; }
 
-/* ---- Karten-Header mit Run-ID oben rechts ----------------------------- */
+/* ---- Karten-Header mit Run-ID + Report-Button ---------------------------- */
+/* Zwei Zeilen: oben Step + Titel + Run-ID (rechtsbündig), darunter
+   der Report-Button rechtsbündig. Dadurch wandert der Button nicht
+   beim Auf-/Zuklappen der Details, und die Details bekommen unten
+   die volle Kartenbreite. */
 .result-header {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .55rem;
+  margin-bottom: 1.1rem;
+}
+.result-header-top {
+  /* Volle Kartenbreite einnehmen, damit der Step-Badge ganz links
+     und die Run-ID ganz rechts (margin-left: auto) liegen — ohne
+     diese Breite schrumpft der Flex-Container auf den Inhalt und
+     die Run-ID würde rechts am Inhalt-Ende statt am Karten-Rand
+     kleben. */
   display: flex;
   align-items: center;
   gap: .75rem;
-  margin-bottom: 1.1rem;
+  width: 100%;
+}
+.result-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  /* Im Flex-Column-Parent wird das Item nur dann auf volle Breite
+     gestreckt, wenn es nicht selbst ein Flex-Container ist oder
+     explizit eine Breite hat. Ohne `width: 100%` schrumpft der
+     Container auf den Button und `justify-content: flex-end`
+     schiebt ihn nur an den rechten Rand des Containers — was wie
+     zentriert aussieht, weil der Container genauso breit wie der
+     Button ist. */
+  width: 100%;
+  align-self: stretch;
 }
 .result-header h2 {
   /* Im Flex-Header übernimmt `gap` den Abstand; das alte margin-left
      für den absolut positionierten Step-Badge brauchen wir hier nicht. */
   margin: 0;
+  flex-shrink: 0;
 }
 .result-header .step {
   /* Innerhalb des Flex-Headers soll der Step-Badge Teil des
      Layouts sein, nicht absolut positioniert über dem Titel. */
   position: static;
   top: auto;
+  flex-shrink: 0;
 }
 .result-run-id {
   margin-left: auto;
@@ -375,6 +408,8 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 60%;
+  flex-shrink: 1;
+  min-width: 0;
 }
 .result-run-id code {
   padding: .15rem .4rem;

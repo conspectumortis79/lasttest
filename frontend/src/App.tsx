@@ -260,7 +260,7 @@ function LoadTestApp() {
           übernommen und kann vor dem Import noch bearbeitet werden.
         </small>
       </label>
-      <textarea aria-label="Swagger / OpenAPI-Dokumentation" value={specification} onChange={event => setSpecification(event.target.value)} spellCheck={false} />
+      <textarea className="specification-textarea" aria-label="Swagger / OpenAPI-Dokumentation" value={specification} onChange={event => setSpecification(event.target.value)} spellCheck={false} />
       <div className="actions">
         <label className="upload">Datei öffnen<input type="file" accept=".yaml,.yml,.json" onChange={async event => {
           const file = event.target.files?.[0]
@@ -354,25 +354,37 @@ function LoadTestApp() {
 
     {run && <section className="card result">
       <header className="result-header">
-        <div className="step">4</div>
-        <h2>Testlauf</h2>
-        {/* Run-ID sitzt immer oben rechts in der Karte, sowohl während
-            k6 läuft als auch im Ergebnis. Der Report-Button erscheint
-            nur, wenn k6 fertig ist (siehe ResultFoot in runStatusView). */}
-        <span className="result-run-id">Run-ID: <code>{run.id}</code></span>
+        <div className="result-header-top">
+          <div className="step">4</div>
+          <h2>Testlauf</h2>
+          {/* Run-ID sitzt immer oben rechts in der Karte, sowohl während
+              k6 läuft als auch im Ergebnis. Direkt darunter (rechtsbündig)
+              erscheint der Report-Button, sobald der Test beendet ist
+              (COMPLETED oder FAILED) — unabhängig davon, ob k6 Output
+              oder einen Summary geliefert hat. So bekommen die Details
+              unten die volle Kartenbreite, und der Report-Link ist auch
+              dann verfügbar, wenn ein sauberer Run ohne Summary
+              zurueckkommt. Waehrend RUNNING/QUEUED bleibt der Button
+              korrekterweise weg (Negativfall). */}
+          <span className="result-run-id">Run-ID: <code>{run.id}</code></span>
+        </div>
+        {(run.status === 'COMPLETED' || run.status === 'FAILED') && (
+          <div className="result-header-actions">
+            <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">Ausführlicher K6-Testbericht</a>
+          </div>
+        )}
       </header>
       <TestRunSummary run={run} />
       <RunStatusView run={run} now={runNow} />
-      {/* Untere Zeile: k6-Konsolenausgabe + k6-JSON-Rohdaten links,
-          Ausführlicher-Report-Button rechtsbündig daneben — beide auf
-          gleicher Höhe. Nur sichtbar, wenn k6 überhaupt Output oder
-          einen Summary geliefert hat. */}
+      {/* Untere Zeile: k6-Konsolenausgabe + k6-JSON-Rohdaten. Nimmt jetzt
+          die volle Kartenbreite, weil der Report-Button oben in den
+          Header gewandert ist. Nur sichtbar, wenn k6 überhaupt Output
+          oder einen Summary geliefert hat. */}
       {((run.consoleOutput ?? run.error) || run.summary) && <div className="result-extras">
         <div className="result-extras-details">
           {(run.consoleOutput ?? run.error) && <details><summary>k6-Konsolenausgabe</summary><pre>{run.consoleOutput ?? run.error}</pre></details>}
           {run.summary && <details><summary>k6-JSON-Rohdaten</summary><pre>{run.summary.raw}</pre></details>}
         </div>
-        <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">Ausführlicher K6-Testbericht</a>
       </div>}
     </section>}
   </main>

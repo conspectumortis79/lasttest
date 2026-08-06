@@ -3,9 +3,10 @@ import { test } from 'node:test'
 import { fetchWithRetry } from './retryFetch.ts'
 
 type FetchCall = { url: string; init: RequestInit | undefined; attempt: number }
+type FetchOutcome = Response | { throws: unknown }
 
 function makeFakeFetch(
-  responses: Array<Response | { throws: Error }>,
+  responses: FetchOutcome[],
 ): { fetch: typeof fetch; calls: FetchCall[] } {
   const calls: FetchCall[] = []
   let index = 0
@@ -98,6 +99,25 @@ test('fetchWithRetry does not retry when shouldRetry returns false on a non-2xx 
     )
     deepEqual(calls.map(call => call.attempt), [1])
     deepEqual([response.status], [400])
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('fetchWithRetry wraps a non-Error throw in a generic Error after maxAttempts', async () => {
+  // last thrown value is a string, not an Error instance, so the
+  // `lastError instanceof Error` branch must take the `new Error(...)` fallback.
+  const { fetch, calls } = makeFakeFetch([{ throws: 'plain-string-failure' }])
+  const original = globalThis.fetch
+  globalThis.fetch = fetch
+  try {
+    await rejects(
+      fetchWithRetry('/api/x', undefined, { maxAttempts: 1, delayMs: 0 }),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === 'fetchWithRetry failed without a response',
+    )
+    deepEqual(calls.map(call => call.attempt), [1])
   } finally {
     globalThis.fetch = original
   }

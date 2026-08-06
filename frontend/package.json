@@ -8,11 +8,11 @@
     "build": "tsc -b && vite build",
     "test": "npm run test:coverage",
     "test:unit": "node --experimental-strip-types --test src/*.test.ts",
-    "test:coverage": "node --experimental-strip-types --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include=src/k6Report.ts --test-coverage-include=src/loadProfile.ts --test-coverage-include=src/operationConfiguration.ts --test-coverage-include=src/specificationSource.ts src/*.test.ts",
+    "test:coverage": "node --experimental-strip-types --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include=src/k6Report.ts --test-coverage-include=src/loadProfile.ts --test-coverage-include=src/operationConfiguration.ts --test-coverage-include=src/retryFetch.ts --test-coverage-include=src/specificationSource.ts --test-coverage-include=src/timeSeries.ts --test-coverage-include=src/useRunClock.ts src/*.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
     "test:all": "npm test && npm run test:e2e",
-    "lint": "oxlint .",
+    "lint": "oxlint --format=json .",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -22,9 +22,11 @@
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "@types/node": "^24.13.3",
+    "@types/jsdom": "^28.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "jsdom": "^30.0.1",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"

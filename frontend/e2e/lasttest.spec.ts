@@ -130,7 +130,7 @@ test('runs the selected endpoint and opens the complete report in a new tab', as
 
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('searchProducts', { exact: true })).toBeVisible()
-  const reportLink = page.getByRole('link', { name: /Ausführlichen k6-Testbericht/ })
+  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })
   await expect(reportLink).toHaveAttribute('target', '_blank')
 
   const popupPromise = page.waitForEvent('popup')
@@ -441,7 +441,7 @@ test('runs the selected destructive endpoint with bearer token and downloads the
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
-  const reportLink = page.getByRole('link', { name: /Ausführlichen k6-Testbericht/ })
+  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })
   const popupPromise = page.waitForEvent('popup')
   await reportLink.click()
   const report = await popupPromise
@@ -940,31 +940,76 @@ test('k6-Konsolenausgabe wird auch im Erfolgsfall angezeigt', async ({ page }) =
   await expect(consoleDetails.locator('pre')).not.toHaveText('')
 })
 
-test('Report-Button steht auf gleicher Höhe wie k6-JSON-Rohdaten und ist rechtsbündig', async ({ page }) => {
+test('Report-Button sitzt fest direkt unter der Run-ID (rechtsbündig) — Details nutzen volle Kartenbreite', async ({ page }) => {
   await importDemo(page)
   await page.getByLabel('Virtual Users').fill('1')
   await page.getByLabel('Dauer (Sekunden)').fill('1')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
 
-  // Button + JSON-Rohdaten-Details leben jetzt in derselben .result-extras-Zeile.
-  const extras = page.locator('.result-extras')
-  await expect(extras).toBeVisible()
+  // Strukturelemente: Button lebt jetzt im Header (.result-header-actions),
+  // die Details (k6-Konsolenausgabe + k6-JSON-Rohdaten) in .result-extras.
+  const resultCard = page.locator('section.card.result')
+  const headerActions = resultCard.locator('.result-header-actions')
+  const reportBtn = headerActions.getByRole('link', { name: 'Ausführlicher K6-Testbericht' })
+  const extras = resultCard.locator('.result-extras')
+  const consoleDetails = extras.locator('details', { hasText: 'k6-Konsolenausgabe' })
   const jsonDetails = extras.locator('details', { hasText: 'k6-JSON-Rohdaten' })
-  const reportBtn = extras.getByRole('link', { name: 'Ausführlicher K6-Testbericht' })
-  await expect(jsonDetails).toBeVisible()
   await expect(reportBtn).toBeVisible()
+  await expect(consoleDetails).toBeVisible()
+  await expect(jsonDetails).toBeVisible()
 
-  // Beide Boxen muessen auf gleicher vertikaler Hoehe liegen
-  // (Bounding-Box-Top fast identisch — Toleranz fuer Browser-Rendering).
-  const jsonBox = await jsonDetails.boundingBox()
-  const btnBox = await reportBtn.boundingBox()
-  if (!jsonBox || !btnBox) throw new Error('Bounding-Box nicht verfuegbar')
-  const topDelta = Math.abs(jsonBox.y - btnBox.y)
-  expect(topDelta).toBeLessThan(8)
+  const cardBox = await resultCard.boundingBox()
+  const btnClosed = await reportBtn.boundingBox()
+  const consoleClosed = await consoleDetails.boundingBox()
+  const jsonClosed = await jsonDetails.boundingBox()
+  if (!cardBox || !btnClosed || !consoleClosed || !jsonClosed) throw new Error('Bounding-Box nicht verfuegbar')
 
-  // Button ist rechtsbuendig: er sitzt weiter rechts als die Details-Box.
-  expect(btnBox.x).toBeGreaterThan(jsonBox.x)
+  // 1) Button ist rechtsbündig: sein rechter Rand liegt am rechten
+  //    Inhaltsrand der Karte. Da `.card` ein `padding: 1.5rem` (24 px)
+  //    hat, darf der Abstand bis zur Card-Außenkante diesen Wert plus
+  //    etwas Subpixel-Puffer nicht überschreiten.
+  const cardRight = cardBox.x + cardBox.width
+  const rightPadding = 32
+  expect(cardRight - (btnClosed.x + btnClosed.width)).toBeLessThan(rightPadding)
+
+  // 2) Details nutzen die volle Kartenbreite: ihr rechter Rand liegt
+  //    ebenfalls am rechten Inhaltsrand (gleiche Toleranz).
+  expect(cardRight - (consoleClosed.x + consoleClosed.width)).toBeLessThan(rightPadding)
+  expect(cardRight - (jsonClosed.x + jsonClosed.width)).toBeLessThan(rightPadding)
+
+  // 3) Details sind breiter als der Button (volle Breite vs. nur
+  //    Button-Breite).
+  expect(consoleClosed.width).toBeGreaterThan(btnClosed.width)
+  expect(jsonClosed.width).toBeGreaterThan(btnClosed.width)
+
+  // 4) Initialposition des Buttons merken (alle <details> zu).
+  const initialY = btnClosed.y
+  const initialX = btnClosed.x
+
+  // 5) k6-Konsolenausgabe aufklappen — Button darf nicht mitwandern.
+  await consoleDetails.locator('summary').click()
+  await expect(consoleDetails).toHaveAttribute('open', '')
+  const btnAfterConsole = await reportBtn.boundingBox()
+  if (!btnAfterConsole) throw new Error('Bounding-Box nicht verfuegbar')
+  expect(Math.abs(btnAfterConsole.y - initialY)).toBeLessThan(1.5)
+  expect(Math.abs(btnAfterConsole.x - initialX)).toBeLessThan(1.5)
+
+  // 6) k6-JSON-Rohdaten zusaetzlich aufklappen — Button bleibt fix.
+  await jsonDetails.locator('summary').click()
+  await expect(jsonDetails).toHaveAttribute('open', '')
+  const btnAfterBoth = await reportBtn.boundingBox()
+  if (!btnAfterBoth) throw new Error('Bounding-Box nicht verfuegbar')
+  expect(Math.abs(btnAfterBoth.y - initialY)).toBeLessThan(1.5)
+  expect(Math.abs(btnAfterBoth.x - initialX)).toBeLessThan(1.5)
+
+  // 7) Beide Details wieder zuklappen — Button immer noch am selben Ort.
+  await consoleDetails.locator('summary').click()
+  await jsonDetails.locator('summary').click()
+  const btnFinal = await reportBtn.boundingBox()
+  if (!btnFinal) throw new Error('Bounding-Box nicht verfuegbar')
+  expect(Math.abs(btnFinal.y - initialY)).toBeLessThan(1.5)
+  expect(Math.abs(btnFinal.x - initialX)).toBeLessThan(1.5)
 })
 
 test('report page renders the ramp-grafik for a completed ramping-vus run', async ({ page }) => {
@@ -996,7 +1041,7 @@ test('report page renders the ramp-grafik for a completed ramping-vus run', asyn
   await expect(page.getByText('COMPLETED', { exact: false })).toBeVisible({ timeout: 60_000 })
 
   // Report-Link öffnen.
-  const reportLink = page.getByRole('link', { name: /Ausführlichen k6-Testbericht/ })
+  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })
   const [reportPage] = await Promise.all([page.context().waitForEvent('page'), reportLink.click()])
 
   // Lastprofil-Sektion und Ramp-Grafik sind sichtbar.
@@ -1145,7 +1190,7 @@ test('the completed summary card grid is also visible in the report popup', asyn
   // Report-Popup öffnen und prüfen, dass die ausführliche
   // Zusammenfassung (Cards + Thresholds) sichtbar ist.
   const popupPromise = page.context().waitForEvent('page')
-  await page.getByRole('link', { name: /Ausführlichen k6-Testbericht/ }).click()
+  await page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i }).click()
   const report = await popupPromise
   await report.waitForLoadState('networkidle')
 
@@ -1940,7 +1985,7 @@ paths:
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
     const popupPromise = page.context().waitForEvent('page')
-    await page.getByRole('link', { name: /Ausführlichen k6-Testbericht/ }).click()
+    await page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i }).click()
     const report = await popupPromise
     await report.waitForLoadState('networkidle')
     // "Generiertes k6-Testskript" ist ein <summary>-Element, kein Heading.
@@ -1954,7 +1999,7 @@ paths:
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
     const popupPromise = page.context().waitForEvent('page')
-    await page.getByRole('link', { name: /Ausführlichen k6-Testbericht/ }).click()
+    await page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i }).click()
     const report = await popupPromise
     await report.waitForLoadState('networkidle')
     await expect(report.getByRole('heading', { name: 'Testkonfiguration' })).toBeVisible()
@@ -1967,7 +2012,7 @@ paths:
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
     const popupPromise = page.context().waitForEvent('page')
-    await page.getByRole('link', { name: /Ausführlichen k6-Testbericht/ }).click()
+    await page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i }).click()
     const report = await popupPromise
     await report.waitForLoadState('networkidle')
     await expect(report.getByRole('heading', { name: 'Detaillierte k6-Metriken' })).toBeVisible()
@@ -2066,7 +2111,7 @@ paths:
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
     const popupPromise = page.context().waitForEvent('page')
-    await page.getByRole('link', { name: /Ausführlichen k6-Testbericht/ }).click()
+    await page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i }).click()
     const report = await popupPromise
     await report.waitForLoadState('networkidle')
     const backLink = report.getByRole('link', { name: 'Zur Anwendung' })

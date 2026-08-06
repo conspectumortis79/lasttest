@@ -163,9 +163,11 @@ function ThresholdNotice({ passed, failedMetrics, run }: ThresholdNoticeProps) {
 
 // ---- ResultFoot entfernt ---------------------------------------------------
 //
-// Der Report-Button ist nach App.tsx in die Zeile mit den
-// k6-Konsolenausgabe / k6-JSON-Rohdaten-Details gewandert, damit er
-// auf gleicher Höhe rechtsbündig steht. Siehe `App.tsx :: .result-extras`.
+// Der Report-Button ist nach App.tsx in den Karten-Header gewandert
+// (`.result-header-actions`) und sitzt dort in einer eigenen Zeile
+// rechtsbündig direkt unter der Run-ID. Die k6-Konsolenausgabe und
+// die k6-JSON-Rohdaten-Details bekommen dadurch in `.result-extras`
+// wieder die volle Kartenbreite.
 
 function parseFinishedAt(run: TestRun): number {
   const finished = new Date(run.finishedAt ?? '').getTime()

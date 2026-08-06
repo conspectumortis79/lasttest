@@ -451,7 +451,7 @@ const FAILURE_PATTERNS: readonly FailurePattern[] = [
     kind: 'dns',
     // k6 v0.x / v1.x: "dial tcp[:PORT]: lookup HOST: <reason>"
     // k6 v2.x: "lookup HOST on <resolver>:<port>: <reason>" (Go's pure DNS error, no dial prefix)
-    regex: /(?:dial tcp(?::\d+)?:\s*)?lookup ([^\s:]+)(?:\s+on\s+[0-9.:a-fA-F\[\]]+)?:\s*(no such host|Temporary failure in name resolution|Server misbehaving)/i,
+    regex: /(?:dial tcp(?::\d+)?:\s*)?lookup ([^\s:]+)(?:\s+on\s+[0-9.:a-fA-F[\]]+)?:\s*(no such host|Temporary failure in name resolution|Server misbehaving)/i,
     buildSummary: match => `DNS-Auflösung fehlgeschlagen für „${match[1]}".`,
     buildDetail: match => `k6 konnte den Hostnamen ${match[1]} nicht auflösen (${match[2]}).`,
   },

@@ -84,7 +84,7 @@ class InfluxDbTimeSeriesReader(
      * Zeitstempel + Wert-Paare als TimeSeriesPoints zurück. Die
      * Authentifizierung erfolgt per HTTP-Basic-Auth via Query-Param.
      */
-    private fun queryInfluxQL(influxql: String): List<TimeSeriesPoint> {
+    internal fun queryInfluxQL(influxql: String): List<TimeSeriesPoint> {
         val uri =
             URI.create(
                 "${properties.url.trimEnd('/')}/query" +
@@ -116,7 +116,7 @@ class InfluxDbTimeSeriesReader(
      * eine Abhängigkeit auf eine InfluxDB-spezifische Bibliothek zu
      * vermeiden.
      */
-    private fun parseInfluxQLJson(json: String): List<TimeSeriesPoint> {
+    internal fun parseInfluxQLJson(json: String): List<TimeSeriesPoint> {
         if (json.isBlank()) return emptyList()
         val mapper =
             com.fasterxml.jackson.databind
@@ -150,14 +150,14 @@ class InfluxDbTimeSeriesReader(
         return points
     }
 
-    private fun parseInstant(value: String?): Instant? =
+    internal fun parseInstant(value: String?): Instant? =
         try {
             if (value.isNullOrBlank()) null else Instant.parse(value)
         } catch (_: Exception) {
             null
         }
 
-    private fun escape(value: String): String = value.replace("'", "\\'").replace("\n", " ")
+    internal fun escape(value: String): String = value.replace("'", "\\'").replace("\n", " ")
 
     private companion object {
         val logger = LoggerFactory.getLogger(InfluxDbTimeSeriesReader::class.java)
