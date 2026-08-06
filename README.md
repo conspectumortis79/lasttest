@@ -16,7 +16,7 @@ For every imported spec lasttest lets you:
 2. **Pick a load profile** that maps to one of four k6 executors —
    `constant-vus`, `shared-iterations`, `ramping-vus`, or
    `constant-arrival-rate` — with one-click presets for Smoke, Load,
-   Stress, Spike, Soak, Anfragen, and Arrival-Rate.
+   Stress, Spike, Soak, Burst, and Arrival-Rate.
 3. **Run the test** and watch the status cycle through `QUEUED` →
    `RUNNING` → `COMPLETED` (or `FAILED`).
 4. **Open the report** in a new tab. It contains a printable summary, the
@@ -37,7 +37,6 @@ Or with Docker Compose:
 docker compose up --build -d
 ```
 
-<<<<<<< HEAD
 This starts three containers: `lasttest` (the application), `lasttest-influxdb`
 (a Time-Series database for the ramp-grafik), and `lasttest-grafana`
 (optional dashboards). Access them at:
@@ -61,11 +60,6 @@ Jetzt im Browser öffnen: http://localhost:8286/
 
 If a different public host or port is used, the displayed link can be
 overridden via the `LASTTEST_PUBLIC_URL` environment variable.
-=======
-Once Spring Boot has finished starting, the web UI is reachable on the
-configured port (default `8286`). The startup log only contains the
-standard Spring Boot output — no extra banner is emitted by lasttest.
->>>>>>> ffe00f7ec7e0eebe0a0fe17c903fbf09914889be
 
 Open the application in your browser:
 
@@ -145,26 +139,18 @@ npm run dev
 
 Then open: <http://localhost:5173>
 
-Or simply run the helper script, which detects and stops any previously
-running lasttest instance (including Docker containers) and then starts
-both services:
-
-```bash
-./start-linux.sh
-```
-
-The script starts the project in **dev mode**: the Vite dev-server serves
-the React UI with hot-reload on **http://localhost:5173**, and Spring
-Boot runs the JSON API on **http://localhost:8286**. The backend URL
-does **not** serve a UI in dev mode (it returns Spring's Whitelabel 404
-page, because `../frontend/dist/` is not built). Always open the dev-UI
-URL in your browser:
+In dev mode the Vite dev-server serves the React UI with hot-reload on
+**http://localhost:5173**, and Spring Boot runs the JSON API on
+**http://localhost:8286**. The backend URL does **not** serve a UI in
+dev mode (it returns Spring's Whitelabel 404 page, because
+`../frontend/dist/` is not built). Always open the dev-UI URL in your
+browser:
 
 - Dev-UI (Vite, hot-reload): <http://localhost:5173>
 - API (Spring Boot, JSON only): <http://localhost:8286>
 
-If you want a single-URL deployment where the backend serves both the
-API and the UI on port 8286, use `./docker-start.sh` (or `docker compose up --build`)
+For a single-URL deployment where the backend serves both the API and
+the UI on port 8286, use `./docker-start.sh` (or `docker compose up --build`)
 instead — the Dockerfile builds `frontend/dist/` and the Spring app
 serves it as static files.
 
@@ -178,8 +164,6 @@ explicitly.
   English user manual covering the workflow, the demo API, the
   configuration of every endpoint, running load tests, the report view,
   and troubleshooting.
-- **[`start-linux.sh`](./start-linux.sh)** — one-command local startup
-  (kills any previous instance, then launches backend + frontend).
 
 ## Tests and quality checks
 

@@ -59,7 +59,7 @@ const PRESETS: PresetEntry[] = [
   { label: 'Stress', description: 'Stufenweise bis 400 VUs, findet den Knick', apply: stressPreset },
   { label: 'Spike', description: 'Plötzlicher Sprung auf 800 VUs, 30 s Plateau', apply: spikePreset },
   { label: 'Soak', description: '50 VUs über eine Stunde, deckt Leaks auf', apply: soakPreset },
-  { label: 'Anfragen', description: '1 000 Anfragen so schnell wie möglich — vergleicht Releases mit fester Request-Anzahl', apply: requestsPreset },
+  { label: 'Burst', description: '1 000 Anfragen so schnell wie möglich — vergleicht Releases mit fester Request-Anzahl', apply: requestsPreset },
   { label: 'Arrival-Rate', description: '50 Anfragen/s unabhängig von der Antwortzeit', apply: arrivalRatePreset },
 ]
 
@@ -68,6 +68,10 @@ export function LoadProfileEditor({ profile, onChange, disabled = false }: LoadP
   const errorId = useId()
   const presetHelpId = useId()
   const [presetHovered, setPresetHovered] = useState<string | undefined>()
+  // Die zuletzt geklickte Schnellauswahl bleibt markiert, bis eine
+  // andere gewählt wird. So sieht der User jederzeit, welches Preset
+  // aktuell aktiv ist — auch nachdem die Maus den Button verlassen hat.
+  const [presetSelected, setPresetSelected] = useState<string | undefined>()
 
   function emit(next: LoadProfile) {
     onChange(next)
@@ -78,8 +82,12 @@ export function LoadProfileEditor({ profile, onChange, disabled = false }: LoadP
       <PresetRow
         disabled={disabled}
         hovered={presetHovered}
+        selected={presetSelected}
         onHover={setPresetHovered}
-        onPick={entry => emit(entry.apply())}
+        onPick={entry => {
+          setPresetSelected(entry.label)
+          emit(entry.apply())
+        }}
         helpId={presetHelpId}
       />
 
@@ -95,7 +103,14 @@ export function LoadProfileEditor({ profile, onChange, disabled = false }: LoadP
           <select
             className="profile-type-select"
             value={profile.type}
-            onChange={event => emit(changeProfileType(profile, event.target.value as LoadProfile['type']))}
+            onChange={event => {
+              // Wenn der User den Lastprofil-Typ manuell wechselt, passt
+              // die zuvor gewählte Schnellauswahl nicht mehr — wir
+              // räumen die Markierung auf, damit klar ist, dass kein
+              // Preset mehr aktiv ist.
+              setPresetSelected(undefined)
+              emit(changeProfileType(profile, event.target.value as LoadProfile['type']))
+            }}
             aria-label="Lastprofil-Typ"
           >
             <option value="constant-vus">Konstante Last (constant-vus)</option>
@@ -127,39 +142,52 @@ export function LoadProfileEditor({ profile, onChange, disabled = false }: LoadP
 function PresetRow({
   disabled,
   hovered,
+  selected,
   onHover,
   onPick,
   helpId,
 }: {
   disabled: boolean
   hovered: string | undefined
+  selected: string | undefined
   onHover: (label: string | undefined) => void
   onPick: (entry: PresetEntry) => void
   helpId: string
 }) {
+  // Beim Verlassen der Maus / des Fokus fällt der Hilfe-Text auf die
+  // Beschreibung der zuletzt gewählten Schnellauswahl zurück, damit
+  // der User weiterhin sieht, was das aktive Preset macht.
+  const focusLabel = hovered ?? selected
   return (
     <div className="preset-row" aria-describedby={helpId}>
       <span className="preset-label">Schnellauswahl</span>
       <div className="preset-buttons">
-        {PRESETS.map(entry => (
-          <button
-            type="button"
-            key={entry.label}
-            className={`preset-button ${hovered === entry.label ? 'hovered' : ''}`}
-            disabled={disabled}
-            onClick={() => onPick(entry)}
-            onMouseEnter={() => onHover(entry.label)}
-            onMouseLeave={() => onHover(undefined)}
-            onFocus={() => onHover(entry.label)}
-            onBlur={() => onHover(undefined)}
-            aria-describedby={helpId}
-          >
-            {entry.label}
-          </button>
-        ))}
+        {PRESETS.map(entry => {
+          const isHovered = hovered === entry.label
+          const isSelected = !isHovered && selected === entry.label
+          return (
+            <button
+              type="button"
+              key={entry.label}
+              className={`preset-button ${isHovered ? 'hovered' : ''} ${isSelected ? 'selected' : ''}`}
+              disabled={disabled}
+              onClick={() => onPick(entry)}
+              onMouseEnter={() => onHover(entry.label)}
+              onMouseLeave={() => onHover(undefined)}
+              onFocus={() => onHover(entry.label)}
+              onBlur={() => onHover(undefined)}
+              aria-describedby={helpId}
+              aria-pressed={selected === entry.label}
+            >
+              {entry.label}
+            </button>
+          )
+        })}
       </div>
       <small id={helpId} className="preset-help">
-        {hovered ? PRESETS.find(entry => entry.label === hovered)?.description : 'Preset überfahren für eine Beschreibung.'}
+        {focusLabel
+          ? PRESETS.find(entry => entry.label === focusLabel)?.description
+          : 'Preset überfahren für eine Beschreibung.'}
       </small>
     </div>
   )

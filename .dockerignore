@@ -16,6 +16,4 @@ frontend/test-results
 **/.vscode
 README.md
 USER_GUIDE.md
-lasttest.pdf
 docker-start.sh
-start-linux.sh

@@ -20,16 +20,13 @@ import {
   metric,
   operationDisplayPath,
   parseK6Summary,
-<<<<<<< HEAD
+  progressHint,
   runElapsedSeconds,
   runRemainingSeconds,
   statusDistribution,
-  summariseFailure,
-=======
-  progressHint,
-  statusDistribution,
   summarizeFailure,
->>>>>>> ffe00f7ec7e0eebe0a0fe17c903fbf09914889be
+  summariseFailure,
+  summariseThresholds,
   TRACKED_STATUS_CODES,
   type K6Summary,
   type ReportOperation,
@@ -280,7 +277,18 @@ test('activeStatusCodes returns only the fallback columns when nothing fired', (
   deepEqual(activeStatusCodes(rows), ['err', 'other'])
 })
 
-<<<<<<< HEAD
+
+// ---- Zusammenfuehrung der Konflikt-Seiten --------------------------------
+//
+// HEAD (Feature) und ffe00f7ec (Main) bleiben beide erhalten:
+//   HEAD       - formatDuration* / runElapsedSeconds / runRemainingSeconds /
+//                summariseFailure (s) / extractErrorLine
+//   ffe00f7ec  - summarizeFailure (z) / buildMetricRow
+//
+// summarizeFailure (z) wird in App.tsx:380 produktiv aufgerufen,
+// buildMetricRow in App.tsx:382. Beide brauchen Tests, sonst scheitert
+// die 100-Prozent-Coverage-Vorgabe in package.json:scripts.test:coverage.
+
 // ---- formatDurationSeconds / formatDurationHuman ----
 
 test('formatDurationSeconds formats MM:SS for values under one hour', () => {
@@ -601,7 +609,8 @@ test('extractErrorLine falls back to the trimmed text when every line is just an
   // Defensive Pfad: jeder Strip liefert eine leere Zeile. Wir nehmen
   // dann die letzte Zeile, die noch Inhalt hat.
   equal(extractErrorLine('ERRO[0000]\nERRO[0001]\n   '), 'ERRO[0000]\nERRO[0001]')
-=======
+})
+
 function runWithError(error: string | undefined, summaryRaw?: string): TestRun {
   return {
     id: 'run-1',
@@ -611,9 +620,7 @@ function runWithError(error: string | undefined, summaryRaw?: string): TestRun {
       apiTitle: 'API',
       apiVersion: '1',
       baseUrl: 'http://127.0.0.1:1',
-      virtualUsers: 1,
-      durationSeconds: 10,
-      useIterations: false,
+      loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 10 },
       operations: [],
     },
     summary: summaryRaw ? { raw: summaryRaw } : undefined,
@@ -986,7 +993,7 @@ test('progressHint reports the elapsed and remaining duration while the run is R
     createdAt: startedAt,
     startedAt,
     configuration: {
-      apiTitle: 'API', apiVersion: '1', baseUrl: 'https://x', virtualUsers: 1, durationSeconds: 10, useIterations: false, operations: [],
+      apiTitle: 'API', apiVersion: '1', baseUrl: 'https://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 10 }, operations: [],
     },
   }
   equal(progressHint(run), 'läuft seit 4 s · voraussichtlich noch 6 s')
@@ -1039,9 +1046,7 @@ test('summarizeFailure falls back to "Zielhost" when baseUrl is malformed', () =
       apiTitle: 'API',
       apiVersion: '1',
       baseUrl: 'not a valid url',
-      virtualUsers: 1,
-      durationSeconds: 10,
-      useIterations: false,
+      loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 10 },
       operations: [],
     },
     error: 'ERRO[0001] GoError: Getaddrinfo ENOTFOUND',
@@ -1471,6 +1476,89 @@ test('summarizeFailure adds the rate-vs-threshold bullet for a timeout run that 
   equal(failure.category, 'timeout')
   // The bullet must say 'gerissen' when 5xx count is 0.
   equal(failure.reasons.some(r => r.includes('gerissen')), true)
->>>>>>> ffe00f7ec7e0eebe0a0fe17c903fbf09914889be
+
+})
+
+// ---- summariseThresholds ----------------------------------------------------
+//
+// Drives the "Alle N Thresholds eingehalten / N Thresholds verletzt" banner
+// above the result cards. The helper must be deterministic, must only look
+// at the two metrics the project actually configures, and must not flash a
+// green "passed" banner before k6 has settled the run.
+
+test('summariseThresholds returns passed=true when both metrics are within limits', () => {
+  const summary = summaryRawWith({
+    http_req_failed: { value: 0.004 },
+    http_req_duration: { 'p(95)': 842 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'COMPLETED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, true)
+  deepEqual(result.failedMetrics, [])
+})
+
+test('summariseThresholds reports http_req_duration when p(95) exceeds 1000 ms', () => {
+  const summary = summaryRawWith({
+    http_req_failed: { value: 0.01 },
+    http_req_duration: { 'p(95)': 2579 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'COMPLETED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, false)
+  deepEqual(result.failedMetrics, ['http_req_duration'])
+})
+
+test('summariseThresholds reports http_req_failed when the rate exceeds 5 %', () => {
+  const summary = summaryRawWith({
+    http_req_failed: { value: 0.179 },
+    http_req_duration: { 'p(95)': 300 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'FAILED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, false)
+  deepEqual(result.failedMetrics, ['http_req_failed'])
+})
+
+test('summariseThresholds reports both metrics when both thresholds are crossed', () => {
+  const summary = summaryRawWith({
+    http_req_failed: { value: 0.179 },
+    http_req_duration: { 'p(95)': 2579 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'FAILED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, false)
+  // The order must match the order in the k6 summary: failure rate, then latency.
+  deepEqual(result.failedMetrics, ['http_req_failed', 'http_req_duration'])
+})
+
+test('summariseThresholds treats a missing or non-finite metric as not-crossed', () => {
+  const summary = summaryRawWith({
+    http_req_failed: {},
+    http_req_duration: { 'p(95)': 500 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'COMPLETED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, true)
+  deepEqual(result.failedMetrics, [])
+})
+
+test('summariseThresholds does not flash a pass banner while the run is still going', () => {
+  const summary = summaryRawWith({
+    http_req_failed: { value: 0.0 },
+    http_req_duration: { 'p(95)': 100 },
+  })
+  const run = { ...runWithError(undefined, summary), status: 'RUNNING' as const }
+  const result = summariseThresholds(run)
+  // We deliberately report "not passed" with no failures, so the UI
+  // can show a neutral state instead of a green banner.
+  equal(result.passed, false)
+  deepEqual(result.failedMetrics, [])
+})
+
+test('summariseThresholds returns no failures when the run has no k6 summary at all', () => {
+  const run = { ...runWithError('k6 brach vor dem ersten Request ab'), status: 'FAILED' as const }
+  const result = summariseThresholds(run)
+  equal(result.passed, false)
+  deepEqual(result.failedMetrics, [])
 })
 

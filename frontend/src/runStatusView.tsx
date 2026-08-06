@@ -6,11 +6,13 @@ import {
   formatInteger,
   formatNumber,
   formatTimestamp,
+  LATENCY_THRESHOLD_MS,
   metric,
   parseK6Summary,
   runElapsedSeconds,
   runRemainingSeconds,
   summariseFailure,
+  summariseThresholds,
   type FailureKind,
   type FailureReason,
   type TestRun,
@@ -59,6 +61,11 @@ export function RunProgress({ run, now }: RunProgressProps) {
 // die Nutzer:innen die wichtigsten Kennzahlen sehen, ohne den
 // ausführlichen Report öffnen zu müssen. Wir rendern deshalb dieselben
 // Kern-Cards wie im Report, aber kompakter und ohne Schwellwert-Box.
+//
+// Sobald k6 fertig ist (COMPLETED oder FAILED), bekommt die Karte oben
+// einen Pass/Fail-Header und unten einen Run-Foot mit Run-ID und
+// Report-Link. Während k6 noch läuft (RUNNING/QUEUED) wird stattdessen
+// weiterhin `RunProgress` angezeigt — der ist 1:1 wie bisher.
 
 type RunSummaryProps = {
   run: TestRun
@@ -76,20 +83,89 @@ export function RunSummary({ run }: RunSummaryProps) {
   const requestCount = completedRequestCount(summary)
   const checkRate = checkSuccessRate(summary)
   const failureRate = failed.value == null ? undefined : failed.value * 100
+  const p95 = duration['p(95)']
+  const p95Pass = p95 != null && Number.isFinite(p95) && p95 < LATENCY_THRESHOLD_MS
+  const failureRatePass = failureRate != null && failureRate < 5
+  const checksPass = checkRate === 100
   const noRequests = requestCount == null || requestCount === 0
+  const threshold = summariseThresholds(run)
+  const passed = threshold.passed
+  const failedNames = threshold.failedMetrics
 
   return <>
+    <ResultHeader passed={passed} run={run} />
+    <ThresholdNotice passed={passed} failedMetrics={failedNames} run={run} />
     {noRequests && <div className="run-summary-empty warning">Keine HTTP-Anfrage wurde abgeschlossen. Das Ziel war aus dem k6-Container nicht erreichbar oder antwortete nicht rechtzeitig.</div>}
     <div className="run-summary-cards">
-      <SummaryCard label="Checks erfolgreich" value={formatPercentage(checkRate)} detail={`${formatInteger(checks.passes)} bestanden, ${formatInteger(checks.fails)} fehlgeschlagen`} success={checkRate === 100} />
-      <SummaryCard label="HTTP-Fehlerrate" value={formatPercentage(failureRate)} detail={`${formatInteger(requestCount ?? 0)} Requests`} success={failureRate != null && failureRate < 5} />
-      <SummaryCard label="p(95) Antwortzeit" value={`${formatNumber(duration['p(95)'])} ms`} detail="Grenzwert: < 1.000 ms" success={(duration['p(95)'] ?? Number.POSITIVE_INFINITY) < 1000} />
+      <SummaryCard label="Checks erfolgreich" value={formatPercentage(checkRate)} detail={`${formatInteger(checks.passes)} bestanden, ${formatInteger(checks.fails)} fehlgeschlagen`} status={checksPass ? 'pass' : 'fail'} />
+      <SummaryCard label="HTTP-Fehlerrate" value={formatPercentage(failureRate)} detail={`${formatInteger(requestCount ?? 0)} Requests`} status={failureRatePass ? 'pass' : 'fail'} />
+      <SummaryCard label="p(95) Antwortzeit" value={p95 != null && Number.isFinite(p95) ? `${formatNumber(p95)} ms` : '–'} detail="Grenzwert: < 1.000 ms" status={p95Pass ? 'pass' : 'fail'} />
       <SummaryCard label="HTTP Requests" value={formatInteger(requests.count)} detail={`${formatNumber(requests.rate)}/s`} />
       <SummaryCard label="Iterationen" value={formatInteger(metric(summary, 'iterations').count)} detail={`${formatNumber(metric(summary, 'iterations').rate)}/s`} />
       <SummaryCard label="Laufzeit" value={formatDurationHuman(runElapsedSeconds(run, parseFinishedAt(run)))} detail={`Exit-Code ${run.exitCode ?? '–'}`} />
     </div>
   </>
 }
+
+// ---- ResultHeader -----------------------------------------------------------
+//
+// Zeigt "PASSED" oder "FAILED" als Pille. Wird nur eingeblendet, wenn
+// k6 den Run abgeschlossen hat — die laufende Ansicht (RunProgress)
+// bleibt unangetastet.
+
+type ResultHeaderProps = {
+  passed: boolean
+  run: TestRun
+}
+
+function ResultHeader({ passed, run }: ResultHeaderProps) {
+  return <div className="run-result-head">
+    <span className={`status-badge is-${passed ? 'pass' : 'fail'}`}>{passed ? 'PASSED' : 'FAILED'}</span>
+    <span className="run-result-exit">Exit-Code {run.exitCode ?? '–'}</span>
+  </div>
+}
+
+// ---- ThresholdNotice --------------------------------------------------------
+//
+// Die kompakte Zeile unter dem Header: "Alle N Thresholds eingehalten" oder
+// "N Thresholds verletzt: <metric>, <metric>". Bei FAILED werden die
+// betroffenen Metriken als <code>-Tags gerendert, damit klar ist, welche
+// konfigurierten Thresholds betroffen sind.
+
+type ThresholdNoticeProps = {
+  passed: boolean
+  failedMetrics: string[]
+  run: TestRun
+}
+
+function ThresholdNotice({ passed, failedMetrics, run }: ThresholdNoticeProps) {
+  if (passed) {
+    return <div className="run-notice is-pass" role="status">
+      <span className="run-notice-check" aria-hidden="true">✓</span>
+      <span>Alle <strong>2</strong> Thresholds eingehalten:
+        <code>http_req_duration</code>, <code>http_req_failed</code>
+      </span>
+      <span className="run-notice-detail">Testdauer {formatDurationHuman(runElapsedSeconds(run, parseFinishedAt(run)))}</span>
+    </div>
+  }
+  const metricChips = failedMetrics.map((name, i) => (
+    <span key={name} className="run-notice-chips">
+      {i > 0 && <span className="run-notice-sep">, </span>}
+      <code>{name}</code>
+    </span>
+  ))
+  return <div className="run-notice is-fail" role="alert">
+    <span className="run-notice-check" aria-hidden="true">✗</span>
+    <span><strong>{failedMetrics.length}</strong> Threshold{failedMetrics.length === 1 ? '' : 's'} verletzt: {metricChips}</span>
+    <span className="run-notice-detail">Testdauer {formatDurationHuman(runElapsedSeconds(run, parseFinishedAt(run)))}</span>
+  </div>
+}
+
+// ---- ResultFoot entfernt ---------------------------------------------------
+//
+// Der Report-Button ist nach App.tsx in die Zeile mit den
+// k6-Konsolenausgabe / k6-JSON-Rohdaten-Details gewandert, damit er
+// auf gleicher Höhe rechtsbündig steht. Siehe `App.tsx :: .result-extras`.
 
 function parseFinishedAt(run: TestRun): number {
   const finished = new Date(run.finishedAt ?? '').getTime()
@@ -100,10 +176,10 @@ function formatPercentage(value: number | undefined): string {
   return value == null ? '–' : `${formatNumber(value)} %`
 }
 
-function SummaryCard({ label, value, detail, success = false }: { label: string, value: string, detail: string, success?: boolean }) {
-  return <div className="run-summary-card">
+function SummaryCard({ label, value, detail, status = 'normal' }: { label: string, value: string, detail: string, status?: 'pass' | 'fail' | 'normal' }) {
+  return <div className={`run-summary-card ${status === 'normal' ? '' : `is-${status}`}`}>
     <span>{label}</span>
-    <strong className={success ? 'success' : ''}>{value}</strong>
+    <strong>{value}</strong>
     <small>{detail}</small>
   </div>
 }
@@ -121,15 +197,19 @@ type RunFailureProps = {
   reason: FailureReason
 }
 
-export function RunFailure({ reason }: RunFailureProps) {
-  return <div className={`run-failure kind-${reason.kind}`} role="alert">
-    <div className="run-failure-head">
-      <span className="run-failure-label">{labelForFailure(reason.kind)}</span>
-      <strong>{reason.summary}</strong>
+export function RunFailure({ run, reason }: RunFailureProps) {
+  return <>
+    <ResultHeader passed={false} run={run} />
+    <ThresholdNotice passed={false} failedMetrics={summariseThresholds(run).failedMetrics} run={run} />
+    <div className={`run-failure kind-${reason.kind}`} role="alert">
+      <div className="run-failure-head">
+        <span className="run-failure-label">{labelForFailure(reason.kind)}</span>
+        <strong>{reason.summary}</strong>
+      </div>
+      <p className="run-failure-detail">{reason.detail}</p>
+      {reason.hint && <p className="run-failure-hint">{reason.hint}</p>}
     </div>
-    <p className="run-failure-detail">{reason.detail}</p>
-    {reason.hint && <p className="run-failure-hint">{reason.hint}</p>}
-  </div>
+  </>
 }
 
 function labelForFailure(kind: FailureKind): string {
@@ -170,6 +250,16 @@ export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) 
     return <RunSummary run={run} />
   }
   if (run.status === 'FAILED') {
+    // Ein FAILED-Lauf kann zwei sehr verschiedene Ursachen haben:
+    //   a) k6 hat Thresholds verletzt — dann gibt es echte Metriken
+    //      und wir zeigen die Summary-Karten mit roter Einfärbung.
+    //   b) k6 ist intern fehlgeschlagen (z. B. DNS, Connection refused,
+    //      TLS, Skript-Fehler) — dann gibt es keine verwertbaren
+    //      Metriken und wir zeigen den typisierten Failure-Block.
+    const threshold = summariseThresholds(run)
+    if (threshold.failedMetrics.length > 0) {
+      return <RunSummary run={run} />
+    }
     const reason = reasonOverride ?? summariseFailure(run.error)
     if (reason) return <RunFailure run={run} reason={reason} />
   }

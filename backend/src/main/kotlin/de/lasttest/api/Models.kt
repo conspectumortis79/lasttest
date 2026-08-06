@@ -216,5 +216,12 @@ data class TestRun(
     val exitCode: Int? = null,
     val configuration: TestRunConfiguration? = null,
     val summary: Map<String, Any?>? = null,
+    /**
+     * Roher (gekürzter) k6-Output für die UI. Wird sowohl für
+     * erfolgreiche als auch für gescheiterte Läufe befüllt, damit die
+     * "k6-Konsolenausgabe" immer eingeblendet werden kann. `null`, wenn
+     * k6 gar nicht gestartet werden konnte (siehe `error`).
+     */
+    val consoleOutput: String? = null,
     val error: String? = null,
 )

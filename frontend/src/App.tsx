@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { TestRunReportPage } from './TestRunReport.tsx'
-<<<<<<< HEAD
-import { type TestRun } from './k6Report.ts'
+import {
+  buildMetricRow,
+  parseK6Summary,
+  summarizeFailure,
+  type TestRun,
+} from './k6Report.ts'
 import { RunStatusView } from './runStatusView.tsx'
 import { useRunClock } from './useRunClock.ts'
 import { LoadProfileEditor } from './LoadProfileEditor.tsx'
@@ -14,16 +18,6 @@ import {
 } from './loadProfile.ts'
 // MAX_DURATION_SECONDS / MAX_VIRTUAL_USERS werden in App.tsx nicht mehr
 // direkt benötigt — die Limits leben jetzt im LoadProfileEditor.
-=======
-import {
-  buildMetricRow,
-  parseK6Summary,
-  progressHint,
-  summarizeFailure,
-  type TestRun,
-} from './k6Report.ts'
-import { MAX_DURATION_SECONDS, MAX_VIRTUAL_USERS, validateLoadProfile } from './loadProfile.ts'
->>>>>>> ffe00f7ec7e0eebe0a0fe17c903fbf09914889be
 import {
   buildOperationConfigurations,
   createOperationSettings,
@@ -359,14 +353,27 @@ function LoadTestApp() {
     </>}
 
     {run && <section className="card result">
-      <div className="step">4</div>
-      <h2>Testlauf</h2>
+      <header className="result-header">
+        <div className="step">4</div>
+        <h2>Testlauf</h2>
+        {/* Run-ID sitzt immer oben rechts in der Karte, sowohl während
+            k6 läuft als auch im Ergebnis. Der Report-Button erscheint
+            nur, wenn k6 fertig ist (siehe ResultFoot in runStatusView). */}
+        <span className="result-run-id">Run-ID: <code>{run.id}</code></span>
+      </header>
       <TestRunSummary run={run} />
-      <p>Run-ID: <code>{run.id}</code></p>
       <RunStatusView run={run} now={runNow} />
-      <a className="report-link" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">Ausführlichen k6-Testbericht in neuem Tab öffnen ↗</a>
-      {run.error && <details><summary>k6-Konsolenausgabe</summary><pre>{run.error}</pre></details>}
-      {run.summary && <details><summary>k6-JSON-Rohdaten</summary><pre>{run.summary.raw}</pre></details>}
+      {/* Untere Zeile: k6-Konsolenausgabe + k6-JSON-Rohdaten links,
+          Ausführlicher-Report-Button rechtsbündig daneben — beide auf
+          gleicher Höhe. Nur sichtbar, wenn k6 überhaupt Output oder
+          einen Summary geliefert hat. */}
+      {((run.consoleOutput ?? run.error) || run.summary) && <div className="result-extras">
+        <div className="result-extras-details">
+          {(run.consoleOutput ?? run.error) && <details><summary>k6-Konsolenausgabe</summary><pre>{run.consoleOutput ?? run.error}</pre></details>}
+          {run.summary && <details><summary>k6-JSON-Rohdaten</summary><pre>{run.summary.raw}</pre></details>}
+        </div>
+        <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">Ausführlicher K6-Testbericht</a>
+      </div>}
     </section>}
   </main>
 }
@@ -378,22 +385,33 @@ type TestRunSummaryProps = {
 function TestRunSummary({ run }: TestRunSummaryProps) {
   const summary = parseK6Summary(run)
   const failure = summarizeFailure(run)
-  const hint = progressHint(run)
   const metricItems = buildMetricRow(run, summary, failure)
+  // Sobald k6 fertig ist, übernimmt <RunStatusView> die komplette
+  // Ergebnisdarstellung (Badge + Threshold-Notice + Karten + Run-Foot).
+  // Wir blenden dann hier oben die Metrik-Zeile und die Fehlerursachen
+  // Sobald k6 fertig ist, übernimmt <RunStatusView> die komplette
+  // Ergebnisdarstellung (PASSED/FAILED-Pille + Exit-Code in der
+  // `ResultHeader`-Zeile, Threshold-Notice, Karten, Run-Foot). Hier
+  // oben blenden wir dann sowohl die Status-Pille als auch die
+  // Fehlerursachen aus, damit nichts doppelt erscheint. Für
+  // RUNNING/QUEUED bleibt die Status-Pille sichtbar; den Zeit-Hint
+  // (`läuft seit …`) blenden wir weiterhin aus, weil die drei Cells
+  // unten (LÄUFT SEIT / NOCH / GESTARTET) dieselbe Information
+  // übersichtlicher zeigen.
+  const isFinished = run.status === 'COMPLETED' || run.status === 'FAILED'
 
   return (
     <>
-      <div className="status-row">
+      {!isFinished && <div className="status-row">
         <div className={`status ${run.status.toLowerCase()}`}>{run.status}</div>
-        {hint && <span className="status-hint">{hint}</span>}
         {run.status === 'FAILED' && (
           <>
             <span className="status-diagnosis">{failure.diagnosis}</span>
             <span className="status-detail">{failure.detail}</span>
           </>
         )}
-      </div>
-      {metricItems.length > 0 && (
+      </div>}
+      {!isFinished && metricItems.length > 0 && (
         <ul className="metric-row">
           {metricItems.map(item => (
             <li key={item.label} className={`metric-item metric-${item.severity}`}>
@@ -403,7 +421,7 @@ function TestRunSummary({ run }: TestRunSummaryProps) {
           ))}
         </ul>
       )}
-      {run.status === 'FAILED' && failure.reasons.length > 0 && (
+      {!isFinished && run.status === 'FAILED' && failure.reasons.length > 0 && (
         <ul className="failure-reasons">
           {failure.reasons.map(reason => <li key={reason}>{reason}</li>)}
         </ul>

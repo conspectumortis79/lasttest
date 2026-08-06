@@ -57,6 +57,14 @@ export type TestRun = {
   exitCode?: number
   configuration?: TestRunConfiguration
   summary?: { raw: string }
+  /**
+   * Roher (gekürzter) k6-Output. Wird vom Backend sowohl im
+   * Erfolgsfall als auch im Fehlerfall befüllt, damit die UI den
+   * "k6-Konsolenausgabe"-Block immer anzeigen kann. `null`, wenn k6
+   * gar nicht gestartet werden konnte (dann steht die Diagnose in
+   * `error`).
+   */
+  consoleOutput?: string
   error?: string
 }
 
@@ -681,7 +689,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // Failure-rate threshold above which a run is reported as failed.
 const FAILURE_RATE_THRESHOLD = 0.05
 // Latency threshold (in ms) above which a run is reported as failed.
-const LATENCY_THRESHOLD_MS = 1000
+export const LATENCY_THRESHOLD_MS = 1000
 // Share of 5xx responses above which the failure is classified as a
 // server-error run rather than a generic threshold failure.
 const SERVER_ERROR_SHARE = 0.05
@@ -1056,7 +1064,7 @@ export function buildMetricRow(
 export function progressHint(run: TestRun): string | undefined {
   if (run.status === 'RUNNING') {
     const started = run.startedAt ? new Date(run.startedAt).getTime() : undefined
-    const duration = run.configuration?.durationSeconds
+    const duration = run.configuration?.loadProfile?.durationSeconds
     if (started != null && Number.isFinite(started) && duration != null) {
       const elapsed = Math.max(0, Math.floor((Date.now() - started) / 1000))
       const remaining = Math.max(0, duration - elapsed)
@@ -1068,4 +1076,52 @@ export function progressHint(run: TestRun): string | undefined {
     return 'wartet auf Executor (Pool-Größe: 2)'
   }
   return undefined
+}
+
+// ---- Threshold summary for the result banner --------------------------------
+//
+// Decides whether the just-finished run is a pass or a fail, and which
+// metrics crossed the configured thresholds. The UI uses this to render
+// the "Alle N Thresholds eingehalten / N Thresholds verletzt" banner
+// above the summary cards. The list of failed metrics uses the same
+// k6 metric names the user wrote in their load profile, so the banner
+// ties back to the test definition instead of inventing new labels.
+export type ThresholdSummary = {
+  /** True when the run completed and no configured threshold was crossed. */
+  passed: boolean
+  /**
+   * Names of every k6 metric whose threshold was crossed. Empty when
+   * `passed` is true. Returned in the same order the metrics appear
+   * in the k6 summary so the banner is deterministic across renders.
+   */
+  failedMetrics: string[]
+}
+
+export function summariseThresholds(run: TestRun): ThresholdSummary {
+  // A run that is still queued, running, or that did not produce a
+  // k6 summary has no settled thresholds to evaluate yet. We return
+  // `passed: false` so the UI does not accidentally flash a green
+  // banner before the data is in.
+  if (run.status !== 'COMPLETED' && run.status !== 'FAILED') {
+    return { passed: false, failedMetrics: [] }
+  }
+  const summary = parseK6Summary(run)
+  if (!summary) {
+    return { passed: false, failedMetrics: [] }
+  }
+  const failed: string[] = []
+  // Only inspect the two metrics the project actually configures as
+  // thresholds (see TestRunReport.tsx :: <Threshold name="…">). Any
+  // other metric crossing a threshold configured by the user in the
+  // load profile is intentionally ignored here — those surface via
+  // the k6 report link, not the result banner.
+  const failureRate = metric(summary, 'http_req_failed').value
+  if (failureRate != null && Number.isFinite(failureRate) && failureRate > FAILURE_RATE_THRESHOLD) {
+    failed.push('http_req_failed')
+  }
+  const p95 = metric(summary, 'http_req_duration')['p(95)']
+  if (p95 != null && Number.isFinite(p95) && p95 > LATENCY_THRESHOLD_MS) {
+    failed.push('http_req_duration')
+  }
+  return { passed: failed.length === 0, failedMetrics: failed }
 }

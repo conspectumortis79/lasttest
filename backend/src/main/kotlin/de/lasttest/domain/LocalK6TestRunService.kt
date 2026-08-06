@@ -174,6 +174,7 @@ class LocalK6TestRunService(
             val exitCode = process.waitFor()
             val summary = if (Files.exists(summaryFile)) mapOf("raw" to Files.readString(summaryFile)) else null
             val succeeded = exitCode == 0
+            val console = truncateForError(output)
             runs[run.id] =
                 run.copy(
                     status = if (succeeded) TestRunStatus.COMPLETED else TestRunStatus.FAILED,
@@ -181,7 +182,12 @@ class LocalK6TestRunService(
                     finishedAt = Instant.now().toString(),
                     exitCode = exitCode,
                     summary = summary,
-                    error = if (succeeded) null else truncateForError(output),
+                    // k6-Konsolenausgabe wird unabhängig vom Status
+                    // gespeichert, damit die UI sie auch im Erfolgsfall
+                    // anzeigen kann. `error` bleibt die Fehlermeldung
+                    // für strukturierte Analysen (siehe RunFailure).
+                    consoleOutput = console,
+                    error = if (succeeded) null else console,
                 )
         } catch (exception: java.io.IOException) {
             runs[run.id] = run.copy(status = TestRunStatus.FAILED, startedAt = started, finishedAt = Instant.now().toString(), error = exception.message)

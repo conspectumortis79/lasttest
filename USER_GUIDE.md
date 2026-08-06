@@ -53,9 +53,8 @@
     - 11.2 [Downloading the script](#112-downloading-the-script)
     - 11.3 [Running the script outside lasttest](#113-running-the-script-outside-lasttest)
 12. [CLI helper scripts](#12-cli-helper-scripts)
-    - 12.1 [`start-linux.sh`](#121-start-linuxsh)
-    - 12.2 [`docker-start.sh`](#122-docker-startsh)
-    - 12.3 [InfluxDB-UI and Grafana](#123-influxdb-ui-and-grafana)
+    - 12.1 [`docker-start.sh`](#121-docker-startsh)
+    - 12.2 [InfluxDB-UI and Grafana](#122-influxdb-ui-and-grafana)
 13. [Troubleshooting](#13-troubleshooting)
     - 13.1 [Trusting custom TLS certificates](#131-trusting-custom-tls-certificates)
     - 13.2 [InfluxDB is not reachable](#132-influxdb-is-not-reachable)
@@ -229,24 +228,16 @@ npm install
 npm run dev
 ```
 
-Or use the one-shot helper that stops any previous instance and launches
-both:
+In dev mode two URLs are exposed; they are **not** interchangeable:
 
-```bash
-./start-linux.sh
-```
+| URL | What it serves |
+| --- | --- |
+| <http://localhost:5173> | **Web-UI** (Vite dev-server with hot-reload) — open this in your browser |
+| <http://localhost:8286> | **API only** (Spring Boot, JSON) — returns Whitelabel 404 on `/` because the frontend bundle is not built in dev mode |
 
-> ⚠️  **`start-linux.sh` starts the project in dev mode.**
-> Two URLs are exposed; they are **not** interchangeable:
->
-> | URL | What it serves |
-> | --- | --- |
-> | <http://localhost:5173> | **Web-UI** (Vite dev-server with hot-reload) — open this in your browser |
-> | <http://localhost:8286> | **API only** (Spring Boot, JSON) — returns Whitelabel 404 on `/` because the frontend bundle is not built in dev mode |
->
-> For a single-URL deployment where the backend serves both the API and
-> the UI on port 8286, use `./docker-start.sh` (or `docker compose up --build`)
-> instead.
+For a single-URL deployment where the backend serves both the API and
+the UI on port 8286, use `./docker-start.sh` (or `docker compose up --build`)
+instead.
 
 ---
 
@@ -614,7 +605,7 @@ fine-tune. The presets are designed for common load-testing scenarios:
 | **Stress** | ramping-vus | stepwise 0 → 50 → 100 → 200 → 400 VUs | ~5 min | find the breaking point |
 | **Spike** | ramping-vus | 0 → 800 VUs in 10 s, hold 30 s, ramp down | 80 s | Black-Friday scenario |
 | **Soak** | ramping-vus | 50 VUs for 1 hour after a 5 min warm-up | ~66 min | leaks, slow degradation |
-| **Anfragen** | shared-iterations | 10 VUs, 1 000 iterations | ends when done | reproduce request count across releases |
+| **Burst** | shared-iterations | 10 VUs, 1 000 iterations | ends when done | reproduce request count across releases |
 | **Arrival-Rate** | constant-arrival-rate | 50 req/s for 2 min | 2 min | decouple RPS from response time |
 
 Hover any preset button to read its one-line description in the help
@@ -628,7 +619,7 @@ can pick the right profile without reading the full executor docs:
 | **Stress** | Stufenweise bis 400 VUs, findet den Knick |
 | **Spike** | Plötzlicher Sprung auf 800 VUs, 30 s Plateau |
 | **Soak** | 50 VUs über eine Stunde, deckt Leaks auf |
-| **Anfragen** | 1 000 Anfragen so schnell wie möglich — vergleicht Releases mit fester Request-Anzahl |
+| **Burst** | 1 000 Anfragen so schnell wie möglich — vergleicht Releases mit fester Request-Anzahl |
 | **Arrival-Rate** | 50 Anfragen/s unabhängig von der Antwortzeit |
 
 ### 8.4 Editing ramping stages
@@ -872,30 +863,10 @@ started.
 
 ## 12. CLI helper scripts
 
-Two thin shell scripts are shipped in the repository root to make
-local iteration fast and safe.
+One thin shell script is shipped in the repository root to make the
+Docker start a one-liner with a clear success banner.
 
-### 12.1 `start-linux.sh`
-
-- Detects any previous lasttest instance:
-  - host processes (Java Spring Boot, Vite, npm `run dev`),
-  - Docker containers whose name or image contains `lasttest`,
-  - processes whose working directory or command line is inside the
-    repository.
-- Stops the previous instance (SIGTERM, then SIGKILL) before starting
-  the new one.
-- Launches the backend (`./gradlew bootRun`) and the frontend
-  (`npm install && npm run dev`) in the background.
-- Polls both URLs and prints a clear success banner.
-- Registers a cleanup trap so that `Ctrl/⌘ + C` stops both children
-  cleanly.
-
-```bash
-./start-linux.sh
-# open http://localhost:5173 in a browser
-```
-
-### 12.2 `docker-start.sh`
+### 12.1 `docker-start.sh`
 
 - Runs `docker compose up -d --build`.
 - Waits for the container’s healthcheck to report `healthy` (timeout
@@ -909,7 +880,7 @@ local iteration fast and safe.
 # open http://localhost:8286 in a browser
 ```
 
-### 12.3 InfluxDB-UI and Grafana
+### 12.2 InfluxDB-UI and Grafana
 
 When you started with `docker compose up` (rather than `docker run`),
 two additional containers are running:
@@ -937,7 +908,7 @@ and use a managed time-series database.
 | `Start` button is disabled | No endpoint is selected | Tick at least one checkbox |
 | `Start` rejects with “Pflichtparameter … darf nicht leer sein.” | A required parameter is empty in the UI | Fill the highlighted field |
 | `Start` rejects with “Request-Body … ist kein gültiges JSON.” | The JSON body editor contains a syntax error | Fix the JSON; the validator points at the line number |
-| `BindException: Address already in use` on the backend | Another process is listening on 8286 | `./start-linux.sh` will normally clean this up; otherwise, `sudo lsof -i :8286` and stop the offending process |
+| `BindException: Address already in use` on the backend | Another process is listening on 8286 | `docker compose down` (if the previous container is still running) or `sudo lsof -i :8286` and stop the offending process |
 | The status badge stays on `RUNNING` forever | k6 is blocked because the target is slow or unreachable | Cancel the run from the UI, or `docker compose logs lasttest` to see the k6 output |
 | Report opens but shows “unbekannte Report-ID” | The lasttest process was restarted since the run finished | Test runs are in-memory only; re-run the test to get a fresh report |
 | Bearer-authenticated requests come back as `401` | The placeholder misled you into including the `Bearer ` prefix | Strip the prefix; lasttest adds it for you |
