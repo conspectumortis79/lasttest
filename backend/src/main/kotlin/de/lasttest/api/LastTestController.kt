@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
@@ -100,6 +101,56 @@ class LastTestController(
                 requestsPerSecond = rps,
             ),
         )
+    }
+
+    /**
+     * Requests cancellation of an in-flight test run. Returns 200
+     * with the refreshed [TestRun] snapshot so the UI does not need
+     * an additional `/api/test-runs/{id}` round-trip. 404 when the
+     * id is unknown, 409 when the run is already in a terminal
+     * state (completed / failed / aborted / stopped).
+     *
+     * `?force=true` escalates immediately to SIGKILL (status
+     * ABORTED); `?force=false` (the default) sends SIGTERM and the
+     * service marks the run as STOPPING.
+     */
+    @PostMapping("/test-runs/{id}/cancel")
+    fun cancel(
+        @PathVariable id: String,
+        @RequestParam(name = "force", defaultValue = "false") force: Boolean,
+    ): ResponseEntity<TestRun> {
+        // Cheap existence check first so callers get a clean 404
+        // instead of a 409 for runs they have never heard of.
+        if (testRuns.find(id) == null) return ResponseEntity.notFound().build()
+        return if (testRuns.cancel(id, force)) {
+            ResponseEntity.ok(testRuns.find(id)!!)
+        } else {
+            ResponseEntity.status(HttpStatus.CONFLICT).build()
+        }
+    }
+
+    /**
+     * Re-runs an existing test from the [CreateTestRunRequest] that
+     * was preserved when the original run was started. The new run
+     * gets a fresh id and is queued like any other. Returns 404
+     * when the id is unknown, 409 when the run cannot be rerun
+     * (e.g. it was a synthetic run without a preserved request).
+     */
+    @PostMapping("/test-runs/{id}/rerun")
+    fun rerun(
+        @PathVariable id: String,
+    ): ResponseEntity<TestRun> {
+        // Existence check first — `rerun()` returns null both for
+        // unknown ids and for unknown-but-synthetic runs; without
+        // the upfront find() we could not distinguish the two and
+        // would always return 404.
+        if (testRuns.find(id) == null) return ResponseEntity.notFound().build()
+        val newRun =
+            testRuns.rerun(id)
+                ?: return ResponseEntity.status(HttpStatus.CONFLICT).build()
+        // 202 Accepted so the caller knows the k6 process has not
+        // finished spawning yet.
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(newRun)
     }
 
     @ExceptionHandler(InvalidSpecificationException::class, IllegalArgumentException::class)

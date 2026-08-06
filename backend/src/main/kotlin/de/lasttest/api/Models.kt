@@ -298,8 +298,46 @@ data class TestRunOperationConfiguration(
 enum class TestRunStatus {
     QUEUED,
     RUNNING,
+
+    /**
+     * The user requested a graceful stop (SIGINT/SIGTERM). k6 is
+     * still running and finishing the current iterations; the run is
+     * not yet in a terminal state. The frontend polls until the
+     * service promotes the run to [STOPPED] (or [ABORTED] if the
+     * graceful-stop grace period elapsed without exit).
+     */
+    STOPPING,
+
     COMPLETED,
     FAILED,
+
+    /**
+     * The user requested a force abort (SIGKILL). k6 has been killed
+     * without a chance to flush its summary. The run is in a
+     * terminal state; partial metrics may still be available.
+     */
+    ABORTED,
+
+    /**
+     * The user requested a graceful stop and k6 exited cleanly
+     * afterwards. Reached from [STOPPING] once the k6 process
+     * actually exits. Distinguished from [COMPLETED] because the
+     * run did not run for its full planned duration.
+     */
+    STOPPED,
+
+    ;
+
+    /**
+     * True once the run has settled in any terminal state — the
+     * polling on the frontend can stop, no more transitions are
+     * expected from the service. STOPPING is intentionally excluded
+     * because the service may still flip it to STOPPED or ABORTED
+     * on a forced-kill timeout.
+     */
+    fun isTerminal(): Boolean = this == COMPLETED || this == FAILED || this == ABORTED || this == STOPPED
+
+    fun isCancellable(): Boolean = this == QUEUED || this == RUNNING || this == STOPPING
 }
 
 data class TestRun(
@@ -319,4 +357,25 @@ data class TestRun(
      */
     val consoleOutput: String? = null,
     val error: String? = null,
+    /**
+     * Timestamp at which the user requested cancellation. `null`
+     * when the run never received a user-initiated stop. Combined
+     * with [cancelledByForce] it lets the UI distinguish between
+     * graceful stop, force abort and a normal exit.
+     */
+    val cancelledAt: String? = null,
+    /**
+     * `true` if cancellation was a force abort (SIGKILL), `false`
+     * for a graceful stop (SIGTERM, possibly escalated after the
+     * grace period). `null` if the run was never cancelled.
+     */
+    val cancelledByForce: Boolean? = null,
+    /**
+     * Snapshot of the [CreateTestRunRequest] that started this run.
+     * Preserved so the UI can call `POST /api/test-runs/{id}/rerun`
+     * without having to resend the full specification from the
+     * browser. `null` for legacy synthetic runs inserted directly
+     * into the in-memory map.
+     */
+    val originalRequest: CreateTestRunRequest? = null,
 )

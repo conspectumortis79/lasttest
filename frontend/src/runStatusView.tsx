@@ -62,10 +62,13 @@ export function RunProgress({ run, now }: RunProgressProps) {
 // therefore render the same core cards as the report, but more
 // compact and without the threshold box.
 //
-// As soon as k6 is done (COMPLETED or FAILED), the card gets a
-// pass/fail header on top and a run foot with run ID and report link
-// at the bottom. While k6 is still running (RUNNING/QUEUED),
-// `RunProgress` keeps being shown unchanged.
+// As soon as k6 is done (COMPLETED, FAILED, STOPPED or ABORTED),
+// the card gets a pass/fail/stopped/aborted header on top and a run
+// foot with run ID and report link at the bottom. While k6 is
+// still running (RUNNING/QUEUED), `RunProgress` keeps being shown
+// unchanged. STOPPING keeps showing the progress cells too because
+// the user explicitly asked for a stop and should see the status
+// play out, not a blank card.
 
 type RunSummaryProps = {
   run: TestRun
@@ -109,19 +112,31 @@ export function RunSummary({ run }: RunSummaryProps) {
 
 // ---- ResultHeader -----------------------------------------------------------
 //
-// Shows "PASSED" or "FAILED" as a pill. Only rendered when k6 has
-// finished the run — the in-progress view (RunProgress) is left
-// untouched.
+// Shows the terminal status as a pill. COMPLETED runs are PASSED
+// (threshold met) or FAILED (threshold violated). STOPPED and
+// ABORTED are user-initiated and have their own pills so the user
+// sees immediately that the run was cut short, not failed.
 
 type ResultHeaderProps = {
-  passed: boolean
+  passed: boolean | null
   run: TestRun
 }
 
 function ResultHeader({ passed, run }: ResultHeaderProps) {
+  const pill =
+    run.status === 'STOPPED'
+      ? { className: 'is-stopped', text: 'STOPPED' }
+      : run.status === 'ABORTED'
+        ? { className: 'is-aborted', text: 'ABORTED' }
+        : passed
+          ? { className: 'is-pass', text: 'PASSED' }
+          : { className: 'is-fail', text: 'FAILED' }
   return <div className="run-result-head">
-    <span className={`status-badge is-${passed ? 'pass' : 'fail'}`}>{passed ? 'PASSED' : 'FAILED'}</span>
+    <span className={`status-badge ${pill.className}`}>{pill.text}</span>
     <span className="run-result-exit">Exit-Code {run.exitCode ?? '–'}</span>
+    {run.cancelledAt && <span className="run-result-stop-reason">
+      {run.cancelledByForce ? 'Abgebrochen (SIGKILL)' : 'Gestoppt (SIGTERM)'} um {formatTimestamp(run.cancelledAt)}
+    </span>}
   </div>
 }
 
@@ -133,12 +148,34 @@ function ResultHeader({ passed, run }: ResultHeaderProps) {
 // thresholds are involved.
 
 type ThresholdNoticeProps = {
-  passed: boolean
+  passed: boolean | null
   failedMetrics: string[]
   run: TestRun
 }
 
 function ThresholdNotice({ passed, failedMetrics, run }: ThresholdNoticeProps) {
+  // User-stopped runs get their own headline so the user does not
+  // see "All 2 thresholds met" on a run that never reached the
+  // planned duration.
+  if (run.status === 'STOPPED') {
+    return <div className="run-notice is-stopped" role="status">
+      <span className="run-notice-check" aria-hidden="true">■</span>
+      <span>Vom Benutzer gestoppt — die geplante Laufzeit wurde nicht erreicht.</span>
+      <span className="run-notice-detail">
+        Bisherige Thresholds: {passed ? 'eingehalten' : failedMetrics.length === 0 ? 'unbekannt' : `${failedMetrics.length} verletzt`}
+      </span>
+    </div>
+  }
+  if (run.status === 'ABORTED') {
+    // ABORTED runs do not have a clean summary. Tell the user
+    // up-front that the numbers are partial so they do not
+    // mistake the cards below for a full result.
+    return <div className="run-notice is-aborted" role="alert">
+      <span className="run-notice-check" aria-hidden="true">⚠</span>
+      <span>Vom Benutzer abgebrochen — k6 wurde per SIGKILL beendet.</span>
+      <span className="run-notice-detail">Es liegen ggf. nur Teilkennzahlen vor; Threshold-Bewertung ist nicht aussagekräftig.</span>
+    </div>
+  }
   if (passed) {
     return <div className="run-notice is-pass" role="status">
       <span className="run-notice-check" aria-hidden="true">✓</span>
@@ -261,8 +298,41 @@ export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) 
   if (run.status === 'RUNNING' || run.status === 'QUEUED') {
     return <RunProgress run={run} now={now} />
   }
+  // STOPPING sits between RUNNING and a terminal state: the user
+  // asked for a graceful stop, k6 is finishing its current
+  // iterations, and the backend will flip the run to STOPPED
+  // (or ABORTED after the grace period) once the process exits.
+  // We keep showing the progress cells so the dashboard does not
+  // blank out exactly when the user is watching for the stop to
+  // land.
+  if (run.status === 'STOPPING') {
+    return <RunProgress run={run} now={now} />
+  }
   if (run.status === 'COMPLETED') {
     return <RunSummary run={run} />
+  }
+  if (run.status === 'STOPPED') {
+    // Graceful stop acknowledged by k6: same shape as COMPLETED
+    // but with a STOPPED pill so the user can tell that the run
+    // did not run for its planned duration.
+    return <RunSummary run={run} />
+  }
+  if (run.status === 'ABORTED') {
+    // SIGKILL by the user — there are partial metrics at best
+    // but no full threshold pass. Show the typed failure block
+    // if we can recognise one (usually `process` — k6 was
+    // killed), otherwise fall back to a hand-rolled placeholder
+    // so the call to RunFailure stays type-safe when no
+    // classification was possible (e.g. error text was empty).
+    const reason = reasonOverride ?? summariseFailure(run.error)
+    if (reason) return <RunFailure run={run} reason={reason} />
+    const placeholder = {
+      kind: 'process' as const,
+      summary: 'k6 abgebrochen',
+      detail: 'Der Prozess wurde per SIGKILL beendet, bevor eine Auswertung möglich war.',
+      hint: 'Wenn die k6-Ausgabe unvollständig erscheint, ist das erwartet — der Prozess wurde sofort beendet.',
+    }
+    return <RunFailure run={run} reason={placeholder} />
   }
   if (run.status === 'FAILED') {
     // A FAILED run can have two very different causes:

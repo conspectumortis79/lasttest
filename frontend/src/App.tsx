@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { pickActiveRunId } from './runDashboard.ts'
 import './App.css'
 import { TestRunReportPage } from './TestRunReport.tsx'
 import {
   buildMetricRow,
+  copyTextToClipboard,
   parseK6Summary,
   summarizeFailure,
   type TestRun,
 } from './k6Report.ts'
+import { buildRunMenuItems, type MenuItem } from './runMenuItems.ts'
+import { MenuItemIcon } from './runMenuIcons.tsx'
 import { RunStatusView } from './runStatusView.tsx'
 import { useRunClock } from './useRunClock.ts'
 import { LoadProfileEditor } from './LoadProfileEditor.tsx'
@@ -91,6 +94,15 @@ function LoadTestApp() {
   // run is QUEUED or RUNNING; the hook forwards the current `now`
   // to <RunStatusView>.
   const runNow = useRunClock(run)
+  // Right-click context menu on a run badge. `null` when no menu
+  // is open. `position` keeps the menu at the cursor location;
+  // `menuRef` lets us detect outside clicks.
+  const [runMenu, setRunMenu] = useState<{ runId: string, x: number, y: number } | null>(null)
+  const runMenuRef = useRef<HTMLDivElement | null>(null)
+  // Surfaces API failures from the cancel / force-cancel / rerun
+  // actions in the global error banner, since the menu itself has
+  // no place to render a message.
+  const [runActionError, setRunActionError] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -119,14 +131,42 @@ function LoadTestApp() {
   }, [])
 
   useEffect(() => {
-    // Multi-run polling: refresh every run that is still in a
-    // terminal state, so the dashboard reflects status changes
-    // (e.g. QUEUED → RUNNING → COMPLETED) for every run the user
-    // started. We key the effect on the list of run ids so the
-    // timer is restarted whenever a new run is added or a run
-    // reaches a terminal state.
+    if (!runMenu) return
+    function handlePointer(event: MouseEvent) {
+      // Close on any click outside the floating menu. The badge's
+      // own contextmenu is captured by onContextMenu above so it
+      // only fires when the menu is already closed.
+      if (runMenuRef.current && !runMenuRef.current.contains(event.target as Node)) {
+        setRunMenu(null)
+      }
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setRunMenu(null)
+    }
+    window.addEventListener('mousedown', handlePointer)
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('mousedown', handlePointer)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [runMenu])
+
+  useEffect(() => {
+    // Multi-run polling: keep refreshing every run that has not
+    // yet reached a terminal state, so the dashboard reflects
+    // status changes (QUEUED → RUNNING → STOPPING → STOPPED for
+    // a graceful stop, RUNNING → ABORTED for a force abort,
+    // RUNNING → COMPLETED/FAILED for a normal exit) for every
+    // run the user started. STOPPING *must* be in the set, or
+    // the user clicks "Stop", the badge freezes on STOPPING,
+    // and the STOPPING → STOPPED transition is never observed.
+    const terminalStatus = (status: string) =>
+      status === 'COMPLETED' ||
+      status === 'FAILED' ||
+      status === 'STOPPED' ||
+      status === 'ABORTED'
     const pendingIds = Object.entries(runs)
-      .filter(([, run]) => run.status === 'QUEUED' || run.status === 'RUNNING')
+      .filter(([, run]) => !terminalStatus(run.status))
       .map(([id]) => id)
     if (pendingIds.length === 0) return
     const timer = window.setTimeout(async () => {
@@ -332,6 +372,138 @@ function LoadTestApp() {
     })
   }
 
+  // ---- Right-click context menu actions ----------------------------
+  //
+  // The badge opens the menu via `onContextMenu`. Each menu item
+  // routes through these handlers so the menu stays purely
+  // declarative. The full set of possible items lives in
+  // `runMenuItems.ts`, keeping the look-up table unit-testable
+  // without rendering React.
+
+  /**
+   * Opens the run-badge context menu at the cursor position. The
+   * underlying button click is preserved (single-click to focus
+   // the run); `preventDefault` only suppresses the browser's
+   // own context menu.
+   */
+  function openRunMenu(event: React.MouseEvent, runId: string) {
+    event.preventDefault()
+    setRunActionError('')
+    setRunMenu({ runId, x: event.clientX, y: event.clientY })
+  }
+
+  /**
+   * Routes a menu item to the matching action. Most actions are
+   // local (clipboard, navigation, state update); cancel / rerun
+   // hit the backend through `fetch`. Errors are surfaced via
+   // `runActionError` so the user sees the failure in the same
+   // banner as the rest of the dashboard.
+   */
+  async function runMenuAction(run: TestRun, item: MenuItem) {
+    setRunMenu(null)
+    switch (item.action) {
+      case 'focus':
+        setActiveRunId(run.id)
+        return
+      case 'copy-run-id':
+        await safeClipboard(run.id)
+        return
+      case 'copy-report-link': {
+        const url = `${window.location.origin}/?report=${encodeURIComponent(run.id)}`
+        await safeClipboard(url)
+        return
+      }
+      case 'open-report':
+        window.open(`/?report=${encodeURIComponent(run.id)}`, '_blank', 'noopener,noreferrer')
+        return
+      case 'export-metrics':
+        await downloadSummary(run)
+        return
+      case 'stop':
+        await cancelRun(run.id, false)
+        return
+      case 'force-abort':
+        await cancelRun(run.id, true)
+        return
+      case 'rerun':
+        await rerunRun(run.id)
+        return
+    }
+  }
+
+  async function safeClipboard(text: string) {
+    try {
+      await copyTextToClipboard(text)
+    } catch (cause) {
+      setRunActionError(cause instanceof Error ? cause.message : 'Kopieren in die Zwischenablage fehlgeschlagen.')
+    }
+  }
+
+  /**
+   * Downloads the k6 summary JSON for a finished/aborted run via
+   * the existing /api/test-runs/{id}/script endpoint is not a
+   * summary — we re-use the run list since the controller does
+   * not yet expose a dedicated summary endpoint. The download
+   // is offered only when a summary is actually present so the
+   // server is not pinged for nothing.
+   */
+  async function downloadSummary(run: TestRun) {
+    // The menu only enables the export item when a summary is
+    // present (see runMenuItems.ts), so we never reach this path
+    // without data. Downloading the summary as a file is more
+    // useful than opening it in a new tab — the user can drop
+    // it into a k6 report or compare runs offline.
+    if (!run.summary?.raw) return
+    const blob = new Blob([run.summary.raw], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `lasttest-${run.id}-summary.json`
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+  }
+
+  async function cancelRun(runId: string, force: boolean) {
+    try {
+      const response = await fetch(`/api/test-runs/${encodeURIComponent(runId)}/cancel?force=${force}`, { method: 'POST' })
+      if (!response.ok && response.status !== 409) {
+        throw new Error(`Cancel fehlgeschlagen (HTTP ${response.status})`)
+      }
+      // The controller returns the updated run on success so we
+      // can update the local map immediately instead of waiting
+      // for the next poll tick (which can be up to 1 s later).
+      if (response.ok) {
+        const updated = (await response.json()) as TestRun
+        setRuns(current => ({ ...current, [updated.id]: updated }))
+      }
+    } catch (cause) {
+      setRunActionError(cause instanceof Error ? cause.message : 'Cancel fehlgeschlagen.')
+    }
+  }
+
+  async function rerunRun(runId: string) {
+    try {
+      const response = await fetch(`/api/test-runs/${encodeURIComponent(runId)}/rerun`, { method: 'POST' })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        throw new Error(body.message ?? `Rerun fehlgeschlagen (HTTP ${response.status})`)
+      }
+      const fresh = (await response.json()) as TestRun
+      // Add the new run to the dashboard and surface it as the
+      // active one — same shape as `startTest()` so the user
+      // sees a consistent focus transfer.
+      setRuns(current => {
+        const next = { ...current, [fresh.id]: fresh }
+        setActiveRunId(pickActiveRunId(next, activeRunId))
+        return next
+      })
+    } catch (cause) {
+      setRunActionError(cause instanceof Error ? cause.message : 'Rerun fehlgeschlagen.')
+    }
+  }
+
   return <main>
     <header>
       <div className="mark">k6</div>
@@ -373,6 +545,7 @@ function LoadTestApp() {
     </section>
 
     {error && <div className="error" role="alert">{error}</div>}
+    {runActionError && <div className="error" role="alert">{runActionError}</div>}
 
     {imported && <>
       <section className="card">
@@ -528,7 +701,8 @@ function LoadTestApp() {
                 aria-selected={candidate.id === activeRunId}
                 className={`run-badge ${candidate.id === activeRunId ? 'active' : ''} run-badge-${candidate.status.toLowerCase()}`}
                 onClick={() => setActiveRunId(candidate.id)}
-                title={`${candidate.id} · ${method} ${path}`}
+                onContextMenu={event => openRunMenu(event, candidate.id)}
+                title={`${candidate.id} · ${method} ${path} — Rechtsklick für Aktionen`}
               >
                 <span className={`run-badge-method method-${method.toLowerCase()}`}>{method}</span>
                 <div className="run-badge-info">
@@ -542,6 +716,14 @@ function LoadTestApp() {
 
       {run && <RunDetail run={run} runNow={runNow} />}
     </section>}
+
+    {runMenu && <RunContextMenu
+      menu={runMenu}
+      run={runs[runMenu.runId]}
+      onAction={item => runMenuAction(runs[runMenu.runId]!, item)}
+      onClose={() => setRunMenu(null)}
+      menuRef={runMenuRef}
+    />}
   </main>
 }
 
@@ -674,8 +856,6 @@ function OperationEditor({
   const hasPoolError = firstProblem !== undefined
 
   return <article className={`operation-card ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''}`}>
-    {operation.destructive && <span className="destructive-badge" title="Schreibender Endpunkt">schreibend</span>}
-
     <label className="operation-heading">
       <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Endpunkt ${operation.method} ${operation.path} auswählen`} />
       <span className={`method ${operation.method.toLowerCase()}`}>{operation.method}</span>
@@ -822,6 +1002,68 @@ function formatParameterType(schema: unknown): string | undefined {
     return candidate.type
   }
   return undefined
+}
+
+/**
+ * Floating menu that opens on right-click on a run badge. The
+ * visible items come from `buildRunMenuItems(run)` and adapt to the
+ * run's current status. The component is intentionally dumb: it
+ * does not know what each action does — it just emits the
+ * `MenuItem` and lets the parent route to the right handler.
+ */
+function RunContextMenu({
+  menu,
+  run,
+  onAction,
+  onClose,
+  menuRef,
+}: {
+  menu: { runId: string, x: number, y: number }
+  run: TestRun | undefined
+  onAction: (item: MenuItem) => void
+  onClose: () => void
+  menuRef: React.RefObject<HTMLDivElement | null>
+}) {
+  // Defensive: the menu should be closed by the parent when run
+  // disappears from the map, but render nothing if it slipped
+  // through.
+  if (!run) { onClose(); return null }
+  const groups = buildRunMenuItems(run)
+  // Clamp the position so the menu stays inside the viewport.
+  // We use 8px padding from the viewport edge so the rounded
+  // corners and the focus ring do not get clipped.
+  const menuWidth = 240
+  const menuHeightEstimate = 48 * groups.flat().length + 24
+  const x = Math.max(8, Math.min(menu.x, window.innerWidth - menuWidth - 8))
+  const y = Math.max(8, Math.min(menu.y, window.innerHeight - menuHeightEstimate - 8))
+  return <div
+    ref={menuRef}
+    className="run-context-menu"
+    role="menu"
+    aria-label="Aktionen für diesen Testlauf"
+    style={{ left: x, top: y }}
+    onContextMenu={event => event.preventDefault()}
+  >
+    {groups.map((group, groupIndex) => <div key={groupIndex} className="run-context-menu-group">
+      {group.map(item => {
+        const disabled = Boolean(item.disabledReason)
+        return <button
+          key={item.id}
+          type="button"
+          role="menuitem"
+          className={`run-context-menu-item ${item.danger ? 'is-danger' : ''} ${disabled ? 'is-disabled' : ''}`}
+          disabled={disabled}
+          title={item.disabledReason ?? item.label}
+          onClick={() => { if (!disabled) onAction(item) }}
+        >
+          <MenuItemIcon action={item.action} />
+          <span>{item.label}</span>
+          {item.shortcut && <kbd className="kbd">{item.shortcut}</kbd>}
+        </button>
+      })}
+      {groupIndex < groups.length - 1 && <div className="run-context-menu-separator" />}
+    </div>)}
+  </div>
 }
 
 export default App

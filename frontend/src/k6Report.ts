@@ -154,6 +154,16 @@ export type TestRunConfiguration = {
 
 export type TestRun = {
   id: string
+  /**
+   * Lifecycle state. The known values are exported from the
+   * backend (`TestRunStatus` in Kotlin):
+   *   QUEUED, RUNNING, STOPPING          (in-flight)
+   *   COMPLETED, FAILED, STOPPED, ABORTED (terminal)
+   * The status is intentionally typed as `string` here because
+   * older clients may receive runs whose status was added after
+   * they were last deployed; the dashboard routes on `===` checks
+   * against the documented literals below.
+   */
   status: string
   createdAt: string
   startedAt?: string
@@ -169,6 +179,27 @@ export type TestRun = {
    */
   consoleOutput?: string
   error?: string
+  /**
+   * Wall-clock instant at which the user asked for cancellation.
+   * Set together with [cancelledByForce] when the run was stopped
+   * or aborted by the operator (rather than having run its full
+   * course). `undefined` for runs that were never cancelled.
+   */
+  cancelledAt?: string
+  /**
+   * `true` if the user forced the run to abort (SIGKILL), `false`
+   * for a graceful stop (SIGTERM that was honoured by k6). Only
+   * meaningful in combination with [cancelledAt].
+   */
+  cancelledByForce?: boolean
+  /**
+   * Echoed snapshot of the request that started this run. The
+   * frontend does not read it — the rerun endpoint takes care of
+   * that server-side — but the field is included so debugging
+   * tools and future features can inspect what produced the run
+   * without having to call a second endpoint.
+   */
+  originalRequest?: unknown
 }
 
 // Failure categories surfaced by summarizeFailure. The ordering is

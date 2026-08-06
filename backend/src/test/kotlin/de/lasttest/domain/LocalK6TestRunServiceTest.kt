@@ -18,6 +18,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class LocalK6TestRunServiceTest {
@@ -483,5 +484,199 @@ class LocalK6TestRunServiceTest {
         val map = runsField.get(service) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
         map[run.id] = run
         return run
+    }
+
+    // ---- cancel() / rerun() --------------------------------------------
+    //
+    // The existing tests use a noop executor so execute() never runs
+    // on its own — to exercise cancel() we therefore register a
+    // real OS Process under the `processes` map manually. The tests
+    // always clean up the process in `finally` even if the
+    // assertion path fails.
+
+    @Test
+    fun `cancel returns false when no process is registered for the run id`() {
+        // Run exists in the map but execute() did not register a
+        // process (the noop executor never ran). From cancel()'s
+        // point of view, no live process means "nothing to cancel".
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+
+        assertFalse(service.cancel(run.id, force = false))
+        // No cancellation metadata was set on the run either.
+        assertEquals(TestRunStatus.QUEUED, service.find(run.id)?.status)
+    }
+
+    @Test
+    fun `cancel returns false for an unknown run id`() {
+        assertFalse(service.cancel("does-not-exist", force = false))
+        assertFalse(service.cancel("does-not-exist", force = true))
+    }
+
+    @Test
+    fun `cancel returns false when the run is already in a terminal state`() {
+        // A COMPLETED run cannot be cancelled. We register a
+        // process so the early `processes[id]` guard passes, then
+        // rely on the isTerminal() guard to refuse.
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        // Force the run into a terminal state via reflection — the
+        // production path uses cancel() itself for this.
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(service) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+        runsMap[run.id] = run.copy(status = TestRunStatus.COMPLETED)
+        service.processes[run.id] = ProcessBuilder("sleep", "1").start()
+
+        assertFalse(service.cancel(run.id, force = false))
+
+        // Clean up the stub process — cancel() refused so it must
+        // still be alive (well, by the time we check it has
+        // exited on its own; this assertion is best-effort).
+        val stub = service.processes.remove(run.id)!!
+        if (stub.isAlive) stub.destroyForcibly()
+    }
+
+    @Test
+    fun `graceful cancel marks the run as STOPPING and destroys the process`() {
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        // Promote the run to RUNNING so cancel() has to walk the
+        // STOPPING/STOPPED path. Register a long-running stub
+        // process so we can verify destroy() actually kills it.
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(service) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+        runsMap[run.id] = run.copy(status = TestRunStatus.RUNNING, startedAt = "2026-01-01T00:00:01Z")
+        val stub = ProcessBuilder("sleep", "10").start()
+        service.processes[run.id] = stub
+        try {
+            val cancelled = service.cancel(run.id, force = false)
+
+            assertTrue(cancelled)
+            val updated = service.find(run.id)!!
+            assertEquals(TestRunStatus.STOPPING, updated.status)
+            assertNotNull(updated.cancelledAt)
+            assertEquals(false, updated.cancelledByForce)
+            // The stub process was destroyed synchronously by
+            // cancel(). Polling isAlive() with a short timeout
+            // avoids a race in case the JVM has not yet reaped it.
+            val deadline = System.currentTimeMillis() + 1_000
+            while (stub.isAlive && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20)
+            }
+            assertFalse(stub.isAlive, "stub process should be killed by graceful cancel")
+        } finally {
+            if (stub.isAlive) stub.destroyForcibly()
+            service.processes.remove(run.id)
+        }
+    }
+
+    @Test
+    fun `force cancel marks the run as ABORTED and force-destroys the process`() {
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(service) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+        runsMap[run.id] = run.copy(status = TestRunStatus.RUNNING, startedAt = "2026-01-01T00:00:01Z")
+        val stub = ProcessBuilder("sleep", "10").start()
+        service.processes[run.id] = stub
+        try {
+            val cancelled = service.cancel(run.id, force = true)
+
+            assertTrue(cancelled)
+            val updated = service.find(run.id)!!
+            assertEquals(TestRunStatus.ABORTED, updated.status)
+            assertNotNull(updated.cancelledAt)
+            assertEquals(true, updated.cancelledByForce)
+            // destroyForcibly() is asynchronous on some platforms
+            // (POSIX: kill -9 is sent and we wait for the kernel to
+            // reap). Give it up to 2 s before declaring failure so
+            // the test is not flaky on slower CI runners.
+            val exited = stub.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+            assertTrue(exited, "stub process should be killed by force cancel")
+        } finally {
+            if (stub.isAlive) stub.destroyForcibly()
+            service.processes.remove(run.id)
+        }
+    }
+
+    @Test
+    fun `rerun produces a fresh queued run from the preserved request`() {
+        val original =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    operationConfigurations =
+                        listOf(
+                            OperationConfiguration(
+                                operationId = "getPet",
+                                parameterValues = listOf(ParameterValue("id", "path", "42")),
+                                bearerToken = "secret",
+                            ),
+                        ),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 7, durationSeconds = 30),
+                ),
+            )
+
+        val rerun = assertNotNull(service.rerun(original.id))
+
+        // Different id, fresh status, identical request payload.
+        assertTrue(rerun.id != original.id)
+        assertEquals(TestRunStatus.QUEUED, rerun.status)
+        assertNotNull(rerun.originalRequest)
+        assertEquals(original.originalRequest, rerun.originalRequest)
+        val rerunRequest = assertNotNull(rerun.originalRequest)
+        assertEquals(7, rerunRequest.loadProfile?.virtualUsers)
+        assertEquals(30, rerunRequest.loadProfile?.durationSeconds)
+    }
+
+    @Test
+    fun `rerun returns null when the id is unknown`() {
+        assertNull(service.rerun("does-not-exist"))
+    }
+
+    @Test
+    fun `rerun returns null when the run has no preserved originalRequest`() {
+        // Synthetic runs that bypassed create() (e.g. tests that
+        // poked runs[id] directly) have no preserved request and
+        // therefore cannot be rerun.
+        val synthetic = createDirectRun("2026-01-01T00:00:00Z")
+
+        assertNull(service.rerun(synthetic.id))
     }
 }
