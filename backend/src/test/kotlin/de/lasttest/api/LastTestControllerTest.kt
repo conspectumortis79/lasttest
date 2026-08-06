@@ -84,6 +84,32 @@ class LastTestControllerTest {
     }
 
     @Test
+    fun `lists every test run the service knows about`() {
+        // The frontend uses this endpoint to render the multi-run
+        // dashboard; the response must include every run so the
+        // user can switch between parallel runs without losing one.
+        val runA = TestRun(id = "run-a", status = TestRunStatus.COMPLETED, createdAt = "2026-01-02T00:00:00Z")
+        val runB = TestRun(id = "run-b", status = TestRunStatus.RUNNING, createdAt = "2026-01-01T00:00:00Z")
+        val listController =
+            LastTestController(
+                importer =
+                    object : SpecificationImporter {
+                        override fun import(content: String): ImportedSpecification = imported
+                    },
+                testRuns = RecordingTestRunService(runA, additionalRuns = mapOf("run-b" to runB)),
+                demoSpecificationProvider = demoSpecificationProvider,
+                remoteFetcher = remoteFetcher,
+                timeSeriesReader = timeSeriesReader,
+            )
+
+        val response = listController.list()
+
+        assertEquals(2, response.body?.size)
+        assertEquals("run-a", response.body?.get(0)?.id)
+        assertEquals("run-b", response.body?.get(1)?.id)
+    }
+
+    @Test
     fun `creates an accepted test run`() {
         val request = CreateTestRunRequest("openapi document", "https://example.test")
 
@@ -172,6 +198,14 @@ class LastTestControllerTest {
         }
 
         override fun find(id: String): TestRun? = run.takeIf { id == it.id } ?: additionalRuns[id]
+
+        override fun list(): List<TestRun> {
+            // Mirror the production order: primary run first, then any
+            // additional runs in insertion order. Tests that need a
+            // specific order build the additional map explicitly.
+            val primary = if (run.id.isNotEmpty()) listOf(run) else emptyList()
+            return primary + additionalRuns.values
+        }
 
         override fun script(id: String): String? = "export default function () {}".takeIf { id == run.id }
     }

@@ -411,6 +411,121 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   gap: .55rem;
   margin-bottom: 1.1rem;
 }
+
+/* Multi-run dashboard. The badge grid is the only selector — no
+   separate tab strip — so each run is one clickable card laid out
+   in an even-width grid. `auto-fit` + `minmax(220px, 1fr)` means
+   the columns share width and wrap in a new row only when there
+   really is no room left, never causing horizontal scroll. */
+.run-grid-heading {
+  margin: 0 0 .55rem;
+  color: #93a2b8;
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .06rem;
+  text-transform: uppercase;
+}
+.run-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: .55rem;
+  margin-bottom: 1.25rem;
+}
+.run-grid:empty::before {
+  content: 'Noch keine Testläufe gestartet.';
+  color: #667085;
+  font-style: italic;
+  font-size: .85rem;
+  grid-column: 1 / -1;
+}
+
+.run-badge {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .6rem .75rem;
+  border: 1px solid #293950;
+  border-left: 4px solid #7d63ff;
+  border-radius: 8px;
+  background: #111b29;
+  color: #dbe5f3;
+  font-size: .82rem;
+  min-width: 0;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background .12s ease, border-color .12s ease, transform .08s ease, box-shadow .12s ease;
+}
+.run-badge:hover { background: #1a2638; border-color: #3a4d6b; transform: translateY(-1px); }
+.run-badge:focus-visible { outline: 2px solid #7d63ff; outline-offset: 2px; }
+.run-badge.active {
+  background: #1a1d3a;
+  border-color: #7d63ff;
+  box-shadow: 0 0 0 1px #7d63ff, 0 6px 18px -6px #7d63ff66;
+}
+.run-badge.running,
+.run-badge.queued    { border-left-color: #d4a72c; }
+.run-badge.completed { border-left-color: #2d6a4f; }
+.run-badge.failed    { border-left-color: #793b4b; }
+
+.run-badge-method {
+  flex-shrink: 0;
+  padding: .2rem .4rem;
+  border-radius: 4px;
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .04rem;
+  min-width: 3.6rem;
+  text-align: center;
+}
+.run-badge-method.method-get    { background: #266a59; }
+.run-badge-method.method-post   { background: #765924; }
+.run-badge-method.method-put,
+.run-badge-method.method-patch  { background: #315a83; }
+.run-badge-method.method-delete { background: #793b4b; }
+
+.run-badge-info {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.run-badge-status {
+  font-size: .62rem;
+  font-weight: 800;
+  letter-spacing: .06rem;
+  text-transform: uppercase;
+  color: #79e6c8;
+}
+.run-badge.running .run-badge-status,
+.run-badge.queued  .run-badge-status  { color: #d4a72c; }
+.run-badge.completed .run-badge-status { color: #8fe8c1; }
+.run-badge.failed    .run-badge-status { color: #ffb5c3; }
+.run-badge-path {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .8rem;
+  color: #dbe5f3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Per-run detail header. The „Ausführlicher k6 Testbericht"-Button
+   sits ganz rechts über den verkürzten Ergebnissen (TestRunSummary
+   darunter). flex-end schiebt das einzige Kind-Element nach rechts
+   — bei mehreren Kindern würde space-between sie gleichmäßig
+   verteilen, was hier unerwünscht wäre. */
+.result-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .65rem;
+  flex-wrap: wrap;
+  margin-bottom: .85rem;
+}
 .result-header-top {
   /* Take the full card width so the step badge sits on the far left
      and the run ID sits on the far right (margin-left: auto) —

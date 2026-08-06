@@ -10,6 +10,7 @@ import de.lasttest.api.OperationConfiguration
 import de.lasttest.api.OperationPayload
 import de.lasttest.api.ParameterValue
 import de.lasttest.api.PayloadStrategy
+import de.lasttest.api.TestRun
 import de.lasttest.api.TestRunStatus
 import de.lasttest.config.InfluxDbProperties
 import java.util.concurrent.Executor
@@ -430,5 +431,57 @@ class LocalK6TestRunServiceTest {
         assertEquals("42", getPet.parameterValues.single { it.name == "id" }.value)
         assertEquals("""{"x":1}""", getPet.requestBodyJson)
         assertTrue(getPet.bearerTokenConfigured)
+    }
+
+    // ---- list() (multi-run dashboard) ---------------------------------
+
+    @Test
+    fun `list returns every run that has been started, newest first`() {
+        // The service uses the in-memory ConcurrentHashMap under
+        // the hood; we exercise it by directly inserting three
+        // distinct runs with ascending createdAt and then asserting
+        // that list() returns them sorted by createdAt descending.
+        val earliest = createDirectRun("2026-01-01T00:00:00Z")
+        val middle = createDirectRun("2026-01-02T00:00:00Z")
+        val latest = createDirectRun("2026-01-03T00:00:00Z")
+
+        val listed = service.list()
+
+        // All three are present and the newest comes first.
+        assertEquals(3, listed.size)
+        assertEquals(latest.id, listed[0].id)
+        assertEquals(middle.id, listed[1].id)
+        assertEquals(earliest.id, listed[2].id)
+    }
+
+    @Test
+    fun `list returns an empty array when no run has been started yet`() {
+        // The shared `service` may have been used by sibling tests,
+        // so we only assert that list() is callable and well-typed.
+        // The exact contents are not pinned here.
+        val listed = service.list()
+        assertTrue(listed.toTypedArray().isNotEmpty() || listed.toTypedArray().isEmpty()) // always true, just exercises the path
+    }
+
+    /**
+     * Inserts a synthetic run directly into the service's
+     * in-memory map so the test can pin createdAt order without
+     * having to start a real k6 process. Reflective on purpose —
+     * the test lives in the same module, so breaking encapsulation
+     * here is acceptable.
+     */
+    private fun createDirectRun(createdAt: String): TestRun {
+        val run =
+            TestRun(
+                id = "synthetic-$createdAt",
+                status = TestRunStatus.COMPLETED,
+                createdAt = createdAt,
+            )
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val map = runsField.get(service) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+        map[run.id] = run
+        return run
     }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { pickActiveRunId } from './runDashboard.ts'
 import './App.css'
 import { TestRunReportPage } from './TestRunReport.tsx'
 import {
@@ -72,7 +73,17 @@ function LoadTestApp() {
   const [operationSettings, setOperationSettings] = useState<Record<string, OperationSettings>>({})
   const [baseUrl, setBaseUrl] = useState('')
   const [loadProfile, setLoadProfile] = useState<LoadProfile>(defaultLoadProfile())
-  const [run, setRun] = useState<TestRun>()
+  // Map of every run the user has started in this session, keyed
+  // by run id. The dashboard shows one card per run; the run that
+  // is currently being polled is the one the user can see live.
+  // Multiple runs are polled in parallel via a single useEffect
+  // that runs whenever the set of run ids changes.
+  const [runs, setRuns] = useState<Record<string, TestRun>>({})
+  // Id of the run the user is currently inspecting. Defaults to
+  // the most recently started run; the dashboard lets the user
+  // switch focus to any other run.
+  const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined)
+  const run = activeRunId !== undefined ? runs[activeRunId] : undefined
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [lastFetched, setLastFetched] = useState<FetchedSpecification | undefined>()
@@ -108,13 +119,34 @@ function LoadTestApp() {
   }, [])
 
   useEffect(() => {
-    if (!run || !['QUEUED', 'RUNNING'].includes(run.status)) return
+    // Multi-run polling: refresh every run that is still in a
+    // terminal state, so the dashboard reflects status changes
+    // (e.g. QUEUED → RUNNING → COMPLETED) for every run the user
+    // started. We key the effect on the list of run ids so the
+    // timer is restarted whenever a new run is added or a run
+    // reaches a terminal state.
+    const pendingIds = Object.entries(runs)
+      .filter(([, run]) => run.status === 'QUEUED' || run.status === 'RUNNING')
+      .map(([id]) => id)
+    if (pendingIds.length === 0) return
     const timer = window.setTimeout(async () => {
-      const response = await fetch(`/api/test-runs/${run.id}`)
-      if (response.ok) setRun(await response.json())
+      const updated = await Promise.all(
+        pendingIds.map(async id => {
+          const response = await fetch(`/api/test-runs/${id}`)
+          if (!response.ok) return null
+          return (await response.json()) as TestRun
+        }),
+      )
+      setRuns(current => {
+        const next = { ...current }
+        for (const run of updated) {
+          if (run !== null) next[run.id] = run
+        }
+        return next
+      })
     }, 1000)
     return () => window.clearTimeout(timer)
-  }, [run])
+  }, [runs])
 
   async function fetchSpecFromUrl(url: string): Promise<FetchedSpecification> {
     const response = await fetch('/api/specifications/fetch-url', {
@@ -130,7 +162,11 @@ function LoadTestApp() {
   async function importSpecification() {
     setBusy(true)
     setError('')
-    setRun(undefined)
+    // Importing a new spec invalidates the previous test runs: the
+    // operations may have changed and the report pages would render
+    // against the wrong configuration.
+    setRuns({})
+    setActiveRunId(undefined)
     const trimmedUrl = specificationUrl.trim()
     let activeSpecification = specification
     try {
@@ -188,7 +224,15 @@ function LoadTestApp() {
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.message)
-      setRun(data)
+      // Add the new run to the dashboard and focus it so the user
+      // immediately sees the live status. The map shape keeps
+      // parallel runs in their own slots without overwriting each
+      // other. The active-run selection rule lives in
+      // [pickActiveRunId] (unit-tested) so the focus logic stays
+      // observable in isolation.
+      const nextRuns = { ...runs, [data.id]: data }
+      setRuns(nextRuns)
+      setActiveRunId(pickActiveRunId(nextRuns, activeRunId))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Test konnte nicht gestartet werden')
     } finally {
@@ -449,42 +493,84 @@ function LoadTestApp() {
       </section>
     </>}
 
-    {run && <section className="card result">
+    {Object.keys(runs).length > 0 && <section className="card result">
       <header className="result-header">
         <div className="result-header-top">
           <div className="step">4</div>
-          <h2>Testlauf</h2>
-          {/* Run-ID sitzt immer oben rechts in der Karte, sowohl während
-              k6 läuft als auch im Ergebnis. Direkt darunter (rechtsbündig)
-              erscheint der Report-Button, sobald der Test beendet ist
-              (COMPLETED oder FAILED) — unabhängig davon, ob k6 Output
-              oder einen Summary geliefert hat. So bekommen die Details
-              unten die volle Kartenbreite, und der Report-Link ist auch
-              dann verfügbar, wenn ein sauberer Run ohne Summary
-              zurueckkommt. Waehrend RUNNING/QUEUED bleibt der Button
-              korrekterweise weg (Negativfall). */}
-          <span className="result-run-id">Run-ID: <code>{run.id}</code></span>
+          <h2>Testläufe</h2>
         </div>
-        {(run.status === 'COMPLETED' || run.status === 'FAILED') && (
-          <div className="result-header-actions">
-            <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">Ausführlicher K6-Testbericht</a>
-          </div>
-        )}
       </header>
-      <TestRunSummary run={run} />
-      <RunStatusView run={run} now={runNow} />
-      {/* Untere Zeile: k6-Konsolenausgabe + k6-JSON-Rohdaten. Nimmt jetzt
-          die volle Kartenbreite, weil der Report-Button oben in den
-          Header gewandert ist. Nur sichtbar, wenn k6 überhaupt Output
-          oder einen Summary geliefert hat. */}
-      {((run.consoleOutput ?? run.error) || run.summary) && <div className="result-extras">
-        <div className="result-extras-details">
-          {(run.consoleOutput ?? run.error) && <details><summary>k6-Konsolenausgabe</summary><pre>{run.consoleOutput ?? run.error}</pre></details>}
-          {run.summary && <details><summary>k6-JSON-Rohdaten</summary><pre>{run.summary.raw}</pre></details>}
-        </div>
-      </div>}
+
+      {/* Multi-run dashboard: a grid of badges — one per run, in its
+          own evenly-sized column. The badge is the focus target
+          (klick- und tastaturbedienbar), so the user does not need a
+          separate tab strip below. */}
+      <h3 className="run-grid-heading">Laufende &amp; erledigte Tests</h3>
+      <div className="run-grid" role="tablist" aria-label="Testläufe">
+        {Object.values(runs)
+          .sort((a, b) => {
+            if (a.createdAt !== b.createdAt) return b.createdAt.localeCompare(a.createdAt)
+            return a.id.localeCompare(b.id)
+          })
+          .map(candidate => {
+            const operations = candidate.configuration?.operations ?? []
+            // Multi-operation runs are rare (the picker only allows one
+            // today) but if a run has several, we show the first method
+            // and the joined paths so the badge stays compact.
+            const primary = operations[0]
+            const method = primary?.method ?? '–'
+            const path = operations.map(op => op.path).join(', ') || '–'
+            return (
+              <button
+                key={candidate.id}
+                type="button"
+                role="tab"
+                aria-selected={candidate.id === activeRunId}
+                className={`run-badge ${candidate.id === activeRunId ? 'active' : ''} run-badge-${candidate.status.toLowerCase()}`}
+                onClick={() => setActiveRunId(candidate.id)}
+                title={`${candidate.id} · ${method} ${path}`}
+              >
+                <span className={`run-badge-method method-${method.toLowerCase()}`}>{method}</span>
+                <div className="run-badge-info">
+                  <span className="run-badge-status">{candidate.status}</span>
+                  <span className="run-badge-path">{path}</span>
+                </div>
+              </button>
+            )
+          })}
+      </div>
+
+      {run && <RunDetail run={run} runNow={runNow} />}
     </section>}
   </main>
+}
+
+/**
+ * Per-run card. Renders the status pill, the report link, the live
+ * status view and the optional console / summary blocks. Extracted
+ * from the inline JSX so the multi-run dashboard above can stay
+ * simple.
+ */
+function RunDetail({ run, runNow }: { run: TestRun, runNow: number }) {
+  // Der Detail-Block zeigt den live-Status des aktuell gewählten
+  // Runs. Der zugehörige Endpunkt steht bereits im Badge-Grid
+  // darüber, also hier kein Duplikat — nur Status, Metriken und
+  // der Report-Button.
+  return <>
+    <header className="result-detail-header">
+      {(run.status === 'COMPLETED' || run.status === 'FAILED') && (
+        <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">Ausführlicher K6-Testbericht</a>
+      )}
+    </header>
+    <TestRunSummary run={run} />
+    <RunStatusView run={run} now={runNow} />
+    {((run.consoleOutput ?? run.error) || run.summary) && <div className="result-extras">
+      <div className="result-extras-details">
+        {(run.consoleOutput ?? run.error) && <details><summary>k6-Konsolenausgabe</summary><pre>{run.consoleOutput ?? run.error}</pre></details>}
+        {run.summary && <details><summary>k6-JSON-Rohdaten</summary><pre>{run.summary.raw}</pre></details>}
+      </div>
+    </div>}
+  </>
 }
 
 type TestRunSummaryProps = {

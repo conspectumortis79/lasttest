@@ -49,6 +49,9 @@ class LastTestController(
         @Valid @RequestBody request: CreateTestRunRequest,
     ): ResponseEntity<TestRun> = ResponseEntity.status(HttpStatus.ACCEPTED).body(testRuns.create(request))
 
+    @GetMapping("/test-runs")
+    fun list(): ResponseEntity<List<TestRun>> = ResponseEntity.ok(testRuns.list())
+
     @GetMapping("/test-runs/{id}")
     fun find(
         @PathVariable id: String,

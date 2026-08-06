@@ -28,6 +28,14 @@ interface TestRunService {
 
     fun find(id: String): TestRun?
 
+    /**
+     * Returns every run currently held in memory, newest first.
+     * Used by the frontend to render the multi-run dashboard so the
+     * user can see parallel runs side by side. Runs are not
+     * persisted, so a server restart drops the list.
+     */
+    fun list(): List<TestRun>
+
     fun script(id: String): String?
 }
 
@@ -68,6 +76,8 @@ class LocalK6TestRunService(
     }
 
     override fun find(id: String): TestRun? = runs[id]
+
+    override fun list(): List<TestRun> = runs.values.sortedByDescending { it.createdAt }
 
     override fun script(id: String): String? = scripts[id]
 
