@@ -50,6 +50,34 @@ test('isTerminalRun is the complement of isInFlight (STOPPING is neither)', () =
   equal(isTerminalRun('ABORTED'), true)
 })
 
+test('dashboard row (status pill + compact metric box) hides for STOPPED and ABORTED', () => {
+  // The `<TestRunSummary>` block in App.tsx renders the colourless
+  // status pill AND the bordered metric-row ("Requests · p(95) ·
+  // Fehlerquote · …") only while the run is in flight. As soon as
+  // k6 settles in a terminal state, `RunStatusView` takes over and
+  // shows the colour-coded "STOPPED" / "ABORTED" pill plus the
+  // matching threshold notice. Showing the grey row on top of
+  // those would duplicate the status with a colourless leftover.
+  //
+  // The actual JSX is `!isTerminalRun(run.status) && …`, so the
+  // negation is the predicate that decides whether the row is
+  // visible. A regression in `isTerminalRun` (e.g. dropping
+  // STOPPED from the set) would re-surface the grey box on top
+  // of the colour-coded terminal pill — this test catches it.
+  const showsRow = (status: string) => !isTerminalRun(status)
+  // In-flight: keep the row.
+  equal(showsRow('QUEUED'), true)
+  equal(showsRow('RUNNING'), true)
+  equal(showsRow('STOPPING'), true)
+  // Terminal: hide the row for *every* terminal status, including
+  // the user-initiated STOPPED / ABORTED that previously slipped
+  // through the local `isFinished` check in TestRunSummary.
+  equal(showsRow('COMPLETED'), false)
+  equal(showsRow('FAILED'), false)
+  equal(showsRow('STOPPED'), false)
+  equal(showsRow('ABORTED'), false)
+})
+
 test('pickActiveRunId keeps the current focus while it is still in the map', () => {
   const runs = { a: makeRun('a', '2026-01-01T00:00:00Z'), b: makeRun('b', '2026-01-02T00:00:00Z') }
   equal(pickActiveRunId(runs, 'a'), 'a')

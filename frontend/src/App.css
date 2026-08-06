@@ -280,8 +280,13 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   border: 1px solid #2d6a4f;
 }
 .status-badge.is-fail {
-  background: #893c50;
-  color: #fff;
+  /* Matches `.is-aborted`: same dark-red background, same
+     pink-on-red text, same accent border. The two failure
+     pills differ only in label content ("FAILED" vs. "ABORTED")
+     so the eye groups them as the same severity class. */
+  background: #4a1f29;
+  color: #ffb5c3;
+  border: 1px solid #893c50;
 }
 /* User-initiated stops: STOPPED = graceful (k6 honoured SIGTERM
    and shut down cleanly), ABORTED = force (SIGKILL, partial

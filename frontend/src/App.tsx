@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { pickActiveRunId } from './runDashboard.ts'
+import { isTerminalRun, pickActiveRunId } from './runDashboard.ts'
 import './App.css'
 import { TestRunReportPage } from './TestRunReport.tsx'
 import {
@@ -160,13 +160,10 @@ function LoadTestApp() {
     // run the user started. STOPPING *must* be in the set, or
     // the user clicks "Stop", the badge freezes on STOPPING,
     // and the STOPPING → STOPPED transition is never observed.
-    const terminalStatus = (status: string) =>
-      status === 'COMPLETED' ||
-      status === 'FAILED' ||
-      status === 'STOPPED' ||
-      status === 'ABORTED'
+    // The canonical terminal-state predicate lives in
+    // `runDashboard.ts` (single source of truth, unit-tested).
     const pendingIds = Object.entries(runs)
-      .filter(([, run]) => !terminalStatus(run.status))
+      .filter(([, run]) => !isTerminalRun(run.status))
       .map(([id]) => id)
     if (pendingIds.length === 0) return
     const timer = window.setTimeout(async () => {
@@ -774,7 +771,12 @@ function TestRunSummary({ run }: TestRunSummaryProps) {
   // visible; we keep hiding the time hint ("running since …")
   // because the three cells below (RUNNING SINCE / REMAINING /
   // STARTED) show the same information more clearly.
-  const isFinished = run.status === 'COMPLETED' || run.status === 'FAILED'
+  // A terminal run is rendered by `RunStatusView` below — which
+  // carries the colour-coded "STOPPED" / "ABORTED" pills and the
+  // matching threshold notice. Showing the generic gray ".status"
+  // pill on top would duplicate the status and look colourless
+  // next to the dedicated terminal-state badges.
+  const isFinished = isTerminalRun(run.status)
 
   return (
     <>
