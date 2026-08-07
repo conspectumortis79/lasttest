@@ -60,7 +60,7 @@ export function SettingsDrawer({
   // Single source of truth for "what should the UI show?".
   // The pure projection in `runNotifications.ts` is unit-tested
   // so the JSX can stay a dumb formatter of the result.
-  const sectionState = computeNotificationSectionState(notificationSettings, notificationPermission)
+  const sectionState = computeNotificationSectionState(notificationPermission)
 
   return <>
     <div
@@ -142,40 +142,6 @@ export function SettingsDrawer({
               <span className="drawer-checkbox-hint">{translate(language, 'drawer.notifications.enabled.hint')}</span>
             </span>
           </label>
-          {sectionState.subCheckboxesVisible
-            ? <>
-              <label
-                className={`drawer-checkbox drawer-checkbox-sub ${notificationSettings.onSuccess ? 'is-selected' : ''}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={notificationSettings.onSuccess}
-                  onChange={() => onNotificationSettingsChange({
-                    ...notificationSettings,
-                    onSuccess: !notificationSettings.onSuccess,
-                  })}
-                />
-                <span className="drawer-checkbox-text">
-                  <span className="drawer-checkbox-label">{translate(language, 'drawer.notifications.onSuccess')}</span>
-                </span>
-              </label>
-              <label
-                className={`drawer-checkbox drawer-checkbox-sub ${notificationSettings.onFailure ? 'is-selected' : ''}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={notificationSettings.onFailure}
-                  onChange={() => onNotificationSettingsChange({
-                    ...notificationSettings,
-                    onFailure: !notificationSettings.onFailure,
-                  })}
-                />
-                <span className="drawer-checkbox-text">
-                  <span className="drawer-checkbox-label">{translate(language, 'drawer.notifications.onFailure')}</span>
-                </span>
-              </label>
-            </>
-            : null}
           {sectionState.warningVisible
             ? <p className="drawer-checkbox-warning" role="status">
               {translate(language, 'drawer.notifications.permission.denied')}

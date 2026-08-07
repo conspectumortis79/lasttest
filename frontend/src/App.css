@@ -163,7 +163,6 @@ button:disabled { opacity: .5; cursor: wait; }
 }
 .drawer-checkbox:hover { border-color: #7d63ff; }
 .drawer-checkbox.is-selected { border-color: #7d63ff; background: rgba(125, 99, 255, .07); }
-.drawer-checkbox-sub { margin-left: 18px; padding: 8px 12px; }
 .drawer-checkbox input {
   accent-color: #7d63ff;
   margin: 2px 0 0;

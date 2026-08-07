@@ -16,6 +16,13 @@
 //   - `'COMPLETED'` — k6 finished normally, the run went green
 //   - `'FAILED'`    — k6 failed, was stopped, or was force-aborted
 //
+// The user has a single master switch in the Settings drawer:
+// every terminal transition (success or failure) is announced
+// while the toggle is on, so the user is always told when a run
+// settles. There is no per-kind filter anymore — the granular
+// toggles were removed because the user did not want to pick
+// outcomes, they wanted to know.
+//
 // Decoupled from i18n: the App.tsx side injects the localised
 // strings via the `format*` callbacks. That keeps the pure module
 // free of the dict and lets the same detections drive a UI toast
@@ -27,12 +34,12 @@ import type { TestRun } from './k6Report.ts'
 type NotificationKind = 'COMPLETED' | 'FAILED'
 
 export type NotificationSettings = {
-  /** Master switch. When false, no notifications are emitted. */
+  /**
+   * Master switch. When `false`, no notifications are emitted for
+   * any run. When `true`, every `in-flight → terminal` transition
+   * is announced — both successful and failed runs.
+   */
   enabled: boolean
-  /** Notify when a run reaches COMPLETED. */
-  onSuccess: boolean
-  /** Notify when a run reaches FAILED / STOPPED / ABORTED. */
-  onFailure: boolean
 }
 
 /**
@@ -52,35 +59,29 @@ export type NotificationPermissionState = 'default' | 'granted' | 'denied'
  *  - Master toggle is disabled when the browser has denied
  *    permission — blocking the toggle is the only honest signal
  *    because flipping it would have no effect.
- *  - Sub-checkboxes are visible only when the master is *on* and
- *    permission is not denied; the user picks the granularity
- *    they want to be notified about.
  *  - The warning banner is shown exactly when the browser has
  *    denied permission, regardless of the toggle state, so old
  *    persisted `enabled: true` settings do not silently break.
+ *
+ * There are no per-kind sub-checkboxes anymore: a single toggle
+ * covers both the success and the failure outcome.
  */
 type NotificationSectionState = {
   masterDisabled: boolean
-  subCheckboxesVisible: boolean
   warningVisible: boolean
 }
 
 export function computeNotificationSectionState(
-  settings: NotificationSettings,
   permission: NotificationPermissionState,
 ): NotificationSectionState {
-  const masterDisabled = permission === 'denied'
   return {
-    masterDisabled,
-    subCheckboxesVisible: settings.enabled && permission !== 'denied',
+    masterDisabled: permission === 'denied',
     warningVisible: permission === 'denied',
   }
 }
 
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   enabled: false,
-  onSuccess: false,
-  onFailure: true,
 }
 
 type TerminalNotification = {
@@ -99,7 +100,7 @@ function isBoolean(value: unknown): value is boolean {
 function isNotificationSettings(value: unknown): value is NotificationSettings {
   if (value === null || typeof value !== 'object') return false
   const record = value as Record<string, unknown>
-  return isBoolean(record.enabled) && isBoolean(record.onSuccess) && isBoolean(record.onFailure)
+  return isBoolean(record.enabled)
 }
 
 /**
@@ -112,6 +113,11 @@ function isNotificationSettings(value: unknown): value is NotificationSettings {
  * unit-testable without touching the real browser API. Callers
  * are expected to pass `null` when running in an environment
  * without `localStorage` (SSR, server-side tests).
+ *
+ * Stale payloads from a previous schema (with the now-removed
+ * `onSuccess` / `onFailure` fields) are accepted: extra keys are
+ * ignored, the master `enabled` field is the only one that
+ * matters now.
  */
 export function loadNotificationSettings(
   storage: Pick<Storage, 'getItem'> | null,
@@ -122,7 +128,10 @@ export function loadNotificationSettings(
     if (raw === null) return { ...DEFAULT_NOTIFICATION_SETTINGS }
     const parsed: unknown = JSON.parse(raw)
     if (!isNotificationSettings(parsed)) return { ...DEFAULT_NOTIFICATION_SETTINGS }
-    return parsed
+    // Project to the known fields only so a stale payload from
+    // a previous schema (with the now-removed `onSuccess` /
+    // `onFailure` fields) cannot leak into the current type.
+    return { enabled: parsed.enabled }
   } catch {
     return { ...DEFAULT_NOTIFICATION_SETTINGS }
   }
@@ -147,7 +156,7 @@ export function saveNotificationSettings(
 
 /**
  * True when the run status is a "success" terminal state. Used
- * to decide whether the master switch + `onSuccess` ought to fire.
+ * to decide which body / title the caller should render.
  */
 export function isCompletionStatus(status: TestRun['status']): boolean {
   return status === 'COMPLETED'
@@ -168,9 +177,9 @@ export function isFailureStatus(status: TestRun['status']): boolean {
 /**
  * Compares the previous and current run maps and returns one
  * notification per run that crossed `in-flight → terminal` between
- * the two snapshots. The settings filter is applied so the master
- * switch and the success/failure toggles do exactly what the user
- * configured in the Settings drawer.
+ * the two snapshots. With the master switch on, every terminal
+ * transition is announced — successful runs and failed runs
+ * alike, no per-kind filter to keep in sync.
  *
  * Pure: the function never mutates the inputs and never reads
  * `localStorage` or the DOM. The caller is responsible for
@@ -197,9 +206,9 @@ export function detectTerminalTransitions(
     if (isTerminalRun(prevRun.status)) continue
     if (!isTerminalRun(nextRun.status)) continue
     if (isCompletionStatus(nextRun.status)) {
-      if (settings.onSuccess) result.push({ runId: id, kind: 'COMPLETED', status: nextRun.status })
+      result.push({ runId: id, kind: 'COMPLETED', status: nextRun.status })
     } else if (isFailureStatus(nextRun.status)) {
-      if (settings.onFailure) result.push({ runId: id, kind: 'FAILED', status: nextRun.status })
+      result.push({ runId: id, kind: 'FAILED', status: nextRun.status })
     }
   }
   return result

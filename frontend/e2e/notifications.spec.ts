@@ -1,13 +1,13 @@
 // End-to-end coverage for the per-run completion notifications
 // feature wired into the Settings drawer. The spec exercises the
-// three observable behaviours the user cares about:
+// observable behaviours the user cares about:
 //
 //   1. The notifications section is rendered in the drawer
 //      alongside the language picker.
-//   2. The success / failure sub-checkboxes are gated on the
-//      master toggle — they only appear when the master is on,
-//      and re-appear with their previous state when the master
-//      is re-enabled.
+//   2. A single master toggle drives the feature — every
+//      terminal transition (success or failure) is announced
+//      while the toggle is on, no per-kind sub-checkboxes
+//      anymore.
 //   3. A browser notification is fired when a run crosses the
 //      `in-flight → terminal` boundary while the tab is in the
 //      background.
@@ -83,45 +83,13 @@ test.describe('Settings drawer — notifications', () => {
     // (the section heading), not by DOM position, so the test
     // does not break when extra sections are added later.
     await expect(drawer.getByRole('group', { name: 'Notifications' })).toBeVisible()
-    // Master toggle is on by default, sub-checkboxes are hidden
-    // until the user flips the master.
+    // A single master toggle controls every terminal
+    // notification (success + failure). No per-kind sub-toggles
+    // anymore.
     await expect(drawer.getByRole('checkbox', { name: 'Browser notifications' })).toBeVisible()
     await expect(drawer.getByRole('checkbox', { name: 'On successful completion' })).toHaveCount(0)
     await expect(drawer.getByRole('checkbox', { name: 'On failure (FAILED, STOPPED, ABORTED)' })).toHaveCount(0)
     await expect(drawer.getByText('Notifications are blocked by the browser.')).toHaveCount(0)
-  })
-
-  test('reveals the sub-checkboxes when the master is enabled and hides them again', async ({ page }) => {
-    const drawer = await openSettings(page)
-
-    // Toggle the master on. The sub-checkboxes must appear with
-    // their labels visible.
-    await drawer.getByRole('checkbox', { name: 'Browser notifications' }).check()
-    await expect(drawer.getByRole('checkbox', { name: 'On successful completion' })).toBeVisible()
-    await expect(drawer.getByRole('checkbox', { name: 'On failure (FAILED, STOPPED, ABORTED)' })).toBeVisible()
-
-    // Persistence: enabling the master must not lose the
-    // `onSuccess` / `onFailure` defaults.
-    await expect(drawer.getByRole('checkbox', { name: 'On successful completion' })).not.toBeChecked()
-    await expect(drawer.getByRole('checkbox', { name: 'On failure (FAILED, STOPPED, ABORTED)' })).toBeChecked()
-
-    // Customize the success toggle so we can verify the value
-    // survives a master-off / master-on round-trip.
-    await drawer.getByRole('checkbox', { name: 'On successful completion' }).check()
-    await expect(drawer.getByRole('checkbox', { name: 'On successful completion' })).toBeChecked()
-
-    // Toggle the master off. The sub-checkboxes must disappear.
-    await drawer.getByRole('checkbox', { name: 'Browser notifications' }).uncheck()
-    await expect(drawer.getByRole('checkbox', { name: 'On successful completion' })).toHaveCount(0)
-    await expect(drawer.getByRole('checkbox', { name: 'On failure (FAILED, STOPPED, ABORTED)' })).toHaveCount(0)
-
-    // Toggle the master back on. The sub-checkboxes return
-    // and the user's earlier `onSuccess: true` choice is still
-    // there — the drawer's state survives the round-trip.
-    await drawer.getByRole('checkbox', { name: 'Browser notifications' }).check()
-    await expect(drawer.getByRole('checkbox', { name: 'On successful completion' })).toBeVisible()
-    await expect(drawer.getByRole('checkbox', { name: 'On successful completion' })).toBeChecked()
-    await expect(drawer.getByRole('checkbox', { name: 'On failure (FAILED, STOPPED, ABORTED)' })).toBeChecked()
   })
 
   test('persists the toggle state across a page reload', async ({ page }) => {
@@ -135,7 +103,6 @@ test.describe('Settings drawer — notifications', () => {
     await page.reload()
     const reopened = await openSettings(page)
     await expect(reopened.getByRole('checkbox', { name: 'Browser notifications' })).toBeChecked()
-    await expect(reopened.getByRole('checkbox', { name: 'On successful completion' })).toBeVisible()
   })
 
   test('shows the permission-denied warning when the browser blocks notifications', async ({ context, page }) => {
@@ -165,16 +132,14 @@ test.describe('Settings drawer — notifications', () => {
     const master = drawer.getByRole('checkbox', { name: 'Browser notifications' })
     await expect(master).toBeDisabled()
     await expect(drawer.getByText('Notifications are blocked by the browser.')).toBeVisible()
-    // Sub-checkboxes stay hidden when permission is denied,
-    // even though old settings may have enabled the master.
-    await expect(drawer.getByRole('checkbox', { name: 'On successful completion' })).toHaveCount(0)
   })
 
-  test('fires a browser notification when a run completes while the tab is in the background', async ({ page }) => {
-    // Enable notifications (master + onSuccess + onFailure).
+  test('fires a browser notification when a run fails while the tab is in the background', async ({ page }) => {
+    // Enable notifications: the master toggle is the only knob
+    // now, every terminal transition (success + failure) is
+    // covered by it.
     const drawer = await openSettings(page)
     await drawer.getByRole('checkbox', { name: 'Browser notifications' }).check()
-    await drawer.getByRole('checkbox', { name: 'On successful completion' }).check()
     await closeSettings(page)
 
     // Start a minimal load test. The bundled demo spec plus
