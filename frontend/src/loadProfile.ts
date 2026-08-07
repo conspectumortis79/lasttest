@@ -14,9 +14,9 @@ export const MAX_PRE_ALLOCATED_VUS = 30_000
 // integer number of seconds (k6 itself supports up to '60s'). We mirror that
 // range so the validator cannot silently let through '5m' which the executor
 // would reject at runtime.
-export const ALLOWED_TIME_UNITS_SECONDS: readonly number[] = Array.from({ length: 60 }, (_, index) => index + 1)
+const ALLOWED_TIME_UNITS_SECONDS: readonly number[] = Array.from({ length: 60 }, (_, index) => index + 1)
 
-export type LoadProfileType = 'constant-vus' | 'shared-iterations' | 'ramping-vus' | 'constant-arrival-rate'
+type LoadProfileType = 'constant-vus' | 'shared-iterations' | 'ramping-vus' | 'constant-arrival-rate'
 
 /**
  * How the generator picks the next payload from a per-endpoint pool
@@ -45,10 +45,6 @@ export type LoadProfile =
   | { type: 'ramping-vus', startVUs: number, stages: LoadStage[], payloadStrategy?: PayloadStrategy }
   | { type: 'constant-arrival-rate', rate: number, timeUnitSeconds: number, durationSeconds: number, preAllocatedVUs: number, maxVUs: number, payloadStrategy?: PayloadStrategy }
 
-export type LoadProfileValidation =
-  | { valid: true }
-  | { valid: false, message: string }
-
 // ---- Factory & presets ------------------------------------------------------
 //
 // A preset returns a fully-validated profile the user can edit. The presets
@@ -59,6 +55,42 @@ export type LoadProfileValidation =
 
 export function defaultLoadProfile(): LoadProfile {
   return { type: 'constant-vus', virtualUsers: 10, durationSeconds: 30 }
+}
+
+/**
+ * Carry the user's chosen [PayloadStrategy] from a previous profile
+ * onto a freshly built one. Used by the editor in two places:
+ *
+ *  - **Preset application.** Presets (Smoke, Load, Stress, …) return
+ *    a fresh `LoadProfile` template without a `payloadStrategy`.
+ *    The editor's preset onClick handler wraps the result through
+ *    this helper so the manually chosen strategy survives clicking
+ *    a preset.
+ *  - **Executor type change.** The editor's `changeProfileType`
+ *    helper (defined inside `LoadProfileEditor.tsx`) builds a new
+ *    profile of the requested executor type while carrying over
+ *    type-specific fields (VUs, iterations, stages, …). Without
+ *    this helper the strategy would be reset to `undefined`
+ *    (i.e. the backend default `sequential`) every time the user
+ *    switches the executor dropdown.
+ *
+ * The helper never invents a strategy: if [previous] did not have
+ * one, the merged profile carries `payloadStrategy: undefined`
+ * exactly like the fresh profile. The user always sees the
+ * strategy they last chose — or, before any choice, no strategy
+ * at all.
+ */
+export function withStrategy<T extends LoadProfile>(fresh: T, previous: LoadProfile): T {
+  // Only carry the strategy over when the previous profile had one.
+  // Spreading `payloadStrategy: undefined` would add an explicit
+  // `undefined` key on the fresh profile, which is observably
+  // different from "no key at all" for `deepEqual` and for any
+  // future code that checks `key in profile`. The wire shape and
+  // the backend behaviour are the same in both cases, but the
+  // in-memory shape matches the user's mental model: "I have not
+  // chosen a strategy yet" == the key is absent.
+  if (previous.payloadStrategy === undefined) return fresh
+  return { ...fresh, payloadStrategy: previous.payloadStrategy }
 }
 
 export function smokePreset(): LoadProfile {
@@ -240,7 +272,7 @@ function validateIntegerInRange(
 // place where we *could* convert to milliseconds; we deliberately do not
 // because the k6 generated script reads the value as-is.
 
-export type SerialisedLoadProfile = {
+type SerialisedLoadProfile = {
   type: LoadProfileType
   virtualUsers?: number
   durationSeconds?: number

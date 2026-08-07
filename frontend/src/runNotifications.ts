@@ -24,7 +24,7 @@
 import { isTerminalRun } from './runDashboard.ts'
 import type { TestRun } from './k6Report.ts'
 
-export type NotificationKind = 'COMPLETED' | 'FAILED'
+type NotificationKind = 'COMPLETED' | 'FAILED'
 
 export type NotificationSettings = {
   /** Master switch. When false, no notifications are emitted. */
@@ -59,7 +59,7 @@ export type NotificationPermissionState = 'default' | 'granted' | 'denied'
  *    denied permission, regardless of the toggle state, so old
  *    persisted `enabled: true` settings do not silently break.
  */
-export type NotificationSectionState = {
+type NotificationSectionState = {
   masterDisabled: boolean
   subCheckboxesVisible: boolean
   warningVisible: boolean
@@ -83,7 +83,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   onFailure: true,
 }
 
-export type TerminalNotification = {
+type TerminalNotification = {
   runId: string
   kind: NotificationKind
   /** Status the run reached, for callers that want to inspect the granularity. */

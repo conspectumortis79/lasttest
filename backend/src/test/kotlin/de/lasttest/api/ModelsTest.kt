@@ -96,7 +96,7 @@ class ModelsTest {
     fun `PayloadStrategy fromJson rejects unknown values`() {
         val exception = runCatching { PayloadStrategy.fromJson("nope") }.exceptionOrNull()
         assertTrue(exception is IllegalArgumentException)
-        assertTrue(exception!!.message!!.contains("Unbekannte PayloadStrategy"))
+        assertTrue(exception.message!!.contains("Unbekannte PayloadStrategy"))
     }
 
     @Test

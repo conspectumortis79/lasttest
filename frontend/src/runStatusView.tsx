@@ -35,7 +35,7 @@ type RunProgressProps = {
   now: number
 }
 
-export function RunProgress({ run, now }: RunProgressProps) {
+function RunProgress({ run, now }: RunProgressProps) {
   const { language: lang } = useLanguage()
   const elapsed = runElapsedSeconds(run, now)
   const remaining = runRemainingSeconds(run, now)
@@ -86,7 +86,7 @@ type RunSummaryProps = {
   showReportButton?: boolean
 }
 
-export function RunSummary({ run, lang, showReportButton }: RunSummaryProps) {
+function RunSummary({ run, lang, showReportButton }: RunSummaryProps) {
   const summary = parseK6Summary(run)
   if (!summary) {
     return <div className="run-summary-empty">{translate(lang, 'result.noData')}</div>
@@ -294,7 +294,7 @@ type RunFailureProps = {
   showReportButton?: boolean
 }
 
-export function RunFailure({ run, reason, lang, showReportButton }: RunFailureProps) {
+function RunFailure({ run, reason, lang, showReportButton }: RunFailureProps) {
   return <>
     <ResultHeader passed={false} run={run} lang={lang} showReportButton={showReportButton} />
     <ThresholdNotice passed={false} failedMetrics={summariseThresholds(run).failedMetrics} run={run} lang={lang} />

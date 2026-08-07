@@ -471,12 +471,59 @@ export const WIKI_ENTRIES: ReadonlyArray<WikiEntry> = [
   {
     term: 'Bearer Token',
     termDe: 'Bearer-Token',
-    aliases: ['bearer', 'bearer token', 'token', 'auth token', 'access token', 'authtoken', 'zugriffstoken'],
+    aliases: ['bearer', 'bearer token', 'token', 'auth token', 'access token', 'authtoken', 'zugriffstoken', 'bearer-token'],
     category: 'http',
     title: { en: 'Bearer Token', de: 'Bearer-Token' },
     body: {
-      en: 'A <strong>bearer token</strong> is an opaque string sent in the <code>Authorization: Bearer &lt;token&gt;</code> header to authenticate the request. In lasttest you can set a bearer token per payload so different iterations can authenticate as different users.',
-      de: 'Ein <strong>Bearer-Token</strong> ist ein opaker String, der im Header <code>Authorization: Bearer &lt;token&gt;</code> gesendet wird, um den Request zu authentifizieren. In lasttest kannst du pro Payload ein eigenes Bearer-Token setzen, sodass verschiedene Iterationen sich als verschiedene Benutzer ausweisen.',
+      en: 'A <strong>bearer token</strong> is an opaque string sent in the <code>Authorization: Bearer &lt;token&gt;</code> header to authenticate the request. RFC 6750 only requires the holder of the token to be treated as authorised — the server does not prove identity beyond possession. Bearer tokens are the standard credential type produced by an <strong>OAuth 2.0</strong> flow (see the OAuth 2.0 entry) and are also used by many custom APIs. In lasttest you can set a bearer token per payload so different iterations can authenticate as different users.',
+      de: 'Ein <strong>Bearer-Token</strong> ist ein opaker String, der im Header <code>Authorization: Bearer &lt;token&gt;</code> gesendet wird, um den Request zu authentifizieren. RFC 6750 verlangt nur, dass der Inhaber des Tokens als autorisiert gilt — der Server prüft über den Besitz hinaus keine Identität. Bearer-Token sind der Standard-Credential-Typ, den ein <strong>OAuth 2.0</strong>-Flow erzeugt (siehe Eintrag OAuth 2.0), und werden auch von vielen eigenen APIs verwendet. In lasttest kannst du pro Payload ein eigenes Bearer-Token setzen, sodass verschiedene Iterationen sich als verschiedene Benutzer ausweisen.',
+    },
+  },
+  {
+    term: 'OAuth 2.0',
+    termDe: 'OAuth 2.0',
+    aliases: [
+      'oauth', 'oauth2', 'oauth 2', 'oauth 2.0', 'oauth2.0',
+      'authorization', 'autorisierung',
+      'authorization code', 'client credentials', 'resource owner password', 'implicit flow',
+      'authorization code flow', 'client credentials flow', 'pkce',
+      'access token flow', 'token flow',
+    ],
+    category: 'http',
+    title: { en: 'OAuth 2.0 (Authorisation Framework)', de: 'OAuth 2.0 (Autorisierungs-Framework)' },
+    body: {
+      en: '<strong>OAuth 2.0</strong> (RFC 6749) is a delegated <em>authorisation</em> framework: a user grants a client limited access to a resource on a third-party server without sharing their password. Four roles participate: the <strong>resource owner</strong> (the user), the <strong>client</strong> (the app calling the API), the <strong>authorisation server</strong> (issues tokens) and the <strong>resource server</strong> (serves the API). The most common flows are <code>authorization_code</code> (web apps with a backend, today almost always extended with PKCE), <code>client_credentials</code> (machine-to-machine, no human), <code>implicit</code> (legacy single-page apps, deprecated by OAuth 2.1) and <code>resource_owner_password</code> (legacy, the client collects the password directly — avoid). The result of every flow is an <strong>access token</strong> the client sends back as a Bearer token. In lasttest you do not run the OAuth flow itself — you paste the already-issued bearer token into a payload and k6 replays it.',
+      de: '<strong>OAuth 2.0</strong> (RFC 6749) ist ein Framework für delegierte <em>Autorisierung</em>: ein Benutzer gewährt einem Client eingeschränkten Zugriff auf eine Ressource bei einem Drittanbieter, ohne sein Passwort weiterzugeben. Vier Rollen sind beteiligt: der <strong>Resource Owner</strong> (der Benutzer), der <strong>Client</strong> (die App, die die API ruft), der <strong>Authorisation Server</strong> (stellt Tokens aus) und der <strong>Resource Server</strong> (bedient die API). Die häufigsten Flows sind <code>authorization_code</code> (Web-Apps mit Backend, heute fast immer mit PKCE erweitert), <code>client_credentials</code> (Maschine zu Maschine, ohne Mensch), <code>implicit</code> (veraltete Single-Page-Apps, von OAuth 2.1 abgekündigt) und <code>resource_owner_password</code> (veraltet, der Client nimmt das Passwort direkt entgegen — vermeiden). Das Ergebnis jedes Flows ist ein <strong>Access Token</strong>, das der Client als Bearer-Token zurücksendet. In lasttest führst du den OAuth-Flow nicht selbst aus — du fügst das bereits ausgestellte Bearer-Token in einen Payload ein und k6 spielt es ab.',
+    },
+  },
+  {
+    term: 'API Key',
+    termDe: 'API-Key (API-Schlüssel)',
+    aliases: [
+      'api key', 'api keys', 'api-key', 'apikey', 'api schlüssel', 'api-schlüssel',
+      'schluessel', 'schlüssel', 'x-api-key', 'x-api-token', 'api token',
+    ],
+    category: 'http',
+    title: { en: 'API Key', de: 'API-Key (API-Schlüssel)' },
+    body: {
+      en: 'An <strong>API key</strong> is a long, opaque string the client sends with every request to identify itself (and sometimes the calling project). There is no formal RFC for the pattern — every API picks its own header or query parameter. Common placements: <code>X-API-Key: &lt;key&gt;</code>, a custom header like <code>api-key: &lt;key&gt;</code>, or a <code>?api_key=&lt;key&gt;</code> query parameter. API keys are <em>project credentials</em>, not <em>user credentials</em>: a single key typically identifies a developer account, an integration or a billing unit, not a logged-in human. Compared to OAuth 2.0 they are much simpler to set up but grant no scope, no per-user audit trail and no time-based expiry. In lasttest you set the API key per payload (header or query parameter) so each iteration can impersonate a different project or test key.',
+      de: 'Ein <strong>API-Key</strong> (API-Schlüssel) ist ein langer, opaker String, den der Client mit jedem Request mitschickt, um sich zu identifizieren (manchmal auch das aufrufende Projekt). Es gibt keinen RFC für das Muster — jede API wählt eigenen Header oder Query-Parameter. Häufige Stellen: <code>X-API-Key: &lt;key&gt;</code>, ein eigener Header wie <code>api-key: &lt;key&gt;</code> oder ein Query-Parameter <code>?api_key=&lt;key&gt;</code>. API-Keys sind <em>Projekt-Credentials</em>, keine <em>Benutzer-Credentials</em>: ein einzelner Key identifiziert in der Regel ein Entwickler-Konto, eine Integration oder eine Abrechnungseinheit, nicht einen eingeloggten Menschen. Verglichen mit OAuth 2.0 sind sie viel einfacher aufzusetzen, gewähren aber keinen Scope, keine pro-Benutzer-Audit-Spur und keine zeitbasierte Ablauffrist. In lasttest setzt du den API-Key pro Payload (Header oder Query-Parameter), damit jede Iteration ein anderes Projekt oder einen anderen Test-Key darstellen kann.',
+    },
+  },
+  {
+    term: 'Basic Auth (HTTP Basic Authentication)',
+    termDe: 'Basic Auth (HTTP-Basisauthentifizierung)',
+    aliases: [
+      'basic auth', 'basicauth', 'basic authn', 'basic authentication',
+      'basisauthentifizierung', 'basis auth', 'basis-auth',
+      'http basic', 'http basic auth', 'http basic authentication',
+      'basic', 'basic-auth', 'username password', 'benutzername passwort',
+    ],
+    category: 'http',
+    title: { en: 'Basic Auth (HTTP Basic Authentication)', de: 'Basic Auth (HTTP-Basisauthentifizierung)' },
+    body: {
+      en: '<strong>HTTP Basic Authentication</strong> (RFC 7617) is the simplest scheme built into HTTP. The client sends <code>Authorization: Basic &lt;credentials&gt;</code>, where <code>&lt;credentials&gt;</code> is <code>base64(username:password)</code>. The header is encoded, <em>not encrypted</em> — anyone who can read the request sees the credentials after a one-line decode. Basic Auth therefore <strong>requires HTTPS in production</strong> and is also a bad fit for browser flows (the browser caches the credentials and replays them silently). Typical use today: server-to-server integrations where the two endpoints are configured once, internal admin endpoints, and developer tooling. In lasttest you set username and password per payload (or globally for a run) so different iterations can authenticate as different users.',
+      de: '<strong>HTTP-Basisauthentifizierung</strong> (Basic Auth, RFC 7617) ist das einfachste in HTTP eingebaute Schema. Der Client sendet <code>Authorization: Basic &lt;credentials&gt;</code>, wobei <code>&lt;credentials&gt;</code> <code>base64(Benutzername:Passwort)</code> ist. Der Header ist kodiert, <em>nicht verschlüsselt</em> — wer den Request lesen kann, sieht die Credentials nach einer einzeiligen Dekodierung. Basic Auth benötigt deshalb <strong>in Produktion zwingend HTTPS</strong> und ist auch für Browser-Flows ungeeignet (der Browser cached die Credentials und sendet sie stillschweigend erneut). Typischer Einsatz heute: Server-zu-Server-Integrationen, bei denen beide Endpunkte einmal konfiguriert werden, interne Admin-Endpunkte und Entwicklerwerkzeuge. In lasttest setzt du Benutzername und Passwort pro Payload (oder global für einen Lauf), damit sich verschiedene Iterationen als verschiedene Benutzer ausweisen können.',
     },
   },
 

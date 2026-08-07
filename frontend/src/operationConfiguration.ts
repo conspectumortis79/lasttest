@@ -6,7 +6,7 @@ export type ApiParameter = {
   schema?: ParameterSchema
 }
 
-export type ParameterSchemaType = 'string' | 'integer' | 'number' | 'boolean'
+type ParameterSchemaType = 'string' | 'integer' | 'number' | 'boolean'
 
 export type ParameterSchema = {
   type: ParameterSchemaType
@@ -19,7 +19,7 @@ export type ParameterSchema = {
   pattern?: string
 }
 
-export type ParameterValidation =
+type ParameterValidation =
   | { valid: true }
   | { valid: false, message: string }
 
@@ -29,7 +29,7 @@ export type RequestBodySchema = {
   required: string[]
 }
 
-export type OperationValidation = {
+type OperationValidation = {
   parameterErrors: Record<string, string>
   bodyError?: string
 }
@@ -50,6 +50,61 @@ export type Operation = {
   hasRequestBody: boolean
   requestBodyRequired: boolean
   bearerAuth: boolean
+  /**
+   * Auth requirements discovered on the operation by the importer.
+   * Drives which credential inputs the payload pool editor renders
+   * (a Basic requirement shows a username + password column, a
+   * Bearer requirement shows a token column, Unsupported is hidden).
+   * Older backend versions did not send this field; the importer
+   * test suite uses the derived `bearerAuth` boolean for that case.
+   */
+  authRequirements?: AuthRequirement[]
+}
+
+/**
+ * Wire shape of one entry in `Operation.authRequirements`. The
+ * backend uses Jackson with an explicit `kind` discriminator; see
+ * `AuthRequirement` on the Kotlin side. The frontend only needs to
+ * `switch` on the kind — the `schemeName` is purely diagnostic.
+ */
+type OAuth2Flow = {
+  type: string
+  authorizationUrl?: string
+  tokenUrl?: string
+  refreshUrl?: string
+  scopes: string[]
+}
+
+type AuthRequirement =
+  | { kind: 'basic', schemeName: string }
+  | { kind: 'bearer', schemeName: string }
+  | { kind: 'apiKey', schemeName: string, headerName: string }
+  | { kind: 'oauth2', schemeName: string, flows: OAuth2Flow[] }
+  | { kind: 'unsupported', schemeName: string, reason: string }
+
+/** True if the operation declares at least one Basic requirement. */
+export function hasBasicAuth(operation: Operation): boolean {
+  return operation.authRequirements?.some(req => req.kind === 'basic') ?? false
+}
+
+/** True if the operation declares at least one Bearer requirement. */
+export function hasBearerAuth(operation: Operation): boolean {
+  return operation.authRequirements?.some(req => req.kind === 'bearer') ?? false
+}
+
+/** True if the operation declares at least one header-based apiKey. */
+export function hasApiKeyAuth(operation: Operation): boolean {
+  return operation.authRequirements?.some(req => req.kind === 'apiKey') ?? false
+}
+
+/**
+ * True if the operation declares at least one OAuth 2.0 requirement.
+ * The wire format is identical to Bearer (RFC 6750) so the
+ * dedicated UI cell mirrors the Bearer one but with OAuth 2.0
+ * copy and the additional flow / scope metadata in the banner.
+ */
+export function hasOAuth2Auth(operation: Operation): boolean {
+  return operation.authRequirements?.some(req => req.kind === 'oauth2') ?? false
 }
 
 export type ApiServer = {
@@ -73,8 +128,10 @@ export type OperationSettings = {
   /**
    * Pool of complete request datasets. At least one payload is required.
    * This is the new source of truth — the legacy `parameterValues`,
-   * `requestBodyJson`, `bearerToken` fields below are derived from
-   * `payloads[0]` once the settings have been migrated.
+   * `requestBodyJson`, `bearerToken`, `basicAuthUsername`,
+   * `basicAuthPassword`, `apiKey` and `oauth2Token` fields below
+   * are derived from `payloads[0]` once the settings have been
+   * migrated.
    */
   payloads: OperationPayload[]
   /**
@@ -87,22 +144,51 @@ export type OperationSettings = {
   requestBodyJson: string
   /** @deprecated Derived from `payloads[0]`. See `parameterValues`. */
   bearerToken: string
+  /** @deprecated Derived from `payloads[0]`. See `parameterValues`. */
+  basicAuthUsername: string
+  /** @deprecated Derived from `payloads[0]`. See `parameterValues`. */
+  basicAuthPassword: string
+  /** @deprecated Derived from `payloads[0]`. See `parameterValues`. */
+  apiKey: string
+  /** @deprecated Derived from `payloads[0]`. See `parameterValues`. */
+  oauth2Token: string
 }
 
 /**
  * One complete request dataset. Holds every value that the k6 generator
  * needs to issue a single HTTP call: path/query/header/cookie parameters,
- * the JSON request body, and an optional bearer token. Multiple
+ * the JSON request body, and the optional auth credentials. Multiple
  * `OperationPayload`s in an `OperationSettings.payloads` list represent
  * the different datasets a user wants to cycle or pick at random.
+ *
+ * Auth fields are kept as raw strings — the actual wire encoding
+ * (Bearer prefix, Base64, …) is the backend's `AuthHeaderEncoder`'s
+ * job, which is called once per request by the k6 generator.
  */
 export type OperationPayload = {
   parameterValues: Record<string, string>
   requestBodyJson: string
   bearerToken: string
+  basicAuthUsername: string
+  basicAuthPassword: string
+  /**
+   * API key value for an `apiKey in: header` requirement. The k6
+   * generator sets the request header named by the requirement
+   * (e.g. `X-API-Key`) to this value. Ignored when the operation
+   * does not declare an apiKey requirement.
+   */
+  apiKey: string
+  /**
+   * OAuth 2.0 access token for an `oauth2` requirement. The wire
+   * format is identical to [bearerToken] (RFC 6750:
+   * `Authorization: Bearer <token>`); the field is split out so
+   * the UI can render a dedicated OAuth 2.0 input and the banner
+   * can show the flow / scope metadata.
+   */
+  oauth2Token: string
 }
 
-export type OperationConfiguration = {
+type OperationConfiguration = {
   operationId: string
   /**
    * Pool of complete request datasets. The k6 generator uses this
@@ -115,6 +201,10 @@ export type OperationConfiguration = {
     parameterValues: Array<{ name: string, location: string, value: string }>
     requestBodyJson?: string
     bearerToken?: string
+    basicAuthUsername?: string
+    basicAuthPassword?: string
+    apiKey?: string
+    oauth2Token?: string
   }>
   /** @deprecated Derived from `payloads[0]`. */
   parameterValues: Array<{ name: string, location: string, value: string }>
@@ -122,6 +212,14 @@ export type OperationConfiguration = {
   requestBodyJson?: string
   /** @deprecated Derived from `payloads[0]`. */
   bearerToken?: string
+  /** @deprecated Derived from `payloads[0]`. */
+  basicAuthUsername?: string
+  /** @deprecated Derived from `payloads[0]`. */
+  basicAuthPassword?: string
+  /** @deprecated Derived from `payloads[0]`. */
+  apiKey?: string
+  /** @deprecated Derived from `payloads[0]`. */
+  oauth2Token?: string
 }
 
 export function parameterKey(parameter: Pick<ApiParameter, 'location' | 'name'>): string {
@@ -146,7 +244,7 @@ export function parameterKey(parameter: Pick<ApiParameter, 'location' | 'name'>)
  * `format: uuid|email|date|...`) stays a text input — the validator
  * is already in charge of the format check.
  */
-export type ParameterInputKind = 'text' | 'enum' | 'boolean'
+type ParameterInputKind = 'text' | 'enum' | 'boolean'
 
 export function parameterInputKind(schema: ParameterSchema | undefined): ParameterInputKind {
   if (schema === undefined) return 'text'
@@ -179,6 +277,10 @@ export function createOperationSettings(operations: Operation[]): Record<string,
       )
       const seedRequestBodyJson = operation.requestBodyExample == null ? '' : JSON.stringify(operation.requestBodyExample, null, 2)
       const seedBearerToken = ''
+      const seedBasicAuthUsername = ''
+      const seedBasicAuthPassword = ''
+      const seedApiKey = ''
+      const seedOauth2Token = ''
       // The pool is the single source of truth: `buildOperationConfigurations`
       // and `validateOperationSettings` both read from `payloads[0]`. The
       // legacy flat fields are seeded with the same values for
@@ -188,12 +290,20 @@ export function createOperationSettings(operations: Operation[]): Record<string,
         parameterValues: { ...seedParameterValues },
         requestBodyJson: seedRequestBodyJson,
         bearerToken: seedBearerToken,
+        basicAuthUsername: seedBasicAuthUsername,
+        basicAuthPassword: seedBasicAuthPassword,
+        apiKey: seedApiKey,
+        oauth2Token: seedOauth2Token,
       }
       const settings: OperationSettings = {
         payloads: [seed],
         parameterValues: { ...seedParameterValues },
         requestBodyJson: seedRequestBodyJson,
         bearerToken: seedBearerToken,
+        basicAuthUsername: seedBasicAuthUsername,
+        basicAuthPassword: seedBasicAuthPassword,
+        apiKey: seedApiKey,
+        oauth2Token: seedOauth2Token,
       }
       return [operation.operationId, settings]
     }),
@@ -216,12 +326,27 @@ export function migrateOperationSettings(settings: OperationSettings): Operation
     parameterValues: { ...settings.parameterValues },
     requestBodyJson: settings.requestBodyJson,
     bearerToken: settings.bearerToken,
+    // Older settings persisted before Basic auth shipped won't
+    // carry the fields; default to empty so the migrated payload
+    // is well-formed.
+    basicAuthUsername: settings.basicAuthUsername ?? '',
+    basicAuthPassword: settings.basicAuthPassword ?? '',
+    // Same defaulting for the apiKey field added when API key
+    // support shipped.
+    apiKey: settings.apiKey ?? '',
+    // And for the oauth2Token field added when OAuth 2.0
+    // support shipped.
+    oauth2Token: settings.oauth2Token ?? '',
   }
   return {
     payloads: [seed],
     parameterValues: { ...settings.parameterValues },
     requestBodyJson: settings.requestBodyJson,
     bearerToken: settings.bearerToken,
+    basicAuthUsername: settings.basicAuthUsername ?? '',
+    basicAuthPassword: settings.basicAuthPassword ?? '',
+    apiKey: settings.apiKey ?? '',
+    oauth2Token: settings.oauth2Token ?? '',
   }
 }
 
@@ -266,6 +391,15 @@ export function buildOperationConfigurations(
         parameterValues: wireParameterValues,
         requestBodyJson: wireRequestBodyJson,
         bearerToken: payload.bearerToken.trim() || undefined,
+        // Whitespace-only credentials are treated as "not set" so
+        // the backend does not have to repeat the same string
+        // hygiene for every request and so the report's
+        // "Basic auth: configured" line is not falsely flipped on
+        // by a stray space in the password field.
+        basicAuthUsername: payload.basicAuthUsername.trim() || undefined,
+        basicAuthPassword: payload.basicAuthPassword.trim() || undefined,
+        apiKey: payload.apiKey.trim() || undefined,
+        oauth2Token: payload.oauth2Token.trim() || undefined,
       }
     }
 
@@ -282,6 +416,10 @@ export function buildOperationConfigurations(
       parameterValues: payloads[0].parameterValues,
       requestBodyJson: payloads[0].requestBodyJson,
       bearerToken: payloads[0].bearerToken,
+      basicAuthUsername: payloads[0].basicAuthUsername,
+      basicAuthPassword: payloads[0].basicAuthPassword,
+      apiKey: payloads[0].apiKey,
+      oauth2Token: payloads[0].oauth2Token,
     }
   })
 }

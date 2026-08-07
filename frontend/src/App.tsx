@@ -44,7 +44,11 @@ import {
 import {
   buildOperationConfigurations,
   createOperationSettings,
+  hasApiKeyAuth,
+  hasBasicAuth,
+  hasBearerAuth,
   hasMultipleServers,
+  hasOAuth2Auth,
   isOperationValid,
   parameterInputKind,
   parameterKey,
@@ -58,6 +62,7 @@ import {
   type OperationSettings,
 } from './operationConfiguration.ts'
 import { type FetchedSpecification, validateSpecificationUrl } from './specificationSource.ts'
+import { DemoCredentialsBanner } from './DemoCredentialsBanner.tsx'
 import { fetchWithRetry } from './retryFetch.ts'
 
 type ImportResponse = ImportedSpecification & { message?: string }
@@ -451,12 +456,13 @@ function LoadTestApp() {
    * operation. The legacy `parameterValues` / `requestBodyJson` /
    * `bearerToken` flat fields stay in sync with `payloads[0]` so the
    * rest of the pipeline (validation, k6 config builder) keeps
-   * working without further changes.
+   * working without further changes. The Basic auth fields are
+   * mirrored in the same way so the wire shape stays consistent.
    */
   function updatePayloadField(
     operationId: string,
     payloadIndex: number,
-    field: 'parameterValues' | 'requestBodyJson' | 'bearerToken',
+    field: 'parameterValues' | 'requestBodyJson' | 'bearerToken' | 'basicAuthUsername' | 'basicAuthPassword' | 'apiKey' | 'oauth2Token',
     patch: Record<string, string> | string,
   ) {
     updateSettings(operationId, settings => {
@@ -471,6 +477,18 @@ function LoadTestApp() {
         if (field === 'bearerToken' && typeof patch === 'string') {
           return { ...payload, bearerToken: patch }
         }
+        if (field === 'basicAuthUsername' && typeof patch === 'string') {
+          return { ...payload, basicAuthUsername: patch }
+        }
+        if (field === 'basicAuthPassword' && typeof patch === 'string') {
+          return { ...payload, basicAuthPassword: patch }
+        }
+        if (field === 'apiKey' && typeof patch === 'string') {
+          return { ...payload, apiKey: patch }
+        }
+        if (field === 'oauth2Token' && typeof patch === 'string') {
+          return { ...payload, oauth2Token: patch }
+        }
         return payload
       })
       const primary = next[0] ?? settings.payloads[0]
@@ -480,6 +498,10 @@ function LoadTestApp() {
         parameterValues: { ...primary.parameterValues },
         requestBodyJson: primary.requestBodyJson,
         bearerToken: primary.bearerToken,
+        basicAuthUsername: primary.basicAuthUsername,
+        basicAuthPassword: primary.basicAuthPassword,
+        apiKey: primary.apiKey,
+        oauth2Token: primary.oauth2Token,
       }
     })
   }
@@ -491,6 +513,10 @@ function LoadTestApp() {
         parameterValues: { ...seed.parameterValues },
         requestBodyJson: seed.requestBodyJson,
         bearerToken: seed.bearerToken,
+        basicAuthUsername: seed.basicAuthUsername,
+        basicAuthPassword: seed.basicAuthPassword,
+        apiKey: seed.apiKey,
+        oauth2Token: seed.oauth2Token,
       }
       return { ...settings, payloads: [...settings.payloads, clone] }
     })
@@ -510,6 +536,10 @@ function LoadTestApp() {
         parameterValues: { ...primary.parameterValues },
         requestBodyJson: primary.requestBodyJson,
         bearerToken: primary.bearerToken,
+        basicAuthUsername: primary.basicAuthUsername,
+        basicAuthPassword: primary.basicAuthPassword,
+        apiKey: primary.apiKey,
+        oauth2Token: primary.oauth2Token,
       }
     })
   }
@@ -963,15 +993,14 @@ function LoadTestApp() {
  */
 function RunDetail({ run, runNow }: { run: TestRun, runNow: number }) {
   const { language } = useLanguage()
-  // Der Detail-Block zeigt den live-Status des aktuell gewählten
-  // Runs. Der zugehörige Endpunkt steht bereits im Badge-Grid
-  // darüber, also hier kein Duplikat — nur Status, Metriken und
-  // der Report-Button. Der Report-Button lebt jetzt im
-  // ResultHeader (Bestanden / Abgebrochen-Pille), nicht mehr in
-  // einer eigenen Header-Zeile darüber. Über `showReportButton`
-  // teilen wir RunStatusView mit, dass wir den Link einblenden
-  // wollen — der Vollreport in TestRunReport.tsx lässt das Flag
-  // weg, weil der Report selbst das Link-Ziel ist.
+  // The detail block shows the live status of the currently selected
+  // run. The associated endpoint is already rendered in the badge
+  // grid above, so we do not duplicate it here — only the status,
+  // metrics and report button. The report button now lives inside
+  // the ResultHeader (PASSED / ABORTED pill), no longer in its own
+  // header row above. Via `showReportButton` we tell RunStatusView
+  // to render the link; the full report in TestRunReport.tsx omits
+  // the flag because the report itself is the link's destination.
   return <>
     <TestRunSummary run={run} />
     <RunStatusView run={run} now={runNow} showReportButton />
@@ -1048,7 +1077,7 @@ type OperationEditorProps = {
   language: SupportedLanguage
   onToggle: () => void
   onToggleExpand: () => void
-  onPayloadField: (payloadIndex: number, field: 'parameterValues' | 'requestBodyJson' | 'bearerToken', patch: Record<string, string> | string) => void
+  onPayloadField: (payloadIndex: number, field: 'parameterValues' | 'requestBodyJson' | 'bearerToken' | 'basicAuthUsername' | 'basicAuthPassword' | 'apiKey' | 'oauth2Token', patch: Record<string, string> | string) => void
   onAddPayload: () => void
   onRemovePayload: (payloadIndex: number) => void
 }
@@ -1091,6 +1120,17 @@ function OperationEditor({
   const firstProblem = poolValidation.find(v => v.bodyError !== undefined || Object.keys(v.parameterErrors).length > 0)
   const hasPoolError = firstProblem !== undefined
 
+  // The pool editor renders one credential column per auth type
+  // declared by the operation. `hasBasicAuth` / `hasBearerAuth` /
+  // `hasApiKeyAuth` are derived from `operation.authRequirements`
+  // (the new discriminated union from the backend); the legacy
+  // `bearerAuth` boolean is used as a fallback so specs without
+  // the new field keep showing the optional Bearer input.
+  const showBasicAuth = hasBasicAuth(operation)
+  const showBearerAuth = hasBearerAuth(operation) || (!showBasicAuth && operation.bearerAuth)
+  const showApiKey = hasApiKeyAuth(operation)
+  const showOAuth2 = hasOAuth2Auth(operation)
+
   return <article className={`operation-card ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''}`}>
     <label className="operation-heading">
       <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Endpunkt ${operation.method} ${operation.path} auswählen`} />
@@ -1119,6 +1159,17 @@ function OperationEditor({
     </button>
 
     {expanded && <div className="payload-pool">
+      <DemoCredentialsBanner
+        operationId={operation.operationId}
+        language={language}
+        onApplyBasic={(username, password) => {
+          onPayloadField(0, 'basicAuthUsername', username)
+          onPayloadField(0, 'basicAuthPassword', password)
+        }}
+        onApplyBearer={token => onPayloadField(0, 'bearerToken', token)}
+        onApplyApiKey={key => onPayloadField(0, 'apiKey', key)}
+        onApplyOAuth2={token => onPayloadField(0, 'oauth2Token', token)}
+      />
       <p className="pool-hint">
         {translate(language, 'ops.pool.hint')}
       </p>
@@ -1141,7 +1192,10 @@ function OperationEditor({
                 )
               })}
               {operation.hasRequestBody && <th className="col-wide">{translate(language, 'report.payload.jsonSummary')}</th>}
-              <th>Bearer</th>
+              {showBasicAuth && <th className="col-auth-basic">{translate(language, 'ops.auth.basic.header')}</th>}
+              {showApiKey && <th className="col-auth-api-key">{translate(language, 'ops.auth.apiKey.header')}</th>}
+              {showOAuth2 && <th className="col-auth-oauth2">{translate(language, 'ops.auth.oauth2.header')}</th>}
+              {showBearerAuth && <th>{translate(language, 'ops.auth.bearer.header')}</th>}
               <th className="col-actions" aria-label={translate(language, 'profile.stages.action') as string}></th>
             </tr>
           </thead>
@@ -1210,16 +1264,65 @@ function OperationEditor({
                       {validation.bodyError && <div className="parameter-error" role="alert">{validation.bodyError}</div>}
                     </td>
                   )}
-                  <td>
-                    <input
-                      type="password"
-                      autoComplete="off"
-                      aria-label={translate(language, 'ops.bearer.cellAria', { operationId: operation.operationId, n: payloadIndex + 1 })}
-                      placeholder={translate(language, operation.bearerAuth ? 'ops.bearer.placeholder' : 'ops.bearer.placeholderOptional')}
-                      value={payload.bearerToken}
-                      onChange={event => onPayloadField(payloadIndex, 'bearerToken', event.target.value)}
-                    />
-                  </td>
+                  {showBasicAuth && (
+                    <td className="col-auth-basic">
+                      <div className="auth-stack">
+                        <input
+                          type="text"
+                          autoComplete="off"
+                          spellCheck={false}
+                          aria-label={translate(language, 'ops.auth.basic.cellAria.username', { operationId: operation.operationId, n: payloadIndex + 1 })}
+                          placeholder={translate(language, 'ops.auth.basic.placeholder.username')}
+                          value={payload.basicAuthUsername}
+                          onChange={event => onPayloadField(payloadIndex, 'basicAuthUsername', event.target.value)}
+                        />
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          aria-label={translate(language, 'ops.auth.basic.cellAria.password', { operationId: operation.operationId, n: payloadIndex + 1 })}
+                          placeholder={translate(language, 'ops.auth.basic.placeholder.password')}
+                          value={payload.basicAuthPassword}
+                          onChange={event => onPayloadField(payloadIndex, 'basicAuthPassword', event.target.value)}
+                        />
+                      </div>
+                    </td>
+                  )}
+                  {showApiKey && (
+                    <td className="col-auth-api-key">
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        aria-label={translate(language, 'ops.auth.apiKey.cellAria', { operationId: operation.operationId, n: payloadIndex + 1 })}
+                        placeholder={translate(language, 'ops.auth.apiKey.placeholder')}
+                        value={payload.apiKey}
+                        onChange={event => onPayloadField(payloadIndex, 'apiKey', event.target.value)}
+                      />
+                    </td>
+                  )}
+                  {showOAuth2 && (
+                    <td className="col-auth-oauth2">
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        aria-label={translate(language, 'ops.auth.oauth2.cellAria', { operationId: operation.operationId, n: payloadIndex + 1 })}
+                        placeholder={translate(language, 'ops.auth.oauth2.placeholder')}
+                        value={payload.oauth2Token}
+                        onChange={event => onPayloadField(payloadIndex, 'oauth2Token', event.target.value)}
+                      />
+                    </td>
+                  )}
+                  {showBearerAuth && (
+                    <td>
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        aria-label={translate(language, 'ops.auth.bearer.cellAria', { operationId: operation.operationId, n: payloadIndex + 1 })}
+                        placeholder={translate(language, hasBearerAuth(operation) ? 'ops.auth.bearer.placeholder' : 'ops.auth.bearer.placeholderOptional')}
+                        value={payload.bearerToken}
+                        onChange={event => onPayloadField(payloadIndex, 'bearerToken', event.target.value)}
+                      />
+                    </td>
+                  )}
                   <td className="col-actions">
                     <button
                       type="button"

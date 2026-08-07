@@ -267,17 +267,25 @@ instead.
 ## 4. First run and the demo API
 
 The repository ships a small but complete demo API at
-`demo/openapi-demo.yaml`. It exercises the three things lasttest cares
-about most:
+`demo/openapi-demo.yaml`. It exercises the four authentication
+schemes lasttest recognises plus the request shapes it cares about
+most:
 
 - **GET** with query and path parameters
 - **POST** with a JSON body
-- **Bearer authentication**, demonstrated by `POST /products/search`
+- **HTTP Basic** authentication, demonstrated by `GET /products/admin/stats`
+- **HTTP Bearer** authentication, demonstrated by `POST /products/search`
+- **API Key** in a custom header, demonstrated by `GET /products/lookup-by-id`
+- **OAuth 2.0** access tokens, demonstrated by `GET /products/me`
 
 After the import, lasttest itself runs a tiny in-process server that
-answers the same paths under `/demo-api/*`. That means you can do a full
-end-to-end exercise — import → configure → run — without any external
-dependency.
+answers the same paths under `/demo-api/*`. The demo backend is
+strict — every auth endpoint accepts *only* the exact demo
+credentials and returns `401` for anything else, so a typo in the
+pool-editor input is immediately visible in the k6 report instead
+of silently passing. That means you can do a full end-to-end
+exercise — import → configure → run → observe the 200/401 in the
+report — without any external dependency.
 
 > 💡 The demo API in lasttest is **not** a real persistence layer. Data
 > is generated from the URL parameters and is discarded after the
@@ -640,20 +648,88 @@ can edit it freely; the runner validates the JSON before starting the
 test. If the body is optional and you want to send no body, clear the
 textarea.
 
-### 8.5 Bearer token
+### 8.5 Authentication
 
-The very last input on every card is a **Bearer-Token** field. Its
-behaviour depends on the spec:
+`lasttest` recognises the four most common authentication schemes
+declared in a Swagger 2.0 or OpenAPI 3 document. Each recognised
+scheme adds a dedicated credential input to the endpoint card
+(visible only when the operation references that scheme), and the
+yellow *demo banner* lights up on the four bundled demo endpoints so
+the user can copy the demo secrets into the input with one click.
 
-- If the spec defines a Bearer security scheme, the field is labelled
-  `Swagger / OpenAPI Auth` and the placeholder reminds you to enter the
-  token *without* the `Bearer ` prefix.
-- If the spec does not define any auth, the field is still there
-  (labelled `Optional für diesen Endpunkt`) so that you can add ad-hoc
-  authentication to a public endpoint.
+| Scheme | Spec declaration | Wire format | Demo endpoint | Demo credentials |
+|---|---|---|---|---|
+| **HTTP Basic** (RFC 7617) | `type: http, scheme: basic` | `Authorization: Basic <base64(user:pass)>` | `GET /products/admin/stats` | `alice` / `s3cret` |
+| **HTTP Bearer** (RFC 6750) | `type: http, scheme: bearer` | `Authorization: Bearer <token>` | `POST /products/search` | `demo-bearer-token` |
+| **API Key in custom header** | `type: apiKey, in: header, name: X-…` | `X-…: <key>` | `GET /products/lookup-by-id?id=1` | `X-API-Key: demo-api-key-12345` |
+| **OAuth 2.0** (RFC 6749, RFC 6750) | `type: oauth2, flows: {…}` | `Authorization: Bearer <access_token>` | `GET /products/me` | `Bearer demo-oauth2-token-12345` |
 
-The value is sent on every iteration of the load test as
-`Authorization: Bearer <token>`.
+The legacy `apiKey in: query`, `apiKey in: cookie` and `openIdConnect`
+schemes are reported in the import as *unsupported* (so the user sees
+which scheme was detected, even if lasttest does not yet know how to
+use it). They can always be added manually as a regular header
+parameter on the operation card.
+
+#### 8.5.1 HTTP Basic
+
+When the operation's `security` list references a Basic auth
+securityScheme, the card renders two password-style inputs labelled
+**Username** and **Password** under the column header `Basic auth`.
+The k6 script emits `Authorization: Basic <base64(username:password)>`.
+Whitespace around the credentials is trimmed; an empty username
+*and* empty password is treated as "not configured" so the
+generator omits the `Authorization` header entirely (the demo
+backend then responds `401`).
+
+#### 8.5.2 HTTP Bearer
+
+A dedicated password-style input labelled **Bearer** is rendered
+under the column header `Bearer`. The k6 script emits
+`Authorization: Bearer <token>`. The user types the raw token; the
+`Bearer ` prefix is added by the generator. An empty token omits
+the header.
+
+#### 8.5.3 API Key in a custom header
+
+A single password-style input is rendered under the column header
+`API key`. The k6 script emits the *spec-declared header name* with
+the value the user typed. For the spec
+`apiKeyAuth: { type: apiKey, in: header, name: X-API-Key }` the
+generated request carries `X-API-Key: <key>`. An apiKey in the
+`Authorization` header is detected as plain Bearer instead (the
+historical convention).
+
+#### 8.5.4 OAuth 2.0
+
+OAuth 2.0 access tokens ride the same Bearer wire format as plain
+Bearer (RFC 6750). lasttest renders a separate password-style input
+under the column header `OAuth 2.0` so the user types the access
+token in a dedicated slot, but the generated script still emits
+`Authorization: Bearer <access_token>`. The yellow demo banner
+additionally shows the *flow name* (e.g. `clientCredentials`) and
+the *scopes* (e.g. `read:products, write:products`) declared in the
+securityScheme's `flows` object, so the user knows which scopes
+their token is allowed to exercise.
+
+#### 8.5.5 Per-endpoint configuration
+
+A single endpoint can declare more than one requirement via the
+spec's `security` list. lasttest surfaces every requirement in the
+order the spec declares it and renders one credential column per
+type. The pool editor treats each input as a separate cell — for
+example an endpoint with `security: [{ basicAuth: [] }, {
+apiKeyAuth: [] }]` gets both a `Basic auth` column (username +
+password) and an `API key` column. The legacy single-token field
+(`Optional für diesen Endpunkt`) is still shown when no security
+scheme is declared, so the user can add ad-hoc authentication to a
+public endpoint.
+
+The yellow *Demo-Credentials* banner is hardcoded to the four demo
+endpoints and is **only** shown on those. It surfaces the demo
+credentials in monospace plus a one-click **In Felder übernehmen**
+button that copies the values into the input fields. The banner is
+the fastest way to verify that the spec is wired up correctly
+without copy-pasting the demo secrets by hand.
 
 ### 8.6 Payload pool — multiple datasets per endpoint
 

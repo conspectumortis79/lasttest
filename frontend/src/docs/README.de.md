@@ -245,11 +245,21 @@ gesendet wurde.
 
 Die Demo-Spezifikation liegt unter `demo/openapi-demo.yaml`. Sie
 enthält GET-Requests mit editierbaren Query- und Pfadparametern,
-POST-Requests mit JSON-Body sowie PUT und DELETE.
-`POST /products/search` demonstriert Bearer-Authentifizierung; jedes
-nicht-leere Demo-Token wird akzeptiert. Nach dem Import zeigt die UI
-pro Endpunkt eine Eingabebox für Parameter, Request-Body und
-Bearer-Token.
+POST-Requests mit JSON-Body sowie PUT und DELETE. Vier dedizierte
+Demo-Endpunkte üben die vier Authentifizierungs-Schemata, die
+lasttest erkennt:
+
+- `GET /products/admin/stats` — HTTP Basic (Benutzername `alice`, Passwort `s3cret`)
+- `POST /products/search` — HTTP Bearer (Token `demo-bearer-token`)
+- `GET /products/lookup-by-id?id=1` — API Key in eigenem Header (`X-API-Key: demo-api-key-12345`)
+- `GET /products/me` — OAuth 2.0-Access-Token (`Bearer demo-oauth2-token-12345`)
+
+Das Demo-Backend ist strikt — jeder Auth-Endpunkt akzeptiert **nur**
+die exakten Demo-Credentials und antwortet sonst `401`, so dass ein
+Tippfehler im Pool-Editor-Eingabefeld sofort im k6-Report sichtbar
+wird. Auf jedem dieser Endpunkte erscheint in der UI ein gelbes
+„Demo-Credentials“-Banner mit einem **In Felder übernehmen**-Button,
+sodass der User die Werte nicht per Hand kopieren muss.
 
 Die Demo deklariert außerdem vier `servers`-Einträge (lokale Demo,
 Staging, Integration, Produktion), damit die **Base-URL-Dropdown** in

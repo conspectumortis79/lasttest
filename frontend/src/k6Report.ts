@@ -1,12 +1,15 @@
-export type ReportParameterValue = { name: string, location: string, value: string }
+type ReportParameterValue = { name: string, location: string, value: string }
 
-export type ReportPayload = {
+type ReportPayload = {
   parameterValues: ReportParameterValue[]
   requestBodyJson?: string
   bearerTokenConfigured?: boolean
+  basicAuthConfigured?: boolean
+  apiKeyConfigured?: boolean
+  oauth2TokenConfigured?: boolean
 }
 
-export type ReportPayloadUsage = {
+type ReportPayloadUsage = {
   /** Zero-based index into the operation's `payloads` list. */
   index: number
   /** How many times k6 actually picked this payload during the run. */
@@ -62,6 +65,27 @@ export type ReportOperation = {
   requestBodyJson?: string
   bearerTokenConfigured: boolean
   /**
+   * True when at least one payload in the run had a non-blank
+   * Basic auth username or password. The report uses this to
+   * render the "Basic auth: configured / not configured" line.
+   * Older reports (pre-Basic-auth feature) won't carry this
+   * field; the default of `false` keeps the rendering in line
+   * with the historical behaviour.
+   */
+  basicAuthConfigured?: boolean
+  /**
+   * True when at least one payload in the run had a non-blank
+   * API key. The report uses this to render the "API key:
+   * configured / not configured" line.
+   */
+  apiKeyConfigured?: boolean
+  /**
+   * True when at least one payload in the run had a non-blank
+   * OAuth 2.0 access token. The report uses this to render the
+   * "OAuth 2.0: configured / not configured" line.
+   */
+  oauth2TokenConfigured?: boolean
+  /**
    * All payloads that were configured for this endpoint at the time
    * the run was started. The report lists every entry so the user
    * can see exactly which datasets k6 cycled through or sampled
@@ -72,7 +96,7 @@ export type ReportOperation = {
   payloads: ReportPayload[]
 }
 
-export type ReportPayloadStrategy = 'sequential' | 'random'
+type ReportPayloadStrategy = 'sequential' | 'random'
 
 /**
  * Renders the human-readable label for the payload strategy the run
@@ -136,7 +160,7 @@ export type ReportLoadProfile = {
 
 export type ReportLoadStage = { target: number, durationSeconds: number }
 
-export type TestRunConfiguration = {
+type TestRunConfiguration = {
   apiTitle: string
   apiVersion: string
   baseUrl: string
@@ -206,7 +230,7 @@ export type TestRun = {
 // significant: each predicate runs in order so that a more specific
 // signal (e.g. a k6-binary problem) wins over a more generic one
 // (e.g. unknown error text) when both could match.
-export type FailureCategory =
+type FailureCategory =
   | 'k6-missing' // H. Java IOException: "Cannot run program \"k6\""
   | 'tls' // B. CERT_AUTHORITY_INVALID, x509, PKIX, certificate verify failed
   | 'unreachable' // A. ERR_CONNECTION_REFUSED, "connection refused"
@@ -218,7 +242,7 @@ export type FailureCategory =
   | 'threshold-failure-rate' // F. http_req_failed.value > 0.05
   | 'unknown' // I. fallback when nothing else matches
 
-export type FailureSummary = {
+type FailureSummary = {
   category: FailureCategory
   // Short headline shown next to the status badge, e.g. "Target unreachable".
   diagnosis: string
@@ -230,7 +254,7 @@ export type FailureSummary = {
 }
 
 // One labelled value in the metric row beneath the status badge.
-export type MetricItem = {
+type MetricItem = {
   label: string
   value: string
   severity: 'normal' | 'error' | 'warn' | 'muted'
@@ -295,18 +319,17 @@ export const TRACKED_STATUS_CODES = [
   400, 401, 403, 404, 409, 422, 429, // 4xx client error
   500, 502, 503, 504, // 5xx server error
 ] as const
-export type TrackedStatusCode = (typeof TRACKED_STATUS_CODES)[number]
+type TrackedStatusCode = (typeof TRACKED_STATUS_CODES)[number]
 
 export const FALLBACK_CODES = ['err', 'other'] as const
-export type FallbackCode = (typeof FALLBACK_CODES)[number]
+type FallbackCode = (typeof FALLBACK_CODES)[number]
 
 // Every column the report knows about. We keep `err` last so the
 // status-code columns stay grouped and the fallback columns visually
 // detach from the main grid.
 export const ALL_STATUS_CODES = [...TRACKED_STATUS_CODES, ...FALLBACK_CODES] as const
-export type AllStatusCode = (typeof ALL_STATUS_CODES)[number]
 
-export type StatusDistributionRow = {
+type StatusDistributionRow = {
   operationId: string
   // Indexed by string for ergonomic lookup in the React component.
   // Numeric keys are the tracked status codes, `"err"` and `"other"`
@@ -694,7 +717,7 @@ export type RampPlot = {
 
 const PLOT_PADDING = 4
 
-export function plotValue(plot: RampPlot, seconds: number, value: number): { x: number, y: number } {
+function plotValue(plot: RampPlot, seconds: number, value: number): { x: number, y: number } {
   const x = (seconds / plot.maxSeconds) * (plot.width - 2 * PLOT_PADDING) + PLOT_PADDING
   const y = plot.height - PLOT_PADDING - (value / plot.maxValue) * (plot.height - 2 * PLOT_PADDING)
   return { x, y }
@@ -1216,7 +1239,7 @@ export function progressHint(run: TestRun): string | undefined {
 // above the summary cards. The list of failed metrics uses the same
 // k6 metric names the user wrote in their load profile, so the banner
 // ties back to the test definition instead of inventing new labels.
-export type ThresholdSummary = {
+type ThresholdSummary = {
   /** True when the run completed and no configured threshold was crossed. */
   passed: boolean
   /**

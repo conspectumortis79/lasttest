@@ -47,14 +47,14 @@ services:
   # fast, k6-native. The data lands in the default database `k6`,
   # retention policy `autogen`.
   #
-  # Persistenz via benanntem Volume. Beim ersten Start wird die
-  # Datenbank `k6` automatisch angelegt und ein Admin-User mit
-  # Schreib-/Leserechten erstellt.
+  # Persistence via named volume. On first start, the `k6`
+  # database is created automatically and an admin user with
+  # read/write permissions is provisioned.
   influxdb:
     container_name: lasttest-influxdb
     image: influxdb:1.11
     ports:
-      # UI unter http://localhost:8086/ erreichbar (Login siehe unten)
+      # UI reachable at http://localhost:8086/ (login details below)
       - "8086:8086"
     volumes:
       - influxdb-data:/var/lib/influxdb
@@ -86,6 +86,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro

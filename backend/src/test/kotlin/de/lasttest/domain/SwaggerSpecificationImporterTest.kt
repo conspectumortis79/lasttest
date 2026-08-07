@@ -1,6 +1,7 @@
 package de.lasttest.domain
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import de.lasttest.api.AuthRequirement
 import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.media.ArraySchema
@@ -659,6 +660,108 @@ class SwaggerSpecificationImporterTest {
         val imported = importer.import(NON_BEARER_SECURITY)
 
         assertTrue(imported.operations.none { it.bearerAuth })
+    }
+
+    @Test
+    fun `classifies http basic security scheme as AuthRequirement Basic`() {
+        val spec =
+            """
+            openapi: 3.0.3
+            info: {title: Basic API, version: "1"}
+            components:
+              securitySchemes:
+                basicAuth: {type: http, scheme: basic}
+            paths:
+              /admin/stats:
+                get:
+                  operationId: getAdminStats
+                  security: [{basicAuth: []}]
+                  responses: {'200': {description: OK}}
+            """.trimIndent()
+        val imported = importer.import(spec)
+
+        val operation = imported.operations.single { it.operationId == "getAdminStats" }
+        assertEquals(listOf(AuthRequirement.Basic("basicAuth")), operation.authRequirements)
+        assertEquals(false, operation.bearerAuth)
+    }
+
+    @Test
+    fun `classifies oauth2 security scheme as AuthRequirement OAuth2 and exposes the declared flows`() {
+        val spec =
+            """
+            openapi: 3.0.3
+            info: {title: OAuth API, version: "1"}
+            components:
+              securitySchemes:
+                oauth2:
+                  type: oauth2
+                  flows:
+                    clientCredentials:
+                      tokenUrl: https://example.test/oauth/token
+                      scopes:
+                        read:products: Read products
+                        write:products: Write products
+            paths:
+              /me:
+                get:
+                  operationId: getMe
+                  security: [{oauth2: []}]
+                  responses: {'200': {description: OK}}
+            """.trimIndent()
+        val imported = importer.import(spec)
+
+        val operation = imported.operations.single { it.operationId == "getMe" }
+        assertEquals(1, operation.authRequirements.size)
+        val requirement = operation.authRequirements.single()
+        assertTrue(requirement is AuthRequirement.OAuth2)
+        val oauth2: AuthRequirement.OAuth2 = requirement
+        assertEquals("oauth2", oauth2.schemeName)
+        // The flow data must travel through the importer so the
+        // banner can render the flow name + scopes.
+        assertEquals(1, oauth2.flows.size)
+        val flow = oauth2.flows.single()
+        assertEquals("clientCredentials", flow.type)
+        assertEquals("https://example.test/oauth/token", flow.tokenUrl)
+        assertEquals(listOf("read:products", "write:products"), flow.scopes)
+        // OAuth 2.0 access tokens ride the Bearer wire format
+        // (RFC 6750) so the legacy `bearerAuth` flag flips on and
+        // the pool editor renders the dedicated OAuth2 input column.
+        assertEquals(true, operation.bearerAuth)
+    }
+
+    @Test
+    fun `preserves order of multiple security requirements on one operation`() {
+        val spec =
+            """
+            openapi: 3.0.3
+            info: {title: Dual API, version: "1"}
+            components:
+              securitySchemes:
+                basicAuth: {type: http, scheme: basic}
+                bearerAuth: {type: http, scheme: bearer}
+            paths:
+              /whoami:
+                get:
+                  operationId: whoAmI
+                  security:
+                    - basicAuth: []
+                    - bearerAuth: []
+                  responses: {'200': {description: OK}}
+            """.trimIndent()
+        val imported = importer.import(spec)
+
+        val operation = imported.operations.single { it.operationId == "whoAmI" }
+        assertEquals(
+            listOf(
+                AuthRequirement.Basic("basicAuth"),
+                AuthRequirement.Bearer("bearerAuth"),
+            ),
+            operation.authRequirements,
+        )
+        // bearerAuth is a derived "is there any Bearer" predicate, so
+        // the second requirement must be enough to flip it to true
+        // even though the first entry is Basic.
+        assertTrue(operation.bearerAuth)
     }
 
     @Test

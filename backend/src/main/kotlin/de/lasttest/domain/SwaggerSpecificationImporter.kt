@@ -5,6 +5,7 @@ import de.lasttest.api.ApiOperation
 import de.lasttest.api.ApiParameter
 import de.lasttest.api.ApiParameterSchema
 import de.lasttest.api.ApiServer
+import de.lasttest.api.AuthRequirement
 import de.lasttest.api.ImportedSpecification
 import de.lasttest.api.RequestBodySchema
 import io.swagger.v3.oas.models.OpenAPI
@@ -12,7 +13,6 @@ import io.swagger.v3.oas.models.media.ArraySchema
 import io.swagger.v3.oas.models.media.Schema
 import io.swagger.v3.oas.models.parameters.Parameter
 import io.swagger.v3.oas.models.security.SecurityRequirement
-import io.swagger.v3.oas.models.security.SecurityScheme
 import io.swagger.v3.oas.models.servers.Server
 import io.swagger.v3.oas.models.servers.ServerVariable
 import io.swagger.v3.parser.OpenAPIV3Parser
@@ -38,12 +38,11 @@ class SwaggerSpecificationImporter : SpecificationImporter {
             throw InvalidSpecificationException(listOf("Die Swagger-/OpenAPI-Dokumentation ist leer."))
         }
         val api = parseDocument(content)
-        val bearerSecuritySchemes =
+        val requirementsByName: Map<String, AuthRequirement> =
             api.components
                 ?.securitySchemes
                 .orEmpty()
-                .filterValues(::isBearerSecurityScheme)
-                .keys
+                .mapValues { (name, scheme) -> AuthSchemeClassifier.classify(name, scheme) }
         val operations =
             api.paths.orEmpty().flatMap { (path, pathItem) ->
                 pathItem.readOperationsMap().map { (method, operation) ->
@@ -73,7 +72,7 @@ class SwaggerSpecificationImporter : SpecificationImporter {
                         requestBodySchema = primaryMedia?.schema?.let { dereference(it, api)?.let(::toRequestBodySchema) },
                         hasRequestBody = operation.requestBody != null,
                         requestBodyRequired = operation.requestBody?.required == true,
-                        bearerAuth = usesBearerAuthentication(operation.security, api.security, bearerSecuritySchemes),
+                        authRequirements = requirementsForOperation(operation.security, api.security, requirementsByName),
                     )
                 }
             }
@@ -158,20 +157,35 @@ class SwaggerSpecificationImporter : SpecificationImporter {
         swaggerProblems: List<String>?,
     ): List<String> = (openApiProblems.orEmpty() + swaggerProblems.orEmpty()).distinct().ifEmpty { listOf("Ungültige Swagger-/OpenAPI-Dokumentation.") }
 
-    private fun isBearerSecurityScheme(scheme: SecurityScheme): Boolean = isHttpBearer(scheme) || isAuthorizationApiKey(scheme)
-
-    private fun isHttpBearer(scheme: SecurityScheme): Boolean = scheme.type == SecurityScheme.Type.HTTP && scheme.scheme.equals("bearer", ignoreCase = true)
-
-    private fun isAuthorizationApiKey(scheme: SecurityScheme): Boolean =
-        scheme.type == SecurityScheme.Type.APIKEY && scheme.`in` == SecurityScheme.In.HEADER && scheme.name.equals("Authorization", ignoreCase = true)
-
-    private fun usesBearerAuthentication(
+    /**
+     * Collects every [AuthRequirement] declared on a single operation.
+     * The operation-local `security` list wins over the global
+     * `security` block; an explicit empty list (`security: []`) on the
+     * operation means "no auth for this operation" and yields an
+     * empty result here.
+     */
+    private fun requirementsForOperation(
         operationSecurity: List<SecurityRequirement>?,
         globalSecurity: List<SecurityRequirement>?,
-        bearerSecuritySchemes: Set<String>,
-    ): Boolean {
+        known: Map<String, AuthRequirement>,
+    ): List<AuthRequirement> {
         val requirements = operationSecurity ?: globalSecurity.orEmpty()
-        return requirements.any { requirement -> requirement.keys.any(bearerSecuritySchemes::contains) }
+        return requirements
+            .flatMap { requirement -> requirement.keys.mapNotNull(known::get) }
+            // The same scheme name may be referenced from multiple
+            // branches of a `security` OR; rendering two identical
+            // input rows for one operation is a UX bug, so we dedupe
+            // by (concrete class, schemeName) — the only fields that
+            // influence the UI / generator behaviour.
+            .distinctBy { requirement ->
+                when (requirement) {
+                    is AuthRequirement.Basic -> "Basic:${requirement.schemeName}"
+                    is AuthRequirement.Bearer -> "Bearer:${requirement.schemeName}"
+                    is AuthRequirement.ApiKey -> "ApiKey:${requirement.schemeName}:${requirement.headerName}"
+                    is AuthRequirement.OAuth2 -> "OAuth2:${requirement.schemeName}"
+                    is AuthRequirement.Unsupported -> "Unsupported:${requirement.schemeName}"
+                }
+            }
     }
 
     internal fun toParameter(parameter: Parameter): ApiParameter? {

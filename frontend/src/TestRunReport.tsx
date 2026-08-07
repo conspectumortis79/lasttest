@@ -382,7 +382,42 @@ function ReportOperationCard({ operation, run }: { operation: ReportOperation, r
             <span>{parameter.location}</span><strong>{parameter.name}</strong><code>{parameter.value || translate(lang, 'report.payload.params.empty')}</code>
           </div>)}
         </div>}
-        <p><strong>{operation.bearerTokenConfigured ? translate(lang, 'report.payload.bearer.configured') : translate(lang, 'report.payload.bearer.notConfigured')}</strong></p>
+        <div className="report-auth-list">
+          <p className="report-auth-heading">{translate(lang, 'report.payload.auth.heading')}</p>
+          <ul>
+            <li>
+              <strong>
+                {operation.bearerTokenConfigured
+                  ? translate(lang, 'report.payload.bearer.configured')
+                  : translate(lang, 'report.payload.bearer.notConfigured')}
+              </strong>
+            </li>
+            {operation.basicAuthConfigured && (
+              <li>
+                <strong>{translate(lang, 'report.payload.basic.configured')}</strong>
+              </li>
+            )}
+            {!operation.basicAuthConfigured && (
+              <li>
+                {translate(lang, 'report.payload.basic.notConfigured')}
+              </li>
+            )}
+            <li>
+              <strong>
+                {operation.apiKeyConfigured
+                  ? translate(lang, 'report.payload.apiKey.configured')
+                  : translate(lang, 'report.payload.apiKey.notConfigured')}
+              </strong>
+            </li>
+            <li>
+              <strong>
+                {operation.oauth2TokenConfigured
+                  ? translate(lang, 'report.payload.oauth2.configured')
+                  : translate(lang, 'report.payload.oauth2.notConfigured')}
+              </strong>
+            </li>
+          </ul>
+        </div>
         {operation.requestBodyJson != null && <details><summary>{translate(lang, 'report.payload.jsonSummary')}</summary><pre>{operation.requestBodyJson || translate(lang, 'report.payload.jsonEmpty')}</pre></details>}
         {singlePayloadFallback && <p className="report-legacy-note">{translate(lang, 'report.legacy.hint')}</p>}
       </>

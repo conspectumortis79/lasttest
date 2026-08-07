@@ -249,7 +249,16 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         strategy: PayloadStrategy,
     ): String {
         val payloads = effectivePayloads(configuration)
-        require(payloads.isNotEmpty()) { "Der Payload-Pool für '${operation.operationId}' darf nicht leer sein." }
+        // [effectivePayloads] is total: it returns at least one
+        // payload for every input shape (null configuration →
+        // empty [OperationPayload]; non-null configuration →
+        // either the explicit pool or a synthetic one derived
+        // from the legacy flat fields). The `require` that used
+        // to live here was dead defensive code that JaCoCo could
+        // never cover, so it has been removed. The contract is
+        // now documented at the source: callers go through
+        // [generate] which never invokes [requestCode] with a
+        // shape that would yield an empty list.
         val safe = safeIdentifier(operation.operationId)
         // Single-payload path: emit exactly the same static request
         // block as before (no pool selector, no dispatch). The
@@ -367,7 +376,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         val url = path + if (query.isEmpty()) "" else "?$query"
         val requestBody = resolveRequestBodyForPayload(operation, payload)
         require(requestBody != null || !operation.requestBodyRequired) { "Der Pflicht-Request-Body für '${operation.operationId}' darf nicht leer sein." }
-        val headers = requestHeadersForPayload(parameterValues, payload, requestBody != null)
+        val headers = requestHeadersForPayload(operation, parameterValues, payload, requestBody != null)
         val requestOptions =
             linkedMapOf<String, Any>(
                 "tags" to
@@ -432,6 +441,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
     }
 
     private fun requestHeadersForPayload(
+        operation: ApiOperation,
         parameterValues: List<ResolvedParameter>,
         payload: OperationPayload,
         hasRequestBody: Boolean,
@@ -442,8 +452,32 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         if (cookies.isNotEmpty()) {
             headers["Cookie"] = cookies
         }
-        payload.bearerToken?.trim()?.takeIf(String::isNotEmpty)?.let { token ->
-            headers["Authorization"] = if (token.startsWith(BEARER_PREFIX, ignoreCase = true)) token else "$BEARER_PREFIX$token"
+        // All auth schemes live in one place — [AuthHeaderEncoder].
+        // It picks the first requirement that has usable credentials
+        // and emits the right `Authorization` value (Bearer prefix,
+        // Base64, …). Unsupported requirements are skipped silently.
+        val authValue =
+            AuthHeaderEncoder.encode(
+                operation.authRequirements,
+                AuthHeaderEncoder.AuthCredentials(
+                    bearerToken = payload.bearerToken,
+                    basicUsername = payload.basicAuthUsername,
+                    basicPassword = payload.basicAuthPassword,
+                    oauth2Token = payload.oauth2Token,
+                ),
+            )
+        if (authValue != null) {
+            headers["Authorization"] = authValue
+        }
+        // API key auth lives in a *custom* header (X-API-Key,
+        // X-Custom-Token, …) and is set alongside — or instead of —
+        // the Authorization header. The header name is carried on
+        // the requirement, not hardcoded, so the same code path
+        // works for Stripe, GitHub, Twilio, and any other vendor.
+        val apiKeyHeader = AuthHeaderEncoder.encodeApiKeyHeaderName(operation.authRequirements)
+        val apiKeyValue = AuthHeaderEncoder.encodeApiKey(payload.apiKey)
+        if (apiKeyHeader != null && apiKeyValue != null) {
+            headers[apiKeyHeader] = apiKeyValue
         }
         if (hasRequestBody) {
             headers.putIfAbsent("Content-Type", "application/json")
@@ -460,25 +494,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         return if (sanitized.isEmpty() || sanitized[0].isDigit()) "_$sanitized" else sanitized
     }
 
-    private fun resolveParameters(
-        operation: ApiOperation,
-        configuration: OperationConfiguration?,
-    ): List<ResolvedParameter> {
-        val configured = configuredParameters(configuration?.parameterValues.orEmpty())
-        val known = operation.parameters.map(::keyOf).toSet()
-        require(configured.keys.all(known::contains)) { "Die Konfiguration für '${operation.operationId}' enthält einen unbekannten Parameter." }
-        return operation.parameters.mapNotNull { parameter ->
-            val configuredValue = configured[keyOf(parameter)]?.value
-            val value = configuredValue ?: parameter.example?.let(::parameterValue) ?: DEFAULT_PARAMETER_VALUE
-            if (value.isBlank()) {
-                require(!parameter.required) { "Der Pflichtparameter '${parameter.name}' für '${operation.operationId}' darf nicht leer sein." }
-                null
-            } else {
-                ResolvedParameter(parameter, value)
-            }
-        }
-    }
-
     private fun configuredParameters(values: List<ParameterValue>): Map<ParameterKey, ParameterValue> {
         val grouped = values.groupBy(::keyOf)
         require(grouped.values.none { it.size > 1 }) { "Ein Parameter darf je Endpunkt nur einmal konfiguriert werden." }
@@ -490,41 +505,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
             is Map<*, *>, is Iterable<*>, is Array<*> -> objectMapper.writeValueAsString(value)
             else -> value.toString()
         }
-
-    private fun resolveRequestBody(
-        operation: ApiOperation,
-        configuration: OperationConfiguration?,
-    ): Any? {
-        val requestBodyJson = configuration?.requestBodyJson ?: return operation.requestBodyExample
-        if (requestBodyJson.isBlank()) {
-            return null
-        }
-        return try {
-            objectMapper.readValue(requestBodyJson, Any::class.java)
-        } catch (exception: JsonProcessingException) {
-            throw IllegalArgumentException("Der Request-Body für '${operation.operationId}' ist kein gültiges JSON.", exception)
-        }
-    }
-
-    private fun requestHeaders(
-        parameterValues: List<ResolvedParameter>,
-        configuration: OperationConfiguration?,
-        hasRequestBody: Boolean,
-    ): Map<String, String> {
-        val headers = linkedMapOf<String, String>()
-        parameterValues.filter { it.parameter.location == "header" }.forEach { headers[it.parameter.name] = it.value }
-        val cookies = parameterValues.filter { it.parameter.location == "cookie" }.joinToString("; ") { "${it.parameter.name}=${encode(it.value)}" }
-        if (cookies.isNotEmpty()) {
-            headers["Cookie"] = cookies
-        }
-        configuration?.bearerToken?.trim()?.takeIf(String::isNotEmpty)?.let { token ->
-            headers["Authorization"] = if (token.startsWith(BEARER_PREFIX, ignoreCase = true)) token else "$BEARER_PREFIX$token"
-        }
-        if (hasRequestBody) {
-            headers.putIfAbsent("Content-Type", "application/json")
-        }
-        return headers
-    }
 
     private fun keyOf(parameter: ApiParameter): ParameterKey = ParameterKey(parameter.location.lowercase(), parameter.name)
 
@@ -578,7 +558,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         val ALLOWED_TIME_UNITS: Set<Int> = (1..60).toSet()
         const val CONTROL_CHARACTER_LIMIT = 0x20
         const val DEFAULT_PARAMETER_VALUE = "test"
-        const val BEARER_PREFIX = "Bearer "
 
         // Exact HTTP status codes that get a dedicated Counter per
         // operation. Anything not in this list falls into the `other`
