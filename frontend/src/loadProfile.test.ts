@@ -3,12 +3,14 @@ import { test } from 'node:test'
 import {
   arrivalRatePreset,
   defaultLoadProfile,
+  isPayloadStrategy,
   loadPreset,
   loadProfileLabel,
   MAX_DURATION_SECONDS,
   MAX_ITERATIONS,
   MAX_RATE,
   MAX_VIRTUAL_USERS,
+  PAYLOAD_STRATEGIES,
   requestsPreset,
   serialiseLoadProfile,
   smokePreset,
@@ -18,6 +20,7 @@ import {
   validateLoadProfile,
   type LoadProfile,
   type LoadStage,
+  type PayloadStrategy,
 } from './loadProfile.ts'
 
 test('defaultLoadProfile returns a valid constant-vus profile', () => {
@@ -359,3 +362,68 @@ test('loadProfileLabel for ramping-vus handles empty stages defensively', () => 
   const label = loadProfileLabel({ type: 'ramping-vus', startVUs: 0, stages: [] })
   ok(label.includes('0 Stages'))
 })
+
+// ---- PayloadStrategy --------------------------------------------------------
+
+test('PAYLOAD_STRATEGIES lists the two supported strategies in the documented order', () => {
+  deepEqual([...PAYLOAD_STRATEGIES], ['sequential', 'random'])
+})
+
+test('isPayloadStrategy accepts both strategy values and rejects anything else', () => {
+  equal(isPayloadStrategy('sequential'), true)
+  equal(isPayloadStrategy('random'), true)
+  equal(isPayloadStrategy('RANDOM'), false)        // case-sensitive on purpose
+  equal(isPayloadStrategy(''), false)
+  equal(isPayloadStrategy(undefined), false)
+  equal(isPayloadStrategy(null), false)
+  equal(isPayloadStrategy(42), false)
+  equal(isPayloadStrategy({}), false)
+})
+
+test('validateLoadProfile accepts every profile type with a payloadStrategy', () => {
+  const strategies: PayloadStrategy[] = ['sequential', 'random']
+  for (const strategy of strategies) {
+    equal(validateLoadProfile({ type: 'constant-vus', virtualUsers: 1, durationSeconds: 1, payloadStrategy: strategy }), undefined)
+    equal(validateLoadProfile({ type: 'shared-iterations', virtualUsers: 1, iterations: 1, payloadStrategy: strategy }), undefined)
+    equal(validateLoadProfile({ type: 'ramping-vus', startVUs: 0, stages: [{ target: 0, durationSeconds: 1 }], payloadStrategy: strategy }), undefined)
+    equal(validateLoadProfile({ type: 'constant-arrival-rate', rate: 1, timeUnitSeconds: 1, durationSeconds: 1, preAllocatedVUs: 1, maxVUs: 1, payloadStrategy: strategy }), undefined)
+  }
+})
+
+test('validateLoadProfile accepts every profile type with payloadStrategy omitted (default)', () => {
+  equal(validateLoadProfile({ type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }), undefined)
+  equal(validateLoadProfile({ type: 'shared-iterations', virtualUsers: 1, iterations: 1 }), undefined)
+  equal(validateLoadProfile({ type: 'ramping-vus', startVUs: 0, stages: [{ target: 0, durationSeconds: 1 }] }), undefined)
+  equal(validateLoadProfile({ type: 'constant-arrival-rate', rate: 1, timeUnitSeconds: 1, durationSeconds: 1, preAllocatedVUs: 1, maxVUs: 1 }), undefined)
+})
+
+test('validateLoadProfile rejects an unknown payloadStrategy before type-specific errors', () => {
+  // The strategy check must run first so a typo like "sequntial" is the
+  // error the user sees, not a confusing downstream executor error.
+  const error = validateLoadProfile({ type: 'constant-vus', virtualUsers: 1, durationSeconds: 1, payloadStrategy: 'sequntial' as unknown as PayloadStrategy })
+  ok(error?.includes('Payload-Strategie'))
+})
+
+test('validateLoadProfile rejects non-string payloadStrategy values', () => {
+  equal(validateLoadProfile({ type: 'constant-vus', virtualUsers: 1, durationSeconds: 1, payloadStrategy: 42 as unknown as PayloadStrategy }), 'Payload-Strategie muss "sequential" oder "random" sein.')
+  equal(validateLoadProfile({ type: 'constant-vus', virtualUsers: 1, durationSeconds: 1, payloadStrategy: null as unknown as PayloadStrategy }), 'Payload-Strategie muss "sequential" oder "random" sein.')
+  equal(validateLoadProfile({ type: 'constant-vus', virtualUsers: 1, durationSeconds: 1, payloadStrategy: {} as unknown as PayloadStrategy }), 'Payload-Strategie muss "sequential" oder "random" sein.')
+})
+
+test('serialiseLoadProfile forwards payloadStrategy on every profile type', () => {
+  const strategies: PayloadStrategy[] = ['sequential', 'random']
+  for (const strategy of strategies) {
+    equal(serialiseLoadProfile({ type: 'constant-vus', virtualUsers: 1, durationSeconds: 1, payloadStrategy: strategy }).payloadStrategy, strategy)
+    equal(serialiseLoadProfile({ type: 'shared-iterations', virtualUsers: 1, iterations: 1, payloadStrategy: strategy }).payloadStrategy, strategy)
+    equal(serialiseLoadProfile({ type: 'ramping-vus', startVUs: 0, stages: [{ target: 0, durationSeconds: 1 }], payloadStrategy: strategy }).payloadStrategy, strategy)
+    equal(serialiseLoadProfile({ type: 'constant-arrival-rate', rate: 1, timeUnitSeconds: 1, durationSeconds: 1, preAllocatedVUs: 1, maxVUs: 1, payloadStrategy: strategy }).payloadStrategy, strategy)
+  }
+})
+
+test('serialiseLoadProfile omits payloadStrategy when not set', () => {
+  equal(serialiseLoadProfile({ type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }).payloadStrategy, undefined)
+  equal(serialiseLoadProfile({ type: 'shared-iterations', virtualUsers: 1, iterations: 1 }).payloadStrategy, undefined)
+  equal(serialiseLoadProfile({ type: 'ramping-vus', startVUs: 0, stages: [{ target: 0, durationSeconds: 1 }] }).payloadStrategy, undefined)
+  equal(serialiseLoadProfile({ type: 'constant-arrival-rate', rate: 1, timeUnitSeconds: 1, durationSeconds: 1, preAllocatedVUs: 1, maxVUs: 1 }).payloadStrategy, undefined)
+})
+

@@ -7,6 +7,7 @@ import {
   completedRequestCount,
   copyTextToClipboard,
   extractErrorLine,
+  extractPayloadUsage,
   formatBytes,
   formatDurationHuman,
   formatDurationSeconds,
@@ -21,6 +22,8 @@ import {
   operationDisplayPath,
   parseK6Summary,
   progressHint,
+  renderPayloadStrategyHelp,
+  renderPayloadStrategyLabel,
   runElapsedSeconds,
   runRemainingSeconds,
   statusDistribution,
@@ -121,6 +124,7 @@ test('builds the displayed endpoint from path and query values', () => {
       { name: 'unused', location: 'query', value: '' },
     ],
     bearerTokenConfigured: false,
+    payloads: [],
   }
 
   equal(operationDisplayPath(operation), '/pets/42?expand=owner')
@@ -138,6 +142,7 @@ test('keeps unresolved paths and omits empty queries', () => {
       { name: 'X-Tenant', location: 'header', value: 'demo' },
     ],
     bearerTokenConfigured: false,
+    payloads: [],
   }
 
   equal(operationDisplayPath(operation), '/pets/{id}')
@@ -1560,5 +1565,111 @@ test('summariseThresholds returns no failures when the run has no k6 summary at 
   const result = summariseThresholds(run)
   equal(result.passed, false)
   deepEqual(result.failedMetrics, [])
+})
+
+// ---- renderPayloadStrategyLabel / renderPayloadStrategyHelp ------------
+
+test('renderPayloadStrategyLabel maps every wire value to a user-facing string', () => {
+  equal(renderPayloadStrategyLabel('random'), 'Zufällig')
+  equal(renderPayloadStrategyLabel('sequential'), 'Sequenziell')
+  // Legacy runs that pre-date the pool feature arrive without a
+  // strategy field; the label must still be a sensible default.
+  equal(renderPayloadStrategyLabel(null), 'Sequenziell')
+  equal(renderPayloadStrategyLabel(undefined), 'Sequenziell')
+  // Unknown values fall through to the raw string so the user can
+  // still spot a typo or a future enum member.
+  equal(renderPayloadStrategyLabel('fancy'), 'fancy')
+})
+
+test('renderPayloadStrategyHelp describes what the strategy did during the run', () => {
+  equal(renderPayloadStrategyHelp('random'), 'Pro Iteration ein zufälliger Payload aus dem Pool des Endpunkts.')
+  equal(renderPayloadStrategyHelp('sequential'), '1, 2, …, letzter, dann wieder 1 — Round-Robin mit Wrap-Around.')
+  equal(renderPayloadStrategyHelp(null), 'Standard-Verhalten: jeder Endpunkt mit einem einzigen Datensatz.')
+  equal(renderPayloadStrategyHelp(undefined), 'Standard-Verhalten: jeder Endpunkt mit einem einzigen Datensatz.')
+  equal(renderPayloadStrategyHelp('fancy'), '')
+})
+
+// ---- extractPayloadUsage -------------------------------------------------
+
+test('extractPayloadUsage reads the per-payload counters and returns them sorted by index', () => {
+  const run = {
+    summary: {
+      raw: JSON.stringify({
+        metrics: {
+          'lt_payload_0_listProducts': { count: 7 },
+          'lt_payload_1_listProducts': { count: 3 },
+          'lt_payload_2_listProducts': { count: 0 },
+          // Other counters that should be ignored: status codes,
+          // network-error bucket, and a counter for a different
+          // operation that we must not attribute to listProducts.
+          'lt_status_200_listProducts': { count: 10 },
+          'lt_status_err_listProducts': { count: 0 },
+          'lt_payload_0_otherOp': { count: 99 },
+          'http_reqs': { count: 10 },
+        },
+      }),
+    },
+  } as unknown as TestRun
+  const usage = extractPayloadUsage(run, 'listProducts')
+  equal(usage.length, 3)
+  equal(usage[0].index, 0)
+  equal(usage[0].count, 7)
+  equal(usage[1].index, 1)
+  equal(usage[1].count, 3)
+  equal(usage[2].index, 2)
+  equal(usage[2].count, 0)
+})
+
+test('extractPayloadUsage returns an empty array when the summary is missing or malformed', () => {
+  equal(extractPayloadUsage({} as TestRun, 'listProducts').length, 0)
+  equal(extractPayloadUsage({ summary: { raw: 'not-json' } } as unknown as TestRun, 'listProducts').length, 0)
+  equal(extractPayloadUsage({ summary: { raw: '' } } as unknown as TestRun, 'listProducts').length, 0)
+  // Summary that parses but carries no `metrics` key — the ?? {}
+  // fallback path is the one exercised here.
+  equal(extractPayloadUsage({ summary: { raw: '{"foo": 1}' } } as unknown as TestRun, 'listProducts').length, 0)
+})
+
+test('extractPayloadUsage ignores counters that do not match the lt_payload_<i>_<op> pattern', () => {
+  const run = {
+    summary: {
+      raw: JSON.stringify({
+        metrics: {
+          'lt_payload_-1_listProducts': { count: 99 }, // negative index → ignored
+          'lt_payload_abc_listProducts': { count: 99 }, // not an integer → ignored
+          // Same suffix but a non-integer middle part so the parseInt
+          // branch (returning NaN) is exercised end-to-end.
+          'lt_payload_NaN_listProducts': { count: 99 },
+          'lt_status_200_listProducts': { count: 5 },
+        },
+      }),
+    },
+  } as unknown as TestRun
+  const usage = extractPayloadUsage(run, 'listProducts')
+  equal(usage.length, 0)
+})
+
+test('extractPayloadUsage treats a missing or non-numeric count as zero', () => {
+  const run = {
+    summary: {
+      raw: JSON.stringify({
+        metrics: {
+          'lt_payload_0_listProducts': {},                  // count missing → 0
+          'lt_payload_1_listProducts': { count: 'oops' },   // count not a number → 0
+          'lt_payload_2_listProducts': { count: null },    // count null → 0
+          'lt_payload_3_listProducts': { count: 5 },         // count a number → 5
+          // NaN passes the typeof number check but is a degenerate
+          // value — it should fall through to the default branch.
+          'lt_payload_4_listProducts': { count: Number.NaN },
+        },
+      }),
+    },
+  } as unknown as TestRun
+  const usage = extractPayloadUsage(run, 'listProducts')
+  equal(usage.length, 5)
+  equal(usage[0].count, 0)
+  equal(usage[1].count, 0)
+  equal(usage[2].count, 0)
+  equal(usage[3].count, 5)
+  equal(usage[4].count, 0)
 })
 

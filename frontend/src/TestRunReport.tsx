@@ -7,6 +7,7 @@ import {
   checkSuccessRate,
   completedRequestCount,
   copyTextToClipboard,
+  extractPayloadUsage,
   FALLBACK_CODES,
   formatBytes,
   formatInteger,
@@ -20,6 +21,8 @@ import {
   parseK6Summary,
   profileSummary,
   profileTotalSeconds,
+  renderPayloadStrategyHelp,
+  renderPayloadStrategyLabel,
   statusDistribution,
   type K6Metric,
   type K6Summary,
@@ -32,12 +35,15 @@ import {
 import { EMPTY_TIME_SERIES, fetchTimeSeries, type TimeSeriesResponse } from './timeSeries.ts'
 import { RunStatusView } from './runStatusView.tsx'
 import { useRunClock } from './useRunClock.ts'
+import { translate } from './i18n.ts'
+import { useLanguage } from './useLanguage.tsx'
 
 type TestRunReportPageProps = {
   runId: string
 }
 
 export function TestRunReportPage({ runId }: TestRunReportPageProps) {
+  const { language } = useLanguage()
   const [run, setRun] = useState<TestRun>()
   const [generatedScript, setGeneratedScript] = useState<string>()
   const [scriptError, setScriptError] = useState('')
@@ -54,9 +60,9 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
 
   useEffect(() => {
     const previousTitle = document.title
-    document.title = `k6-Testbericht ${runId}`
+    document.title = `${translate(language, 'report.eyebrow')} ${runId}`
     return () => { document.title = previousTitle }
-  }, [runId])
+  }, [runId, language])
 
   useEffect(() => {
     let cancelled = false
@@ -65,14 +71,14 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
     async function load() {
       try {
         const response = await fetch(`/api/test-runs/${encodeURIComponent(runId)}`)
-        if (!response.ok) throw new Error(response.status === 404 ? 'Der Testlauf wurde nicht gefunden.' : 'Der Testbericht konnte nicht geladen werden.')
+        if (!response.ok) throw new Error(response.status === 404 ? translate(language, 'error.reportNotFound') : translate(language, 'error.reportLoad'))
         const loaded: TestRun = await response.json()
         if (cancelled) return
         setRun(loaded)
         setError('')
         if (['QUEUED', 'RUNNING'].includes(loaded.status)) timer = window.setTimeout(load, 1000)
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Der Testbericht konnte nicht geladen werden.')
+        if (!cancelled) setError(cause instanceof Error ? cause.message : translate(language, 'error.reportLoad'))
       }
     }
 
@@ -81,7 +87,7 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
       cancelled = true
       if (timer) window.clearTimeout(timer)
     }
-  }, [runId])
+  }, [runId, language])
 
   useEffect(() => {
     let cancelled = false
@@ -121,7 +127,7 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
   }, [run, runId, timeSeriesLoaded])
 
   if (error) return <ReportShell><div className="report-alert failure">{error}</div></ReportShell>
-  if (!run) return <ReportShell><div className="report-loading">Testbericht wird geladen …</div></ReportShell>
+  if (!run) return <ReportShell><div className="report-loading">{translate(language, 'report.loading')}</div></ReportShell>
 
   const summary = parseK6Summary(run)
   return <ReportShell>
@@ -133,26 +139,28 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
 }
 
 function ReportShell({ children }: { children: ReactNode }) {
+  const { language } = useLanguage()
   return <main className="report-page">
     <div className="report-toolbar">
-      <a href="/">← Zur Anwendung</a>
-      <button type="button" onClick={() => window.print()}>Drucken / als PDF speichern</button>
+      <a href="/">← {language === 'de' ? 'Zur Anwendung' : 'Back to app'}</a>
+      <button type="button" onClick={() => window.print()}>{translate(language, 'report.print')}</button>
     </div>
     {children}
   </main>
 }
 
 function ReportHeader({ run }: { run: TestRun }) {
+  const { language: lang } = useLanguage()
   const configuration = run.configuration
   return <>
     <div className="report-brand">
       <div className="report-logo">k6</div>
-      <div><strong>lasttest</strong><span>Swagger/OpenAPI-basierter Lasttest</span></div>
+      <div><strong>{translate(lang, 'report.brand')}</strong><span>{translate(lang, 'report.brand.tagline')}</span></div>
     </div>
     <div className="report-title-row">
       <div>
-        <span className="report-eyebrow">k6-Testbericht</span>
-        <h1>{configuration?.apiTitle ?? 'Testlauf'}</h1>
+        <span className="report-eyebrow">{translate(lang, 'report.eyebrow')}</span>
+        <h1>{configuration?.apiTitle ?? translate(lang, 'report.testRun')}</h1>
         <p>{configuration ? `${configuration.apiVersion} · ${configuration.baseUrl}` : `Run-ID ${run.id}`}</p>
       </div>
       <div className={`report-status ${run.status.toLowerCase()}`}>{run.status}</div>
@@ -173,6 +181,7 @@ function CompletedReport({
   scriptError: string
   timeSeries: TimeSeriesResponse
 }) {
+  const { language: lang } = useLanguage()
   const checks = metric(summary, 'checks')
   const requests = metric(summary, 'http_reqs')
   const failed = metric(summary, 'http_req_failed')
@@ -186,33 +195,33 @@ function CompletedReport({
 
   return <>
     <section className="report-section">
-      <h2>Zusammenfassung</h2>
+      <h2>{translate(lang, 'report.section.summary')}</h2>
       {requestCount == null || requestCount === 0
-        ? <div className="report-alert failure">Keine HTTP-Anfrage wurde abgeschlossen. Das Ziel war aus dem k6-Container nicht erreichbar oder antwortete nicht rechtzeitig. Prüfe DNS, Firewall, Proxy und den Zugriff aus dem Container.</div>
+        ? <div className="report-alert failure">{translate(lang, 'result.noRequests')}</div>
         : null}
       <div className="report-cards">
-        <ReportCard label="Checks erfolgreich" value={formatPercentage(checkRate)} detail={`${formatInteger(checks.passes)} bestanden, ${formatInteger(checks.fails)} fehlgeschlagen`} success={checkRate === 100} />
-        <ReportCard label="HTTP-Fehlerrate" value={formatPercentage(failureRate)} detail={`${formatInteger(requestCount)} Requests insgesamt`} success={failureRate != null && failureRate < 5} />
-        <ReportCard label="p(95) Antwortzeit" value={`${formatNumber(duration['p(95)'])} ms`} detail="Grenzwert: < 1.000 ms" success={durationThresholdPassed} />
-        <ReportCard label="HTTP Requests" value={formatInteger(requests.count)} detail={`${formatNumber(requests.rate)} Requests/s`} />
-        <ReportCard label="Iterationen" value={formatInteger(iterations.count)} detail={`${formatNumber(iterations.rate)} Iterationen/s`} />
-        <ReportCard label="Maximale Antwortzeit" value={`${formatNumber(duration.max)} ms`} detail={`Durchschnitt ${formatNumber(duration.avg)} ms`} />
+        <ReportCard label={translate(lang, 'summary.checksRate')} value={formatPercentage(checkRate)} detail={translate(lang, 'summary.checksDetail', { passed: formatInteger(checks.passes), failed: formatInteger(checks.fails) })} success={checkRate === 100} />
+        <ReportCard label={translate(lang, 'summary.failureRate')} value={formatPercentage(failureRate)} detail={translate(lang, 'summary.requestsDetail', { count: formatInteger(requestCount) })} success={failureRate != null && failureRate < 5} />
+        <ReportCard label={translate(lang, 'summary.p95')} value={`${formatNumber(duration['p(95)'])} ms`} detail={translate(lang, 'summary.p95.threshold')} success={durationThresholdPassed} />
+        <ReportCard label={translate(lang, 'summary.requests')} value={formatInteger(requests.count)} detail={`${formatNumber(requests.rate)} Requests/s`} />
+        <ReportCard label={translate(lang, 'summary.iterations')} value={formatInteger(iterations.count)} detail={`${formatNumber(iterations.rate)} Iterationen/s`} />
+        <ReportCard label={translate(lang, 'summary.maxResponse')} value={`${formatNumber(duration.max)} ms`} detail={`${lang === 'en' ? 'Average' : 'Durchschnitt'} ${formatNumber(duration.avg)} ms`} />
       </div>
 
-      <h3>Thresholds</h3>
+      <h3>{translate(lang, 'report.section.thresholds')}</h3>
       <div className="report-thresholds">
         <Threshold passed={durationThresholdPassed} name="http_req_duration">p(95) = {formatNumber(duration['p(95)'])} ms &lt; 1.000 ms</Threshold>
         <Threshold passed={failureThresholdPassed} name="http_req_failed">Rate = {formatPercentage(failureRate)} &lt; 5 %</Threshold>
       </div>
 
-      <h3>Laufdaten</h3>
+      <h3>{translate(lang, 'report.section.runtime')}</h3>
       <div className="report-info-grid">
-        <ReportInfo label="Status" value={run.status} />
-        <ReportInfo label="Exit-Code" value={run.exitCode?.toString() ?? '–'} />
-        <ReportInfo label="Erstellt" value={formatTimestamp(run.createdAt)} />
-        <ReportInfo label="Gestartet" value={formatTimestamp(run.startedAt)} />
-        <ReportInfo label="Beendet" value={formatTimestamp(run.finishedAt)} />
-        <ReportInfo label="Run-ID" value={run.id} code />
+        <ReportInfo label={translate(lang, 'report.runtime.status')} value={run.status} />
+        <ReportInfo label={translate(lang, 'report.runtime.exitCode')} value={run.exitCode?.toString() ?? '–'} />
+        <ReportInfo label={translate(lang, 'report.runtime.created')} value={formatTimestamp(run.createdAt)} />
+        <ReportInfo label={translate(lang, 'report.runtime.started')} value={formatTimestamp(run.startedAt)} />
+        <ReportInfo label={translate(lang, 'report.runtime.finished')} value={formatTimestamp(run.finishedAt)} />
+        <ReportInfo label={translate(lang, 'report.runtime.runId')} value={run.id} code />
       </div>
     </section>
 
@@ -243,58 +252,146 @@ function Threshold({ passed, name, children }: { passed: boolean, name: string, 
   </div>
 }
 
-function ReportInfo({ label, value, code = false }: { label: string, value: string, code?: boolean }) {
+function ReportInfo({ label, value, code = false, help }: { label: string, value: string, code?: boolean, help?: string }) {
   return <div className="report-info">
     <span>{label}</span>
     {code ? <code>{value}</code> : <strong>{value}</strong>}
+    {help && <small className="report-info-help">{help}</small>}
   </div>
 }
 
 function TestConfiguration({ run }: { run: TestRun }) {
+  const { language: lang } = useLanguage()
   const configuration = run.configuration
   return <section className="report-section">
-    <h2>Testkonfiguration</h2>
-    {!configuration ? <div className="report-alert">Für diesen älteren Testlauf sind keine Konfigurationsdaten gespeichert.</div> : <>
+    <h2>{translate(lang, 'report.section.config')}</h2>
+    {!configuration ? <div className="report-alert">{translate(lang, 'report.section.config.missing')}</div> : <>
       <div className="report-info-grid">
-        <ReportInfo label="API-Titel" value={configuration.apiTitle} />
-        <ReportInfo label="API-Version" value={configuration.apiVersion || '–'} />
-        <ReportInfo label="Base URL" value={configuration.baseUrl} code />
-        <ReportInfo label="Lastprofil" value={profileSummary(configuration.loadProfile)} />
+        <ReportInfo label={translate(lang, 'report.config.apiTitle')} value={configuration.apiTitle} />
+        <ReportInfo label={translate(lang, 'report.config.apiVersion')} value={configuration.apiVersion || '–'} />
+        <ReportInfo label={translate(lang, 'report.config.baseUrl')} value={configuration.baseUrl} code />
+        <ReportInfo label={translate(lang, 'report.config.loadProfile')} value={profileSummary(configuration.loadProfile)} />
         <ReportInfo
-          label="Geplante Laufzeit"
+          label={translate(lang, 'report.config.duration')}
           value={(() => {
             const total = profileTotalSeconds(configuration.loadProfile)
-            return total == null ? 'Bis zur letzten Antwort' : `${total} Sekunden`
+            return total == null ? translate(lang, 'report.config.durationOpen') : translate(lang, 'report.config.durationSeconds', { seconds: total })
           })()}
         />
-        <ReportInfo label="Ausgewählte Operationen" value={configuration.operations.length.toString()} />
+        <ReportInfo label={translate(lang, 'report.config.operationCount')} value={configuration.operations.length.toString()} />
+        <ReportInfo
+          label={translate(lang, 'report.config.payloadStrategy')}
+          value={renderPayloadStrategyLabel(configuration.payloadStrategy)}
+          help={renderPayloadStrategyHelp(configuration.payloadStrategy)}
+        />
       </div>
-      <h3>Getestete Endpunkte</h3>
+      <h3>{translate(lang, 'report.section.endpoints')}</h3>
       <div className="report-operations">
-        {configuration.operations.map(operation => <ReportOperationCard key={operation.operationId} operation={operation} />)}
+        {configuration.operations.map(operation => <ReportOperationCard key={operation.operationId} operation={operation} run={run} />)}
       </div>
     </>}
   </section>
 }
 
-function ReportOperationCard({ operation }: { operation: ReportOperation }) {
+function ReportOperationCard({ operation, run }: { operation: ReportOperation, run: TestRun }) {
+  const { language: lang } = useLanguage()
+  // When the run was started with the pool feature, `payloads` carries
+  // every dataset the generator cycled through or sampled from. The
+  // report lists all of them so the user can see exactly which request
+  // shapes hit the target. When `payloads` is empty (legacy runs that
+  // pre-date the pool feature) we fall back to the flat fields, which
+  // keep rendering exactly like before.
+  const hasPool = operation.payloads.length > 1
+  const singlePayloadFallback = operation.payloads.length === 0
+  // Per-payload call counts read straight from the k6 summary. The
+  // generator emits one `lt_payload_<i>_<opId>` counter per entry in
+  // the pool; the report renders them next to the configured payload
+  // cards so the user can verify the strategy at a glance.
+  const usage = extractPayloadUsage(run, operation.operationId)
+  const totalCalls = usage.reduce((sum, entry) => sum + entry.count, 0)
   return <article className="report-operation">
     <div className="report-operation-title">
       <span className={`method ${operation.method.toLowerCase()}`}>{operation.method}</span>
       <code>{operationDisplayPath(operation)}</code>
+      {hasPool && <span className="report-operation-pill">{translate(lang, 'report.pool.payloads', { n: operation.payloads.length })}</span>}
     </div>
     <p><strong>{operation.operationId}</strong>{operation.summary ? ` · ${operation.summary}` : ''}</p>
-    {operation.parameterValues.length > 0 && <div className="report-parameter-list">
-      {operation.parameterValues.map(parameter => <div key={`${parameter.location}:${parameter.name}`}>
-        <span>{parameter.location}</span><strong>{parameter.name}</strong><code>{parameter.value || 'leer / nicht gesendet'}</code>
-      </div>)}
-    </div>}
-    <p>Bearer-Token: <strong>{operation.bearerTokenConfigured ? 'konfiguriert (aus Sicherheitsgründen ausgeblendet)' : 'nicht konfiguriert'}</strong></p>
-    {operation.requestBodyJson != null && <details><summary>JSON Request-Body</summary><pre>{operation.requestBodyJson || 'Kein Request-Body gesendet'}</pre></details>}
+    {hasPool && usage.length > 0 && (
+      <div className="report-payload-usage">
+        <h4>{translate(lang, 'report.distribution.title')}</h4>
+        <p className="report-payload-usage-hint">
+          {translate(lang, 'report.distribution.hint')}
+        </p>
+        <table className="report-table report-usage-table">
+          <thead>
+            <tr>
+              <th>{translate(lang, 'report.distribution.col.payload')}</th>
+              {operation.payloads[0]?.parameterValues.length ? <th>{translate(lang, 'report.distribution.col.params')}</th> : null}
+              <th>{translate(lang, 'report.distribution.col.calls')}</th>
+              <th>{translate(lang, 'report.distribution.col.share')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {usage.map(entry => {
+              const payload = operation.payloads[entry.index]
+              const calls = entry.count
+              const percent = totalCalls > 0 ? (calls / totalCalls) * 100 : 0
+              return (
+                <tr key={entry.index}>
+                  <th scope="row">{translate(lang, 'report.distribution.payload', { n: entry.index + 1 })}</th>
+                  {payload?.parameterValues.length ? (
+                    <td>
+                      {payload.parameterValues.map(v => `${v.name}=${v.value}`).join(', ') || translate(lang, 'report.distribution.params.empty')}
+                    </td>
+                  ) : null}
+                  <td><strong>{calls}</strong></td>
+                  <td>
+                    <div className="report-usage-bar-row">
+                      <span className="report-usage-percent">{percent.toFixed(0)} %</span>
+                      <span className="report-usage-bar" style={{ width: `${percent}%` }} aria-hidden="true"></span>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th scope="row">{translate(lang, 'report.distribution.total')}</th>
+              {operation.payloads[0]?.parameterValues.length ? <td></td> : null}
+              <td><strong>{totalCalls}</strong></td>
+              <td>100 %</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    )}
+    {hasPool ? (
+      // Multi-payload path: the call distribution table above
+      // already shows parameter values, call counts and the share
+      // per payload, so the per-payload cards (which used to
+      // duplicate the same information in a much larger layout) are
+      // intentionally omitted. The body / token configuration is
+      // still available via the flat fields on the operation card
+      // when the user needs it.
+      null
+    ) : (
+      <>
+        {operation.parameterValues.length > 0 && <div className="report-parameter-list">
+          {operation.parameterValues.map(parameter => <div key={`${parameter.location}:${parameter.name}`}>
+            <span>{parameter.location}</span><strong>{parameter.name}</strong><code>{parameter.value || translate(lang, 'report.payload.params.empty')}</code>
+          </div>)}
+        </div>}
+        <p><strong>{operation.bearerTokenConfigured ? translate(lang, 'report.payload.bearer.configured') : translate(lang, 'report.payload.bearer.notConfigured')}</strong></p>
+        {operation.requestBodyJson != null && <details><summary>{translate(lang, 'report.payload.jsonSummary')}</summary><pre>{operation.requestBodyJson || translate(lang, 'report.payload.jsonEmpty')}</pre></details>}
+        {singlePayloadFallback && <p className="report-legacy-note">{translate(lang, 'report.legacy.hint')}</p>}
+      </>
+    )}
   </article>
 }
 
 function StatusCodeDistribution({ summary, run }: { summary: K6Summary, run: TestRun }) {
+  const { language: lang } = useLanguage()
   const operationIds = run.configuration?.operations.map(operation => operation.operationId) ?? []
   if (operationIds.length === 0) return null
   const rows = statusDistribution(summary, operationIds)
@@ -313,19 +410,17 @@ function StatusCodeDistribution({ summary, run }: { summary: K6Summary, run: Tes
     grandTotal += row.total
   }
   return <section className="report-section">
-    <h2>Statuscode-Verteilung</h2>
+    <h2>{translate(lang, 'report.statusCode.title')}</h2>
     <p className="report-section-intro">
-      Exakte HTTP-Antwortcodes pro Endpunkt. „err" steht für Netzwerk- oder Verbindungsfehler
-      (Status 0, z. B. Verbindungsabbruch, DNS-Fehler oder TLS-Handshake fehlgeschlagen).
-      „other" sammelt Antworten mit Statuscodes, die nicht in der vordefinierten Liste enthalten sind.
+      {translate(lang, 'report.statusCode.intro')}
     </p>
     <div className="report-table-scroll">
       <table className="report-table status-distribution">
         <thead>
           <tr>
-            <th>Endpunkt</th>
+            <th>{translate(lang, 'report.statusCode.col.endpoint')}</th>
             {columns.map(code => <th key={String(code)} className={headerClassForCode(String(code))}>{renderCodeHeader(String(code))}</th>)}
-            <th>Summe</th>
+            <th>{translate(lang, 'report.statusCode.col.sum')}</th>
           </tr>
         </thead>
         <tbody>
@@ -341,7 +436,7 @@ function StatusCodeDistribution({ summary, run }: { summary: K6Summary, run: Tes
         </tbody>
         <tfoot>
           <tr>
-            <th scope="row">Gesamt</th>
+            <th scope="row">{translate(lang, 'report.statusCode.total')}</th>
             {columns.map(code => <td key={String(code)}><strong>{formatInteger(totals[String(code)])}</strong></td>)}
             <td><strong>{formatInteger(grandTotal)}</strong></td>
           </tr>
@@ -356,6 +451,10 @@ function StatusCodeDistribution({ summary, run }: { summary: K6Summary, run: Tes
 function renderCodeHeader(code: string): string {
   return code
 }
+
+// ----- Payload-Strategie-Labels -----------------------------------------
+// Implementation lives in `./k6Report.ts` so the helper is unit-tested
+// and covered by the npm test coverage gate.
 
 function headerClassForCode(code: string): string {
   if (FALLBACK_CODES.includes(code as typeof FALLBACK_CODES[number])) return `status-header-${code}`
@@ -384,24 +483,25 @@ const durationMetrics: Array<[string, string]> = [
 
 function DetailedMetrics({ summary }: { summary: K6Summary }) {
   const requests = metric(summary, 'http_reqs')
+  const { language: lang } = useLanguage()
   const iterations = metric(summary, 'iterations')
   const checks = metric(summary, 'checks')
   const received = metric(summary, 'data_received')
   const sent = metric(summary, 'data_sent')
   return <section className="report-section">
-    <h2>Detaillierte k6-Metriken</h2>
+    <h2>{translate(lang, 'report.metrics.title')}</h2>
     <div className="report-table-scroll">
       <table className="report-table">
-        <thead><tr><th>Metrik</th><th>Ø</th><th>Minimum</th><th>Median</th><th>p(90)</th><th>p(95)</th><th>Maximum</th></tr></thead>
+        <thead><tr><th>{translate(lang, 'report.metrics.col.metric')}</th><th>{translate(lang, 'report.metrics.col.avg')}</th><th>{translate(lang, 'report.metrics.col.min')}</th><th>{translate(lang, 'report.metrics.col.median')}</th><th>{translate(lang, 'report.metrics.col.p90')}</th><th>{translate(lang, 'report.metrics.col.p95')}</th><th>{translate(lang, 'report.metrics.col.max')}</th></tr></thead>
         <tbody>{durationMetrics.map(([label, name]) => <DurationRow key={name} label={label} value={metric(summary, name)} />)}</tbody>
       </table>
     </div>
     <div className="report-cards compact">
-      <ReportCard label="HTTP Requests" value={formatInteger(requests.count)} detail={`${formatNumber(requests.rate)}/s`} />
-      <ReportCard label="Iterationen" value={formatInteger(iterations.count)} detail={`${formatNumber(iterations.rate)}/s`} />
-      <ReportCard label="Checks" value={formatInteger((checks.passes ?? 0) + (checks.fails ?? 0))} detail={`${formatInteger(checks.passes)} erfolgreich`} />
-      <ReportCard label="Daten empfangen" value={formatBytes(received.count)} detail={`${formatBytes(received.rate)}/s`} />
-      <ReportCard label="Daten gesendet" value={formatBytes(sent.count)} detail={`${formatBytes(sent.rate)}/s`} />
+      <ReportCard label={translate(lang, 'summary.requests')} value={formatInteger(requests.count)} detail={`${formatNumber(requests.rate)}/s`} />
+      <ReportCard label={translate(lang, 'summary.iterations')} value={formatInteger(iterations.count)} detail={`${formatNumber(iterations.rate)}/s`} />
+      <ReportCard label={translate(lang, 'summary.checks')} value={formatInteger((checks.passes ?? 0) + (checks.fails ?? 0))} detail={`${formatInteger(checks.passes)} ${lang === 'en' ? 'passed' : 'erfolgreich'}`} />
+      <ReportCard label={translate(lang, 'report.metrics.dataReceived')} value={formatBytes(received.count)} detail={`${formatBytes(received.rate)}/s`} />
+      <ReportCard label={translate(lang, 'report.metrics.dataSent')} value={formatBytes(sent.count)} detail={`${formatBytes(sent.rate)}/s`} />
     </div>
   </section>
 }
@@ -427,10 +527,11 @@ function RawResults({
   generatedScript?: string
   scriptError: string
 }) {
+  const { language: lang } = useLanguage()
   return <section className="report-section report-raw">
-    <h2>Rohdaten</h2>
-    {run.error && <details><summary>Vollständige k6-Konsolenausgabe</summary><pre>{run.error}</pre></details>}
-    {run.summary && <details><summary>Vollständiger k6-JSON-Export</summary><pre>{formatJson(run.summary.raw)}</pre></details>}
+    <h2>{translate(lang, 'report.rawData')}</h2>
+    {run.error && <details><summary>{translate(lang, 'report.console')}</summary><pre>{run.error}</pre></details>}
+    {run.summary && <details><summary>{translate(lang, 'report.json')}</summary><pre>{formatJson(run.summary.raw)}</pre></details>}
     <GeneratedK6Script run={run} generatedScript={generatedScript} scriptError={scriptError} />
   </section>
 }
@@ -444,31 +545,32 @@ function GeneratedK6Script({
   generatedScript?: string
   scriptError: string
 }) {
+  const { language: lang } = useLanguage()
   const command = manualK6Command(run.configuration, run.id)
   return <>
     <details className="report-script">
-      <summary>Generiertes k6-Testskript</summary>
+      <summary>{translate(lang, 'report.script')}</summary>
       {scriptError && <div className="report-alert failure">{scriptError}</div>}
-      {!generatedScript && !scriptError && <div className="report-loading">k6-Testskript wird geladen …</div>}
+      {!generatedScript && !scriptError && <div className="report-loading">{translate(lang, 'common.loading')}</div>}
       {generatedScript && <>
-        <div className="script-warning"><strong>Sicherheitshinweis:</strong> Das exportierte Skript kann konfigurierte Header und Bearer-Tokens enthalten. Bitte sicher verwahren.</div>
+        <div className="script-warning"><strong>{translate(lang, 'report.script.warning', { strong: 'strong' })}</strong> {translate(lang, 'report.script.warningBody')}</div>
         <pre data-testid="generated-k6-script">{generatedScript}</pre>
         <div className="script-actions">
           <a
             className="script-download"
             href={k6ScriptUrl(run.id)}
             download={k6ScriptDownloadName(run.id)}
-          >k6-Testskript herunterladen (.js) ↓</a>
+          >{translate(lang, 'report.script.download')} (.js) ↓</a>
         </div>
         <div className="script-command">
           <div className="script-command-header">
-            <span>Manueller Start</span>
+            <span>{translate(lang, 'report.manualStart')}</span>
             <CopyButton
               text={command}
-              label="Befehl kopieren"
-              copiedLabel="Kopiert ✓"
-              ariaLabel="Manuellen k6-Startbefehl in die Zwischenablage kopieren"
-              copiedAriaLabel="k6-Startbefehl in die Zwischenablage kopiert"
+              label={translate(lang, 'report.command.copy')}
+              copiedLabel={translate(lang, 'report.command.copied')}
+              ariaLabel={translate(lang, 'report.command.copyAria')}
+              copiedAriaLabel={translate(lang, 'report.command.copiedAria')}
             />
           </div>
           <code>{command}</code>
@@ -489,14 +591,15 @@ function PendingOrFailedReport({
   scriptError: string
   now: number
 }) {
+  const { language: lang } = useLanguage()
   return <section className="report-section">
-    <h2>Testlauf</h2>
+    <h2>{translate(lang, 'report.testRun')}</h2>
     <div className={`report-alert ${run.status === 'FAILED' ? 'failure' : ''}`}>
-      Status: <strong>{run.status}</strong>. {['QUEUED', 'RUNNING'].includes(run.status)
-        ? 'Die Ansicht aktualisiert sich automatisch.'
+      {translate(lang, 'report.status', { status: run.status })}, {['QUEUED', 'RUNNING'].includes(run.status)
+        ? translate(lang, 'report.autoRefresh')
         : run.status === 'FAILED'
-          ? 'Die Analyse der Fehlerursache findest du direkt unter diesem Hinweis.'
-          : 'Es ist kein k6-Summary verfügbar.'}
+          ? translate(lang, 'report.seeAnalysis')
+          : translate(lang, 'result.noData')}
     </div>
     <RunStatusView run={run} now={now} />
     <TestConfiguration run={run} />
@@ -520,12 +623,11 @@ function formatJson(raw: string): string {
 // visible when the backend was able to deliver time-series data.
 
 function RampSection({ profile, timeSeries }: { profile: ReportLoadProfile, timeSeries: TimeSeriesResponse }) {
+  const { language: lang } = useLanguage()
   return <section className="report-section">
-    <h2>Lastprofil &amp; Lastverlauf</h2>
+    <h2>{translate(lang, 'report.ramp.sectionTitle')}</h2>
     <p className="report-section-intro">
-      Diese Sektion zeigt, welches Profil k6 gefahren ist und welche Last dabei aufgebaut wurde.
-      Die Soll-Linie (lila) wird direkt aus deinen konfigurierten Stages abgeleitet. Die Ist-Linie
-      (orange, gestrichelt) stammt aus dem Live-Stream nach InfluxDB.
+      {translate(lang, 'report.ramp.intro')}
     </p>
     <RampCard profile={profile} timeSeries={timeSeries} />
     <StagesDetail profile={profile} />
@@ -533,6 +635,7 @@ function RampSection({ profile, timeSeries }: { profile: ReportLoadProfile, time
 }
 
 function RampCard({ profile, timeSeries }: { profile: ReportLoadProfile, timeSeries: TimeSeriesResponse }) {
+  const { language: lang } = useLanguage()
   const plot = buildRampPlot(profile, timeSeries.vus, { width: 720, height: 200 })
   const sollPath = buildSollPath(plot)
   const istPath = buildIstPath(plot)
@@ -542,12 +645,12 @@ function RampCard({ profile, timeSeries }: { profile: ReportLoadProfile, timeSer
   return <div className="ramp-card">
     <div className="ramp-header">
       <div className="ramp-title">
-        <h3>Geplanter Lastverlauf</h3>
-        <small>· Soll aus Stages, Ist aus InfluxDB</small>
+        <h3>{translate(lang, 'report.ramp.title')}</h3>
+        <small>{translate(lang, 'report.ramp.sourceHint')}</small>
       </div>
       <div className="ramp-legend">
-        <span><span className="swatch soll" />Geplant (Soll)</span>
-        <span><span className="swatch ist" />Tatsächlich (Ist)</span>
+        <span><span className="swatch soll" />{translate(lang, 'report.ramp.soll')}</span>
+        <span><span className="swatch ist" />{translate(lang, 'report.ramp.ist')}</span>
       </div>
     </div>
     <div className="ramp-svg-wrap">
@@ -555,21 +658,21 @@ function RampCard({ profile, timeSeries }: { profile: ReportLoadProfile, timeSer
     </div>
     <div className="ramp-callout">
       <div>
-        <span>Geplante Spitze</span>
-        <strong>{formatInteger(peakSoll)} VUs</strong>
-        <small>Aus Stages berechnet</small>
+        <span>{translate(lang, 'report.ramp.peakSoll')}</span>
+        <strong>{formatInteger(peakSoll)} {translate(lang, 'report.ramp.vus')}</strong>
+        <small>{translate(lang, 'report.ramp.peakSollDetail')}</small>
       </div>
       <div>
-        <span>Tatsächliche Spitze</span>
+        <span>{translate(lang, 'report.ramp.peakIst')}</span>
         <strong style={hasIst ? undefined : { color: '#93370d' }}>
-          {hasIst ? `${formatInteger(peakIst)} VUs` : '–'}
+          {hasIst ? `${formatInteger(peakIst)} ${translate(lang, 'report.ramp.vus')}` : '–'}
         </strong>
-        <small>{hasIst ? 'Aus InfluxDB (max vus)' : 'Noch keine Daten aus InfluxDB'}</small>
+        <small>{hasIst ? translate(lang, 'report.ramp.peakIstDetail') : translate(lang, 'report.ramp.peakIstDetailEmpty')}</small>
       </div>
       <div>
-        <span>Datenpunkte</span>
+        <span>{translate(lang, 'report.ramp.dataPoints')}</span>
         <strong>{formatInteger(timeSeries.vus.length)}</strong>
-        <small>Aus dem k6-Stream</small>
+        <small>{translate(lang, 'report.ramp.dataPointsDetail')}</small>
       </div>
     </div>
   </div>
@@ -618,18 +721,19 @@ function RampSvg({ plot, sollPath, istPath, hasIst }: { plot: RampPlot, sollPath
 }
 
 function StagesDetail({ profile }: { profile: ReportLoadProfile }) {
+  const { language: lang } = useLanguage()
   if (profile.type.toLowerCase().replace(/_/g, '-') !== 'ramping-vus') return null
   const stages = profile.stages ?? []
   return <>
-    <h3>Stages im Detail</h3>
+    <h3>{translate(lang, 'report.ramp.stagesTitle')}</h3>
     <div className="report-table-scroll">
-      <table className="report-table" aria-label="Stages des Lastprofils">
+      <table className="report-table" aria-label={translate(lang, 'report.ramp.stagesAria')}>
         <thead>
           <tr>
-            <th style={{ textAlign: 'left' }}>#</th>
-            <th>Ziel-VUs</th>
-            <th>Dauer (s)</th>
-            <th style={{ textAlign: 'left' }}>Beschreibung</th>
+            <th style={{ textAlign: 'left' }}>{translate(lang, 'report.ramp.stagesCol.index')}</th>
+            <th>{translate(lang, 'report.ramp.stagesCol.target')}</th>
+            <th>{translate(lang, 'report.ramp.stagesCol.duration')}</th>
+            <th style={{ textAlign: 'left' }}>{translate(lang, 'report.ramp.stagesCol.description')}</th>
           </tr>
         </thead>
         <tbody>
@@ -637,10 +741,10 @@ function StagesDetail({ profile }: { profile: ReportLoadProfile }) {
             const previous = (index === 0 ? profile.startVUs : stages[index - 1]?.target) ?? 0
             const delta = stage.target - previous
             const description = delta === 0
-              ? 'Plateau'
+              ? translate(lang, 'report.ramp.plateau')
               : delta > 0
-                ? `+${delta} VUs (Rampe auf ${stage.target})`
-                : `${delta} VUs (Rampe auf ${stage.target})`
+                ? translate(lang, 'report.ramp.rampUp', { delta, target: stage.target })
+                : translate(lang, 'report.ramp.rampDown', { delta, target: stage.target })
             return <tr key={index}>
               <th scope="row" style={{ textAlign: 'left' }}>{index + 1}</th>
               <td>{stage.target}</td>

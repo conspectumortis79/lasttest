@@ -70,6 +70,33 @@ export function hasMultipleServers(servers: ApiServer[] | undefined): boolean {
 }
 
 export type OperationSettings = {
+  /**
+   * Pool of complete request datasets. At least one payload is required.
+   * This is the new source of truth — the legacy `parameterValues`,
+   * `requestBodyJson`, `bearerToken` fields below are derived from
+   * `payloads[0]` once the settings have been migrated.
+   */
+  payloads: OperationPayload[]
+  /**
+   * @deprecated Derived from `payloads[0]`. Retained for legacy code paths
+   * (e.g. settings stored before the pool migration ran) and removed in a
+   * later commit once all callers are migrated.
+   */
+  parameterValues: Record<string, string>
+  /** @deprecated Derived from `payloads[0]`. See `parameterValues`. */
+  requestBodyJson: string
+  /** @deprecated Derived from `payloads[0]`. See `parameterValues`. */
+  bearerToken: string
+}
+
+/**
+ * One complete request dataset. Holds every value that the k6 generator
+ * needs to issue a single HTTP call: path/query/header/cookie parameters,
+ * the JSON request body, and an optional bearer token. Multiple
+ * `OperationPayload`s in an `OperationSettings.payloads` list represent
+ * the different datasets a user wants to cycle or pick at random.
+ */
+export type OperationPayload = {
   parameterValues: Record<string, string>
   requestBodyJson: string
   bearerToken: string
@@ -77,8 +104,23 @@ export type OperationSettings = {
 
 export type OperationConfiguration = {
   operationId: string
+  /**
+   * Pool of complete request datasets. The k6 generator uses this
+   * list to pick the next payload on every iteration according to
+   * the load profile's `payloadStrategy`. The legacy flat fields
+   * below are kept in sync with `payloads[0]` so backend clients
+   * that have not migrated yet still receive the right values.
+   */
+  payloads: Array<{
+    parameterValues: Array<{ name: string, location: string, value: string }>
+    requestBodyJson?: string
+    bearerToken?: string
+  }>
+  /** @deprecated Derived from `payloads[0]`. */
   parameterValues: Array<{ name: string, location: string, value: string }>
+  /** @deprecated Derived from `payloads[0]`. */
   requestBodyJson?: string
+  /** @deprecated Derived from `payloads[0]`. */
   bearerToken?: string
 }
 
@@ -87,14 +129,57 @@ export function parameterKey(parameter: Pick<ApiParameter, 'location' | 'name'>)
 }
 
 export function createOperationSettings(operations: Operation[]): Record<string, OperationSettings> {
-  return Object.fromEntries(operations.map(operation => [
-    operation.operationId,
-    {
-      parameterValues: Object.fromEntries(operation.parameters.map(parameter => [parameterKey(parameter), formatExample(parameter.example)])),
-      requestBodyJson: operation.requestBodyExample == null ? '' : JSON.stringify(operation.requestBodyExample, null, 2),
-      bearerToken: '',
-    },
-  ]))
+  return Object.fromEntries(
+    operations.map(operation => {
+      const seedParameterValues = Object.fromEntries(
+        operation.parameters.map(parameter => [parameterKey(parameter), formatExample(parameter.example)]),
+      )
+      const seedRequestBodyJson = operation.requestBodyExample == null ? '' : JSON.stringify(operation.requestBodyExample, null, 2)
+      const seedBearerToken = ''
+      // The pool is the single source of truth: `buildOperationConfigurations`
+      // and `validateOperationSettings` both read from `payloads[0]`. The
+      // legacy flat fields are seeded with the same values for
+      // backward compatibility (existing callers can still read them),
+      // but the pool is what the rest of the pipeline uses.
+      const seed: OperationPayload = {
+        parameterValues: { ...seedParameterValues },
+        requestBodyJson: seedRequestBodyJson,
+        bearerToken: seedBearerToken,
+      }
+      const settings: OperationSettings = {
+        payloads: [seed],
+        parameterValues: { ...seedParameterValues },
+        requestBodyJson: seedRequestBodyJson,
+        bearerToken: seedBearerToken,
+      }
+      return [operation.operationId, settings]
+    }),
+  )
+}
+
+/**
+ * Idempotent migration from the legacy flat field layout
+ * (`parameterValues` + `requestBodyJson` + `bearerToken`) to the new pool
+ * shape (`payloads[]`). If `payloads` already contains at least one entry
+ * the settings are returned untouched; otherwise a single payload is
+ * synthesised from the deprecated fields. The legacy fields are kept in
+ * sync so any code path that still reads them continues to work.
+ */
+export function migrateOperationSettings(settings: OperationSettings): OperationSettings {
+  if (settings.payloads.length > 0) {
+    return settings
+  }
+  const seed: OperationPayload = {
+    parameterValues: { ...settings.parameterValues },
+    requestBodyJson: settings.requestBodyJson,
+    bearerToken: settings.bearerToken,
+  }
+  return {
+    payloads: [seed],
+    parameterValues: { ...settings.parameterValues },
+    requestBodyJson: settings.requestBodyJson,
+    bearerToken: settings.bearerToken,
+  }
 }
 
 export function buildOperationConfigurations(
@@ -103,34 +188,57 @@ export function buildOperationConfigurations(
   settingsByOperationId: Record<string, OperationSettings>,
 ): OperationConfiguration[] {
   return operations.filter(operation => selected.has(operation.operationId)).map(operation => {
-    const settings = settingsByOperationId[operation.operationId]
-    if (!settings) throw new Error(`Konfiguration für ${operation.operationId} fehlt.`)
+    const rawSettings = settingsByOperationId[operation.operationId]
+    if (!rawSettings) throw new Error(`Konfiguration für ${operation.operationId} fehlt.`)
+    // Pull the latest settings through the migration so code that still
+    // hands us a pre-pool layout (legacy fields only, empty `payloads`)
+    // gets a synthetic single payload to work with. The migrated
+    // settings always have at least one payload to serialise.
+    const settings = migrateOperationSettings(rawSettings)
 
-    const parameterValues = operation.parameters.map(parameter => {
-      const value = settings.parameterValues[parameterKey(parameter)] ?? ''
-      if (parameter.required && value.trim() === '') {
-        throw new Error(`Pflichtparameter „${parameter.name}“ für ${operation.operationId} darf nicht leer sein.`)
+    // Helper: convert one OperationPayload to the wire shape the
+    // backend expects. Validates required parameters and JSON
+    // bodies for *every* payload in the pool — a malformed entry
+    // must not silently ship to k6.
+    const serialisePayload = (payload: OperationPayload) => {
+      const wireParameterValues = operation.parameters.map(parameter => {
+        const value = payload.parameterValues[parameterKey(parameter)] ?? ''
+        if (parameter.required && value.trim() === '') {
+          throw new Error(`Pflichtparameter „${parameter.name}“ für ${operation.operationId} darf nicht leer sein.`)
+        }
+        return { name: parameter.name, location: parameter.location, value }
+      })
+      const wireRequestBodyJson = operation.hasRequestBody ? payload.requestBodyJson : undefined
+      if (operation.requestBodyRequired && wireRequestBodyJson?.trim() === '') {
+        throw new Error(`Pflicht-Request-Body für ${operation.operationId} darf nicht leer sein.`)
       }
-      return { name: parameter.name, location: parameter.location, value }
-    })
+      if (wireRequestBodyJson?.trim()) {
+        try {
+          JSON.parse(wireRequestBodyJson)
+        } catch {
+          throw new Error(`Request-Body für ${operation.operationId} ist kein gültiges JSON.`)
+        }
+      }
+      return {
+        parameterValues: wireParameterValues,
+        requestBodyJson: wireRequestBodyJson,
+        bearerToken: payload.bearerToken.trim() || undefined,
+      }
+    }
 
-    const requestBodyJson = operation.hasRequestBody ? settings.requestBodyJson : undefined
-    if (operation.requestBodyRequired && requestBodyJson?.trim() === '') {
-      throw new Error(`Pflicht-Request-Body für ${operation.operationId} darf nicht leer sein.`)
-    }
-    if (requestBodyJson?.trim()) {
-      try {
-        JSON.parse(requestBodyJson)
-      } catch {
-        throw new Error(`Request-Body für ${operation.operationId} ist kein gültiges JSON.`)
-      }
-    }
+    // Serialise the full pool so the backend can hand every entry to
+    // the k6 generator (which then picks the next one per iteration
+    // according to the load profile's payloadStrategy). The legacy
+    // flat fields stay in sync with payloads[0] so old clients keep
+    // receiving the same data.
+    const payloads = settings.payloads.map(serialisePayload)
 
     return {
       operationId: operation.operationId,
-      parameterValues,
-      requestBodyJson,
-      bearerToken: settings.bearerToken.trim() || undefined,
+      payloads,
+      parameterValues: payloads[0].parameterValues,
+      requestBodyJson: payloads[0].requestBodyJson,
+      bearerToken: payloads[0].bearerToken,
     }
   })
 }
@@ -224,14 +332,18 @@ export function validateRequestBody(bodyJson: string, schema: RequestBodySchema 
 export function validateOperationSettings(operation: Operation, settings: OperationSettings | undefined): OperationValidation {
   const parameterErrors: Record<string, string> = {}
   if (settings !== undefined) {
+    // Run the migration so settings handed in without `payloads` (legacy
+    // field-only layout) are still validated against the synthetic first
+    // payload — same behaviour the user sees after the pool is in place.
+    const active = migrateOperationSettings(settings).payloads[0]
     for (const parameter of operation.parameters) {
       const key = parameterKey(parameter)
-      const value = settings.parameterValues[key] ?? ''
+      const value = active.parameterValues[key] ?? ''
       const result = validateParameterValue(value, parameter.schema)
       if (!result.valid) parameterErrors[key] = result.message
     }
     if (operation.hasRequestBody) {
-      const bodyResult = validateRequestBody(settings.requestBodyJson, operation.requestBodySchema, operation.requestBodyRequired)
+      const bodyResult = validateRequestBody(active.requestBodyJson, operation.requestBodySchema, operation.requestBodyRequired)
       if (!bodyResult.valid) {
         return { parameterErrors, bodyError: bodyResult.message }
       }

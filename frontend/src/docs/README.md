@@ -113,8 +113,10 @@ current status so it only offers actions that make sense:
 | **Stop (graceful)** | `QUEUED`, `RUNNING`, `STOPPING` | Sends `SIGTERM`; k6 winds down, the run ends as `STOPPED` |
 | **Force abort** | `QUEUED`, `RUNNING`, `STOPPING` | Sends `SIGKILL`; the run ends immediately as `ABORTED` (metrics may be partial) |
 | **Rerun** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Re-runs the same scenario against the original base URL with a fresh run id |
-| **Remove from view** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Drops the badge from the in-memory dashboard. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs`. The remaining badges re-sort by their original `createdAt` so the dashboard stays in newest-first order. |
-| **Remove all other failed runs** | Terminal runs, when at least one other `FAILED` badge is present | Bulk-drops every other `FAILED` badge from the dashboard. Disabled (with a reason) when there is nothing to remove. `STOPPED` and `ABORTED` runs are intentionally preserved |
+| **Remove from view** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Drops the badge from the in-memory dashboard. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs` |
+| **Remove all other failed runs** | Terminal runs, when at least one other `FAILED` badge is present | Bulk-drops every other `FAILED` badge from the dashboard. Disabled (with a reason) when there is nothing to remove. STOPPED and ABORTED runs are intentionally preserved |
+| **Remove from view** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Drops the badge from the in-memory dashboard. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs` |
+| **Remove all other failed runs** | Terminal runs, when at least one other `FAILED` badge is present | Bulk-drops every other `FAILED` badge from the dashboard. Disabled (with a reason) when there is nothing to remove. STOPPED and ABORTED runs are intentionally preserved |
 
 > 💡 **Worked example — rerun via right-click:** you ran a 30 s
 > `Smoke` profile against the demo and want to confirm the result

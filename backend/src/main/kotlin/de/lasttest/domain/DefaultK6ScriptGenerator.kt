@@ -8,7 +8,9 @@ import de.lasttest.api.ImportedSpecification
 import de.lasttest.api.LoadProfile
 import de.lasttest.api.LoadProfileType
 import de.lasttest.api.OperationConfiguration
+import de.lasttest.api.OperationPayload
 import de.lasttest.api.ParameterValue
+import de.lasttest.api.PayloadStrategy
 import org.springframework.stereotype.Service
 import java.net.URLEncoder
 
@@ -41,7 +43,18 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         val selectedOperationIds = selected.map(ApiOperation::operationId).toSet()
         require(configurations.keys.all(selectedOperationIds::contains)) { "Die Konfiguration enthält einen nicht ausgewählten oder unbekannten Endpunkt." }
 
-        val calls = selected.joinToString("\n") { operation -> requestCode(operation, configurations[operation.operationId]) }
+        val strategy = loadProfile.payloadStrategy ?: PayloadStrategy.SEQUENTIAL
+        // Map of operationId → effective pool size, used both by
+        // [collectPoolSelectors] (to know when to emit a counter) and
+        // by the per-operation counter declarations above. Computed
+        // once here so the two consumers see the same numbers.
+        val configurationPoolSizes: Map<String, Int> =
+            configurations.mapValues { (_, configuration) -> effectivePayloads(configuration).size }
+        val calls =
+            selected.joinToString("\n") { operation ->
+                requestCode(operation, configurations[operation.operationId], strategy)
+            }
+        val poolSelectors = collectPoolSelectors(selected, configurations, strategy)
         // Per-operation status-code Counters. k6's --summary-export does
         // NOT expose tagged sub-metrics, so we declare one Counter per
         // (operation, status-code) tuple. The report then reads the
@@ -52,6 +65,13 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         // user still sees the unexpected bucket instead of silently
         // dropping responses. `err` is separate so network errors
         // (status === 0) cannot be confused with a real HTTP 0.
+        //
+        // Multi-payload operations additionally get one counter per
+        // payload index (`lt_payload_<i>_<opId>`) so the report can
+        // show how many times each payload was actually picked
+        // during the run. Single-payload operations skip the per-
+        // payload counter because the count is identical to the
+        // per-operation request count and would only add noise.
         val counterDeclarations =
             selected
                 .joinToString("\n") { operation ->
@@ -63,7 +83,17 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                     val fallback =
                         "const lt_status_err_$safe = new Counter('lt_status_err_$safe');\n" +
                             "const lt_status_other_$safe = new Counter('lt_status_other_$safe');"
-                    "$tracked\n$fallback"
+                    val payloadCounters =
+                        configurationPoolSizes[operation.operationId]?.let { size ->
+                            if (size <= 1) {
+                                ""
+                            } else {
+                                (0 until size).joinToString("\n") { index ->
+                                    "const lt_payload_${index}_$safe = new Counter('lt_payload_${index}_$safe');"
+                                }
+                            }
+                        } ?: ""
+                    listOf(tracked, fallback, payloadCounters).filter { it.isNotEmpty() }.joinToString("\n")
                 }
         // k6 v1+ removed the top-level `gracefulStop` option; graceful stop
         // is now a scenario-level setting. The `vus` and `duration`/`iterations`
@@ -95,6 +125,8 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
             };
 
             const BASE_URL = __ENV.BASE_URL;
+
+            $poolSelectors
 
             export default function () {
             $calls
@@ -214,8 +246,116 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
     private fun requestCode(
         operation: ApiOperation,
         configuration: OperationConfiguration?,
+        strategy: PayloadStrategy,
     ): String {
-        val parameterValues = resolveParameters(operation, configuration)
+        val payloads = effectivePayloads(configuration)
+        require(payloads.isNotEmpty()) { "Der Payload-Pool für '${operation.operationId}' darf nicht leer sein." }
+        val safe = safeIdentifier(operation.operationId)
+        // Single-payload path: emit exactly the same static request
+        // block as before (no pool selector, no dispatch). The
+        // behaviour for the legacy single-dataset layout is preserved
+        // bit-for-bit so the existing test suite keeps matching.
+        if (payloads.size == 1) {
+            return singlePayloadRequestBlock(operation, payloads.single(), safe)
+        }
+        // Multi-payload path: inline if/else chain inside the
+        // `default function()` body. The pool selector (counter
+        // + next() function) is emitted at module top-level by
+        // [collectPoolSelectors] so the per-iteration dispatch
+        // here can simply call the next() function. Keeping the
+        // counter at module level is what makes the round-robin
+        // sequence stable across iterations of the same VU.
+        //
+        // Each if/else branch starts with `lt_payload_<i>_<safe>.add(1)`
+        // so the summary export records how many times each payload
+        // was actually picked during the run. The report reads these
+        // counters and shows a per-payload call count next to the
+        // configured payloads.
+        val firstBlock = singlePayloadRequestBlock(operation, payloads[0], safe).trim()
+        val firstBranch =
+            "  if (__lt_idx_$safe === 0) { lt_payload_0_$safe.add(1); $firstBlock }"
+        val subsequentBranches =
+            payloads.drop(1).mapIndexed { index, payload ->
+                val block = singlePayloadRequestBlock(operation, payload, safe).trim()
+                "  else if (__lt_idx_$safe === ${index + 1}) { lt_payload_${index + 1}_$safe.add(1); $block }"
+            }
+        return "  const __lt_idx_$safe = __lt_next_$safe();\n$firstBranch\n" + subsequentBranches.joinToString("\n")
+    }
+
+    /**
+     * Collects the top-level pool selectors (counter + next()
+     * function) for every operation whose configuration carries more
+     * than one payload. Returned as a single string that is rendered
+     * above the `default function()` declaration so the per-VU
+     * counter survives across iterations.
+     */
+    private fun collectPoolSelectors(
+        selected: List<ApiOperation>,
+        configurations: Map<String, OperationConfiguration>,
+        strategy: PayloadStrategy,
+    ): String =
+        selected
+            .mapNotNull { operation ->
+                val configuration = configurations[operation.operationId] ?: return@mapNotNull null
+                val payloads = effectivePayloads(configuration)
+                if (payloads.size <= 1) return@mapNotNull null
+                renderPoolSelector(safeIdentifier(operation.operationId), payloads.size, strategy)
+            }.joinToString("\n\n")
+
+    /**
+     * The k6 JavaScript that picks the next payload index for a given
+     * operation, either round-robin (`sequential`) or uniformly at
+     * random (`random`). Declared at the top of the generated script
+     * so the per-iteration dispatch inside `default function()` is a
+     * cheap function call instead of a duplicated expression.
+     */
+    private fun renderPoolSelector(
+        safe: String,
+        size: Int,
+        strategy: PayloadStrategy,
+    ): String =
+        when (strategy) {
+            PayloadStrategy.SEQUENTIAL ->
+                """
+                let __lt_idx_$safe = 0;
+                function __lt_next_$safe() {
+                    const i = __lt_idx_$safe % $size;
+                    __lt_idx_$safe++;
+                    return i;
+                }
+                """.trimIndent()
+            PayloadStrategy.RANDOM ->
+                """
+                function __lt_next_$safe() {
+                    return Math.floor(Math.random() * $size);
+                }
+                """.trimIndent()
+        }
+
+    /**
+     * Resolves the list of payloads the generator should consider for
+     * an operation. The new `payloads` list takes priority; if it is
+     * empty the legacy flat fields are migrated to a single synthetic
+     * payload via [OperationConfiguration.primaryPayload]. Returns at
+     * least one payload — callers rely on this to never run an empty
+     * request.
+     */
+    private fun effectivePayloads(configuration: OperationConfiguration?): List<OperationPayload> {
+        if (configuration == null) return listOf(OperationPayload())
+        return configuration.payloads.ifEmpty { listOf(configuration.primaryPayload()) }
+    }
+
+    /**
+     * Renders a single static request block for a single payload. The
+     * URL, headers and body are all baked in at generation time so the
+     * k6 runtime does not need a per-iteration template engine.
+     */
+    private fun singlePayloadRequestBlock(
+        operation: ApiOperation,
+        payload: OperationPayload,
+        safe: String,
+    ): String {
+        val parameterValues = resolveParametersForPayload(operation, payload)
         var path = operation.path
         parameterValues.filter { it.parameter.location == "path" }.forEach {
             path = path.replace("{${it.parameter.name}}", encode(it.value))
@@ -225,9 +365,9 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                 .filter { it.parameter.location == "query" }
                 .joinToString("&") { "${encode(it.parameter.name)}=${encode(it.value)}" }
         val url = path + if (query.isEmpty()) "" else "?$query"
-        val requestBody = resolveRequestBody(operation, configuration)
+        val requestBody = resolveRequestBodyForPayload(operation, payload)
         require(requestBody != null || !operation.requestBodyRequired) { "Der Pflicht-Request-Body für '${operation.operationId}' darf nicht leer sein." }
-        val headers = requestHeaders(parameterValues, configuration, requestBody != null)
+        val headers = requestHeadersForPayload(parameterValues, payload, requestBody != null)
         val requestOptions =
             linkedMapOf<String, Any>(
                 "tags" to
@@ -246,10 +386,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                 "DELETE" -> "http.del(BASE_URL + ${toJson(url)}, null, ${toJson(requestOptions)})"
                 else -> "http.request(${toJson(operation.method)}, BASE_URL + ${toJson(url)}, ${requestBody?.let { "JSON.stringify(${toJson(it)})" } ?: "null"}, ${toJson(requestOptions)})"
             }
-        val safe = safeIdentifier(operation.operationId)
-        // switch keeps the generated code linear in the number of codes
-        // (instead of a 20-step if/else-if ladder) and the k6 engine
-        // can fast-path consecutive identical status values better.
         val statusIncrement =
             buildString {
                 appendLine("switch (response.status) {")
@@ -260,7 +396,59 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                 appendLine("  default: lt_status_other_$safe.add(1);")
                 append("}")
             }
-        return "  { const response = $request; $statusIncrement check(response, { ${toJson("${operation.operationId} succeeds")}: (r) => r.status >= 200 && r.status < 400 }); }"
+        return "{ const response = $request; $statusIncrement check(response, { ${toJson("${operation.operationId} succeeds")}: (r) => r.status >= 200 && r.status < 400 }); }"
+    }
+
+    private fun resolveParametersForPayload(
+        operation: ApiOperation,
+        payload: OperationPayload,
+    ): List<ResolvedParameter> {
+        val configured = configuredParameters(payload.parameterValues)
+        val known = operation.parameters.map(::keyOf).toSet()
+        require(configured.keys.all(known::contains)) { "Die Konfiguration für '${operation.operationId}' enthält einen unbekannten Parameter." }
+        return operation.parameters.mapNotNull { parameter ->
+            val configuredValue = configured[keyOf(parameter)]?.value
+            val value = configuredValue ?: parameter.example?.let(::parameterValue) ?: DEFAULT_PARAMETER_VALUE
+            if (value.isBlank()) {
+                require(!parameter.required) { "Der Pflichtparameter '${parameter.name}' für '${operation.operationId}' darf nicht leer sein." }
+                null
+            } else {
+                ResolvedParameter(parameter, value)
+            }
+        }
+    }
+
+    private fun resolveRequestBodyForPayload(
+        operation: ApiOperation,
+        payload: OperationPayload,
+    ): Any? {
+        val requestBodyJson = payload.requestBodyJson ?: return operation.requestBodyExample
+        if (requestBodyJson.isBlank()) return null
+        return try {
+            objectMapper.readValue(requestBodyJson, Any::class.java)
+        } catch (exception: JsonProcessingException) {
+            throw IllegalArgumentException("Der Request-Body für '${operation.operationId}' ist kein gültiges JSON.", exception)
+        }
+    }
+
+    private fun requestHeadersForPayload(
+        parameterValues: List<ResolvedParameter>,
+        payload: OperationPayload,
+        hasRequestBody: Boolean,
+    ): Map<String, String> {
+        val headers = linkedMapOf<String, String>()
+        parameterValues.filter { it.parameter.location == "header" }.forEach { headers[it.parameter.name] = it.value }
+        val cookies = parameterValues.filter { it.parameter.location == "cookie" }.joinToString("; ") { "${it.parameter.name}=${encode(it.value)}" }
+        if (cookies.isNotEmpty()) {
+            headers["Cookie"] = cookies
+        }
+        payload.bearerToken?.trim()?.takeIf(String::isNotEmpty)?.let { token ->
+            headers["Authorization"] = if (token.startsWith(BEARER_PREFIX, ignoreCase = true)) token else "$BEARER_PREFIX$token"
+        }
+        if (hasRequestBody) {
+            headers.putIfAbsent("Content-Type", "application/json")
+        }
+        return headers
     }
 
     private fun safeIdentifier(name: String): String {

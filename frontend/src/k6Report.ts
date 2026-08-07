@@ -1,7 +1,56 @@
-export type ReportParameterValue = {
-  name: string
-  location: string
-  value: string
+export type ReportParameterValue = { name: string, location: string, value: string }
+
+export type ReportPayload = {
+  parameterValues: ReportParameterValue[]
+  requestBodyJson?: string
+  bearerTokenConfigured?: boolean
+}
+
+export type ReportPayloadUsage = {
+  /** Zero-based index into the operation's `payloads` list. */
+  index: number
+  /** How many times k6 actually picked this payload during the run. */
+  count: number
+}
+
+/**
+ * Reads the per-payload call counters from a k6 summary. The k6
+ * generator emits one counter per payload index per operation
+ * (`lt_payload_<i>_<safe>`); the export exposes them under
+ * `metrics.<name>.count`. Returns an empty array when no counters
+ * are present (single-payload runs, legacy runs, or runs that
+ * crashed before any iteration).
+ */
+export function extractPayloadUsage(run: TestRun, operationId: string): ReportPayloadUsage[] {
+  const raw = run.summary?.raw
+  if (typeof raw !== 'string' || raw.length === 0) return []
+  let summary: { metrics?: Record<string, { count?: number }> }
+  try {
+    summary = JSON.parse(raw) as { metrics?: Record<string, { count?: number }> }
+  } catch {
+    return []
+  }
+  const prefix = `lt_payload_`
+  const suffix = `_${operationId}`
+  const usages: ReportPayloadUsage[] = []
+  for (const [name, value] of Object.entries(summary.metrics ?? {})) {
+    if (!name.startsWith(prefix) || !name.endsWith(suffix)) continue
+    const middle = name.slice(prefix.length, name.length - suffix.length)
+    // parseInt returns NaN for non-numeric middles. Both `NaN` and
+    // negative integers are out of range, so we guard with a single
+    // `Number.isInteger && >= 0` check.
+    const index = Number.parseInt(middle, 10)
+    if (!Number.isInteger(index) || index < 0) continue
+    // `value.count` is typed `number | undefined`. Guarding with
+    // Number.isFinite first (which accepts number | undefined in
+    // our local cast below) and falling back to zero mirrors the
+    // behaviour we want without leaning on `as`.
+    const rawCount: number | undefined = value.count
+    const count = typeof rawCount === 'number' && Number.isFinite(rawCount) ? rawCount : 0
+    usages.push({ index, count })
+  }
+  usages.sort((a, b) => a.index - b.index)
+  return usages
 }
 
 export type ReportOperation = {
@@ -12,6 +61,53 @@ export type ReportOperation = {
   parameterValues: ReportParameterValue[]
   requestBodyJson?: string
   bearerTokenConfigured: boolean
+  /**
+   * All payloads that were configured for this endpoint at the time
+   * the run was started. The report lists every entry so the user
+   * can see exactly which datasets k6 cycled through or sampled
+   * from. Empty for legacy runs that pre-date the pool feature —
+   * the report falls back to the flat `parameterValues` /
+   * `requestBodyJson` fields in that case.
+   */
+  payloads: ReportPayload[]
+}
+
+export type ReportPayloadStrategy = 'sequential' | 'random'
+
+/**
+ * Renders the human-readable label for the payload strategy the run
+ * was started with. Falls back to a sensible default for legacy runs
+ * that pre-date the pool feature.
+ */
+export function renderPayloadStrategyLabel(strategy: ReportPayloadStrategy | string | null | undefined): string {
+  switch (strategy) {
+    case 'random':
+      return 'Zufällig'
+    case 'sequential':
+    case null:
+    case undefined:
+      return 'Sequenziell'
+    default:
+      return strategy
+  }
+}
+
+/**
+ * One-line description of the strategy so the user can see at a
+ * glance what the generator actually did during the run.
+ */
+export function renderPayloadStrategyHelp(strategy: ReportPayloadStrategy | string | null | undefined): string {
+  switch (strategy) {
+    case 'random':
+      return 'Pro Iteration ein zufälliger Payload aus dem Pool des Endpunkts.'
+    case 'sequential':
+      return '1, 2, …, letzter, dann wieder 1 — Round-Robin mit Wrap-Around.'
+    case null:
+    case undefined:
+      return 'Standard-Verhalten: jeder Endpunkt mit einem einzigen Datensatz.'
+    default:
+      return ''
+  }
 }
 
 // Wire shape of a load profile. Mirrors `LoadProfile` from
@@ -45,11 +141,29 @@ export type TestRunConfiguration = {
   apiVersion: string
   baseUrl: string
   loadProfile: ReportLoadProfile
+  /**
+   * Echo of the load profile's payload strategy at the time the run
+   * was started. `null` (or missing on the wire) means the run was
+   * started before the pool feature shipped; the report renders
+   * those as `Sequenziell` (default) with a note that the pool is
+   * not in play.
+   */
+  payloadStrategy?: ReportPayloadStrategy | string | null
   operations: ReportOperation[]
 }
 
 export type TestRun = {
   id: string
+  /**
+   * Lifecycle state. The known values are exported from the
+   * backend (`TestRunStatus` in Kotlin):
+   *   QUEUED, RUNNING, STOPPING          (in-flight)
+   *   COMPLETED, FAILED, STOPPED, ABORTED (terminal)
+   * The status is intentionally typed as `string` here because
+   * older clients may receive runs whose status was added after
+   * they were last deployed; the dashboard routes on `===` checks
+   * against the documented literals below.
+   */
   status: string
   createdAt: string
   startedAt?: string
@@ -65,6 +179,27 @@ export type TestRun = {
    */
   consoleOutput?: string
   error?: string
+  /**
+   * Wall-clock instant at which the user asked for cancellation.
+   * Set together with [cancelledByForce] when the run was stopped
+   * or aborted by the operator (rather than having run its full
+   * course). `undefined` for runs that were never cancelled.
+   */
+  cancelledAt?: string
+  /**
+   * `true` if the user forced the run to abort (SIGKILL), `false`
+   * for a graceful stop (SIGTERM that was honoured by k6). Only
+   * meaningful in combination with [cancelledAt].
+   */
+  cancelledByForce?: boolean
+  /**
+   * Echoed snapshot of the request that started this run. The
+   * frontend does not read it — the rerun endpoint takes care of
+   * that server-side — but the field is included so debugging
+   * tools and future features can inspect what produced the run
+   * without having to call a second endpoint.
+   */
+  originalRequest?: unknown
 }
 
 // Failure categories surfaced by summarizeFailure. The ordering is

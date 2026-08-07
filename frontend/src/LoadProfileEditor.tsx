@@ -40,38 +40,45 @@ import {
   type LoadProfile,
   type LoadStage,
 } from './loadProfile.ts'
+import { translate, type SupportedLanguage } from './i18n.ts'
 
 type LoadProfileEditorProps = {
   profile: LoadProfile
+  language: SupportedLanguage
   onChange: (next: LoadProfile) => void
   disabled?: boolean
 }
 
+type PresetId = 'smoke' | 'load' | 'stress' | 'spike' | 'soak' | 'burst' | 'arrivalRate'
+
 type PresetEntry = {
-  label: string
-  description: string
+  id: PresetId
+  // i18n key suffix under `profile.preset.<id>.<label|description>`.
+  // The visible label/description are resolved at render time via
+  // translate() so the preset names speak the user's language
+  // without hardcoded strings leaking into the React tree.
   apply: () => LoadProfile
 }
 
 const PRESETS: PresetEntry[] = [
-  { label: 'Smoke', description: '1 VU für 30 s — idealer CI-Pre-Flight-Check', apply: smokePreset },
-  { label: 'Load', description: 'Schrittweise auf 50 VUs, 5 min Plateau', apply: loadPreset },
-  { label: 'Stress', description: 'Stufenweise bis 400 VUs, findet den Knick', apply: stressPreset },
-  { label: 'Spike', description: 'Plötzlicher Sprung auf 800 VUs, 30 s Plateau', apply: spikePreset },
-  { label: 'Soak', description: '50 VUs über eine Stunde, deckt Leaks auf', apply: soakPreset },
-  { label: 'Burst', description: '1 000 Anfragen so schnell wie möglich — vergleicht Releases mit fester Request-Anzahl', apply: requestsPreset },
-  { label: 'Arrival-Rate', description: '50 Anfragen/s unabhängig von der Antwortzeit', apply: arrivalRatePreset },
+  { id: 'smoke', apply: smokePreset },
+  { id: 'load', apply: loadPreset },
+  { id: 'stress', apply: stressPreset },
+  { id: 'spike', apply: spikePreset },
+  { id: 'soak', apply: soakPreset },
+  { id: 'burst', apply: requestsPreset },
+  { id: 'arrivalRate', apply: arrivalRatePreset },
 ]
 
-export function LoadProfileEditor({ profile, onChange, disabled = false }: LoadProfileEditorProps) {
+export function LoadProfileEditor({ profile, language, onChange, disabled = false }: LoadProfileEditorProps) {
   const error = validateLoadProfile(profile)
   const errorId = useId()
   const presetHelpId = useId()
-  const [presetHovered, setPresetHovered] = useState<string | undefined>()
+  const [presetHovered, setPresetHovered] = useState<PresetId | undefined>()
   // The last clicked preset stays highlighted until a different one is
   // chosen. This way the user always sees which preset is currently
   // active — even after the mouse has left the button.
-  const [presetSelected, setPresetSelected] = useState<string | undefined>()
+  const [presetSelected, setPresetSelected] = useState<PresetId | undefined>()
 
   function emit(next: LoadProfile) {
     onChange(next)
@@ -83,20 +90,21 @@ export function LoadProfileEditor({ profile, onChange, disabled = false }: LoadP
         disabled={disabled}
         hovered={presetHovered}
         selected={presetSelected}
+        language={language}
         onHover={setPresetHovered}
         onPick={entry => {
-          setPresetSelected(entry.label)
+          setPresetSelected(entry.id)
           emit(entry.apply())
         }}
         helpId={presetHelpId}
       />
 
       <fieldset className="profile-fields" disabled={disabled}>
-        <legend className="sr-only">Lastprofil-Felder</legend>
+        <legend className="sr-only">{translate(language, 'profile.editor.legend')}</legend>
 
         <label className="parameter-box">
           <span className="field-heading">
-            <strong>Lastprofil</strong>
+            <strong>{translate(language, 'profile.card.title')}</strong>
             <code>executor</code>
             <span className="type-hint">{profile.type}</span>
           </span>
@@ -110,20 +118,20 @@ export function LoadProfileEditor({ profile, onChange, disabled = false }: LoadP
               setPresetSelected(undefined)
               emit(changeProfileType(profile, event.target.value as LoadProfile['type']))
             }}
-            aria-label="Lastprofil-Typ"
+            aria-label={translate(language, 'profile.editor.type')}
           >
-            <option value="constant-vus">Konstante Last (constant-vus)</option>
-            <option value="shared-iterations">N Anfragen, so schnell wie möglich (shared-iterations)</option>
-            <option value="ramping-vus">Ramping-VUs (Stages)</option>
-            <option value="constant-arrival-rate">Constant-Arrival-Rate (RPS)</option>
+            <option value="constant-vus">{translate(language, 'profile.editor.type.constant-vus')}</option>
+            <option value="shared-iterations">{translate(language, 'profile.editor.type.shared-iterations')}</option>
+            <option value="ramping-vus">{translate(language, 'profile.editor.type.ramping-vus')}</option>
+            <option value="constant-arrival-rate">{translate(language, 'profile.editor.type.constant-arrival-rate')}</option>
           </select>
           <small className="profile-summary">{loadProfileLabel(profile)}</small>
         </label>
 
-        {profile.type === 'constant-vus' && <ConstantVUsFields profile={profile} onChange={emit} />}
-        {profile.type === 'shared-iterations' && <SharedIterationsFields profile={profile} onChange={emit} />}
-        {profile.type === 'ramping-vus' && <RampingVUsFields profile={profile} onChange={emit} />}
-        {profile.type === 'constant-arrival-rate' && <ArrivalRateFields profile={profile} onChange={emit} />}
+        {profile.type === 'constant-vus' && <ConstantVUsFields profile={profile} language={language} onChange={emit} />}
+        {profile.type === 'shared-iterations' && <SharedIterationsFields profile={profile} language={language} onChange={emit} />}
+        {profile.type === 'ramping-vus' && <RampingVUsFields profile={profile} language={language} onChange={emit} />}
+        {profile.type === 'constant-arrival-rate' && <ArrivalRateFields profile={profile} language={language} onChange={emit} />}
       </fieldset>
 
       {error && (
@@ -131,7 +139,7 @@ export function LoadProfileEditor({ profile, onChange, disabled = false }: LoadP
           {error}
         </div>
       )}
-      {!error && profile.type === 'ramping-vus' && <StagesHint stages={profile.stages} />}
+      {!error && profile.type === 'ramping-vus' && <StagesHint language={language} stages={profile.stages} />}
     </div>
   )
 }
@@ -142,57 +150,60 @@ function PresetRow({
   disabled,
   hovered,
   selected,
+  language,
   onHover,
   onPick,
   helpId,
 }: {
   disabled: boolean
-  hovered: string | undefined
-  selected: string | undefined
-  onHover: (label: string | undefined) => void
+  hovered: PresetId | undefined
+  selected: PresetId | undefined
+  language: SupportedLanguage
+  onHover: (id: PresetId | undefined) => void
   onPick: (entry: PresetEntry) => void
   helpId: string
 }) {
   // When the mouse / focus leaves, the help text falls back to the
   // description of the last selected preset, so the user keeps seeing
   // what the active preset does.
-  const focusLabel = hovered ?? selected
+  const focusId = hovered ?? selected
   return (
     <div className="preset-row" aria-describedby={helpId}>
-      <span className="preset-label">Schnellauswahl</span>
+      <span className="preset-label">{translate(language, 'profile.preset.label')}</span>
       <div className="preset-buttons">
         {PRESETS.map(entry => {
-          const isHovered = hovered === entry.label
+          const isHovered = hovered === entry.id
           // `hovered` and `selected` are orthogonal — both classes can
           // be active at the same time (mouse over an already-selected
           // preset). Previously they were coupled together
           // (`!isHovered && selected === …`), which swallowed the
           // `selected` class on click as long as the mouse had not
           // been moved away from the button.
-          const isSelected = selected === entry.label
+          const isSelected = selected === entry.id
+          const label = translate(language, `profile.preset.${entry.id}.label`)
           return (
             <button
               type="button"
-              key={entry.label}
+              key={entry.id}
               className={`preset-button ${isHovered ? 'hovered' : ''} ${isSelected ? 'selected' : ''}`}
               disabled={disabled}
               onClick={() => onPick(entry)}
-              onMouseEnter={() => onHover(entry.label)}
+              onMouseEnter={() => onHover(entry.id)}
               onMouseLeave={() => onHover(undefined)}
-              onFocus={() => onHover(entry.label)}
+              onFocus={() => onHover(entry.id)}
               onBlur={() => onHover(undefined)}
               aria-describedby={helpId}
-              aria-pressed={selected === entry.label}
+              aria-pressed={selected === entry.id}
             >
-              {entry.label}
+              {label}
             </button>
           )
         })}
       </div>
       <small id={helpId} className="preset-help">
-        {focusLabel
-          ? PRESETS.find(entry => entry.label === focusLabel)?.description
-          : 'Preset überfahren für eine Beschreibung.'}
+        {focusId
+          ? translate(language, `profile.preset.${focusId}.description`)
+          : translate(language, 'profile.preset.help')}
       </small>
     </div>
   )
@@ -200,20 +211,20 @@ function PresetRow({
 
 // ---- Profile fields ---------------------------------------------------------
 
-function ConstantVUsFields({ profile, onChange }: { profile: Extract<LoadProfile, { type: 'constant-vus' }>, onChange: (next: LoadProfile) => void }) {
+function ConstantVUsFields({ profile, language, onChange }: { profile: Extract<LoadProfile, { type: 'constant-vus' }>, language: SupportedLanguage, onChange: (next: LoadProfile) => void }) {
   return (
     <div className="profile-fields-grid">
       <NumberField
-        label="Virtual Users"
-        hint={`1 bis ${MAX_VIRTUAL_USERS}`}
+        label={translate(language, 'profile.virtualUsers')}
+        hint={translate(language, 'profile.memory.minmax', { min: 1, max: MAX_VIRTUAL_USERS })}
         min={1}
         max={MAX_VIRTUAL_USERS}
         value={profile.virtualUsers}
         onChange={virtualUsers => onChange({ ...profile, virtualUsers })}
       />
       <NumberField
-        label="Dauer (Sekunden)"
-        hint={`1 bis ${MAX_DURATION_SECONDS}`}
+        label={translate(language, 'profile.durationSeconds')}
+        hint={translate(language, 'profile.memory.minmax', { min: 1, max: MAX_DURATION_SECONDS })}
         min={1}
         max={MAX_DURATION_SECONDS}
         value={profile.durationSeconds}
@@ -223,20 +234,20 @@ function ConstantVUsFields({ profile, onChange }: { profile: Extract<LoadProfile
   )
 }
 
-function SharedIterationsFields({ profile, onChange }: { profile: Extract<LoadProfile, { type: 'shared-iterations' }>, onChange: (next: LoadProfile) => void }) {
+function SharedIterationsFields({ profile, language, onChange }: { profile: Extract<LoadProfile, { type: 'shared-iterations' }>, language: SupportedLanguage, onChange: (next: LoadProfile) => void }) {
   return (
     <div className="profile-fields-grid">
       <NumberField
-        label="Virtual Users"
-        hint={`1 bis ${MAX_VIRTUAL_USERS}`}
+        label={translate(language, 'profile.virtualUsers')}
+        hint={translate(language, 'profile.memory.minmax', { min: 1, max: MAX_VIRTUAL_USERS })}
         min={1}
         max={MAX_VIRTUAL_USERS}
         value={profile.virtualUsers}
         onChange={virtualUsers => onChange({ ...profile, virtualUsers })}
       />
       <NumberField
-        label="Iterationen"
-        hint={`1 bis ${MAX_ITERATIONS}`}
+        label={translate(language, 'profile.iterations.label')}
+        hint={translate(language, 'profile.memory.minmax', { min: 1, max: MAX_ITERATIONS })}
         min={1}
         max={MAX_ITERATIONS}
         value={profile.iterations}
@@ -246,68 +257,70 @@ function SharedIterationsFields({ profile, onChange }: { profile: Extract<LoadPr
   )
 }
 
-function RampingVUsFields({ profile, onChange }: { profile: Extract<LoadProfile, { type: 'ramping-vus' }>, onChange: (next: LoadProfile) => void }) {
+function RampingVUsFields({ profile, language, onChange }: { profile: Extract<LoadProfile, { type: 'ramping-vus' }>, language: SupportedLanguage, onChange: (next: LoadProfile) => void }) {
+  const peak = Math.max(profile.startVUs, ...profile.stages.map(stage => stage.target))
+  const totalSeconds = profile.stages.reduce((sum, stage) => sum + stage.durationSeconds, 0)
   return (
     <div className="ramping-fields">
       <div className="profile-fields-grid">
         <NumberField
-          label="Start-VUs"
-          hint={`0 bis ${MAX_VIRTUAL_USERS}`}
+          label={translate(language, 'profile.virtualUsers')}
+          hint={translate(language, 'profile.memory.minmax', { min: 0, max: MAX_VIRTUAL_USERS })}
           min={0}
           max={MAX_VIRTUAL_USERS}
           value={profile.startVUs}
           onChange={startVUs => onChange({ ...profile, startVUs })}
         />
         <div className="stage-totals">
-          <span>Stages</span>
+          <span>{translate(language, 'profile.stages.title')}</span>
           <strong>{profile.stages.length}</strong>
           <small>
-            Gesamtdauer {profile.stages.reduce((sum, stage) => sum + stage.durationSeconds, 0)} s · Spitze {Math.max(profile.startVUs, ...profile.stages.map(stage => stage.target))} VUs
+            {translate(language, 'profile.stages.total', { seconds: totalSeconds, peak })}
           </small>
         </div>
       </div>
-      <StagesTable stages={profile.stages} onChange={stages => onChange({ ...profile, stages })} />
+      <StagesTable stages={profile.stages} language={language} onChange={stages => onChange({ ...profile, stages })} />
     </div>
   )
 }
 
-function ArrivalRateFields({ profile, onChange }: { profile: Extract<LoadProfile, { type: 'constant-arrival-rate' }>, onChange: (next: LoadProfile) => void }) {
+function ArrivalRateFields({ profile, language, onChange }: { profile: Extract<LoadProfile, { type: 'constant-arrival-rate' }>, language: SupportedLanguage, onChange: (next: LoadProfile) => void }) {
   return (
     <div className="profile-fields-grid">
       <NumberField
-        label="Rate (Anfragen)"
-        hint={`1 bis ${MAX_RATE}`}
+        label={translate(language, 'profile.rate')}
+        hint={translate(language, 'profile.memory.minmax', { min: 1, max: MAX_RATE })}
         min={1}
         max={MAX_RATE}
         value={profile.rate}
         onChange={rate => onChange({ ...profile, rate })}
       />
       <NumberField
-        label="pro Sekunden"
-        hint="1 bis 60"
+        label={translate(language, 'profile.timeUnitSeconds')}
+        hint={translate(language, 'profile.memory.minmax', { min: 1, max: 60 })}
         min={1}
         max={60}
         value={profile.timeUnitSeconds}
         onChange={timeUnitSeconds => onChange({ ...profile, timeUnitSeconds })}
       />
       <NumberField
-        label="Dauer (Sekunden)"
-        hint={`1 bis ${MAX_DURATION_SECONDS}`}
+        label={translate(language, 'profile.durationSeconds')}
+        hint={translate(language, 'profile.memory.minmax', { min: 1, max: MAX_DURATION_SECONDS })}
         min={1}
         max={MAX_DURATION_SECONDS}
         value={profile.durationSeconds}
         onChange={durationSeconds => onChange({ ...profile, durationSeconds })}
       />
       <NumberField
-        label="preAllocatedVUs"
-        hint={`1 bis ${MAX_PRE_ALLOCATED_VUS}`}
+        label={translate(language, 'profile.preAllocatedVUs')}
+        hint={translate(language, 'profile.memory.minmax', { min: 1, max: MAX_PRE_ALLOCATED_VUS })}
         min={1}
         max={MAX_PRE_ALLOCATED_VUS}
         value={profile.preAllocatedVUs}
         onChange={preAllocatedVUs => onChange({ ...profile, preAllocatedVUs })}
       />
       <NumberField
-        label="maxVUs"
+        label={translate(language, 'profile.maxVUs')}
         hint={`≥ preAllocatedVUs, ≤ ${MAX_PRE_ALLOCATED_VUS}`}
         min={profile.preAllocatedVUs}
         max={MAX_PRE_ALLOCATED_VUS}
@@ -320,7 +333,7 @@ function ArrivalRateFields({ profile, onChange }: { profile: Extract<LoadProfile
 
 // ---- Stages table -----------------------------------------------------------
 
-function StagesTable({ stages, onChange }: { stages: LoadStage[], onChange: (next: LoadStage[]) => void }) {
+function StagesTable({ stages, language, onChange }: { stages: LoadStage[], language: SupportedLanguage, onChange: (next: LoadStage[]) => void }) {
   function update(index: number, patch: Partial<LoadStage>) {
     onChange(stages.map((stage, i) => (i === index ? { ...stage, ...patch } : stage)))
   }
@@ -333,13 +346,13 @@ function StagesTable({ stages, onChange }: { stages: LoadStage[], onChange: (nex
   }
   return (
     <div className="stages-table-wrap">
-      <table className="stages-table" aria-label="Ramping-VUs-Stages">
+      <table className="stages-table" aria-label={translate(language, 'profile.editor.type.ramping-vus')}>
         <thead>
           <tr>
             <th>#</th>
-            <th>Ziel-VUs</th>
-            <th>Dauer (s)</th>
-            <th aria-label="Aktionen" />
+            <th>{translate(language, 'profile.stages.target')}</th>
+            <th>{translate(language, 'profile.stages.duration')}</th>
+            <th aria-label={translate(language, 'profile.stages.action') as string} />
           </tr>
         </thead>
         <tbody>
@@ -353,7 +366,7 @@ function StagesTable({ stages, onChange }: { stages: LoadStage[], onChange: (nex
                   max={MAX_VIRTUAL_USERS}
                   step={1}
                   value={stage.target}
-                  aria-label={`Stage ${index + 1}: Ziel-VUs`}
+                  aria-label={translate(language, 'profile.stages.targetAria', { n: index + 1 })}
                   onChange={event => update(index, { target: Number(event.target.value) })}
                 />
               </td>
@@ -364,12 +377,12 @@ function StagesTable({ stages, onChange }: { stages: LoadStage[], onChange: (nex
                   max={MAX_DURATION_SECONDS}
                   step={1}
                   value={stage.durationSeconds}
-                  aria-label={`Stage ${index + 1}: Dauer`}
+                  aria-label={translate(language, 'profile.stages.durationAria', { n: index + 1 })}
                   onChange={event => update(index, { durationSeconds: Number(event.target.value) })}
                 />
               </td>
               <td>
-                <button type="button" className="stage-remove" onClick={() => remove(index)} aria-label={`Stage ${index + 1} entfernen`}>
+                <button type="button" className="stage-remove" onClick={() => remove(index)} aria-label={translate(language, 'profile.stages.removeAria', { n: index + 1 })}>
                   ×
                 </button>
               </td>
@@ -378,16 +391,16 @@ function StagesTable({ stages, onChange }: { stages: LoadStage[], onChange: (nex
         </tbody>
       </table>
       <button type="button" className="stage-add" onClick={append}>
-        + Stage hinzufügen
+        {translate(language, 'profile.stages.add')}
       </button>
     </div>
   )
 }
 
-function StagesHint(_props: { stages: LoadStage[] }) {
+function StagesHint({ language }: { language: SupportedLanguage, stages: LoadStage[] }) {
   return (
     <p className="stages-hint">
-      Stages werden der Reihe nach ausgeführt. Eine Rampe von 0 auf N innerhalb der Stage-Dauer. Für Spike-Tests: kurze Dauer + hoher Zielwert. Für Soak-Tests: langes Plateau auf konstantem Zielwert. Eine Pause zwischen Lastphasen ist eine Stage mit Ziel 0.
+      {translate(language, 'profile.stages.hint')}
     </p>
   )
 }

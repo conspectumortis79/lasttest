@@ -18,16 +18,32 @@ export const ALLOWED_TIME_UNITS_SECONDS: readonly number[] = Array.from({ length
 
 export type LoadProfileType = 'constant-vus' | 'shared-iterations' | 'ramping-vus' | 'constant-arrival-rate'
 
+/**
+ * How the generator picks the next payload from a per-endpoint pool
+ * each time k6 runs an iteration. `sequential` walks the pool top to
+ * bottom and wraps around; `random` picks one at random. The strategy
+ * is optional on the wire — when omitted the backend defaults to
+ * `sequential` (which is also the only behaviour that makes sense for
+ * a single-payload pool, i.e. the legacy single-dataset layout).
+ */
+export type PayloadStrategy = 'sequential' | 'random'
+
+export const PAYLOAD_STRATEGIES: readonly PayloadStrategy[] = ['sequential', 'random'] as const
+
+export function isPayloadStrategy(value: unknown): value is PayloadStrategy {
+  return value === 'sequential' || value === 'random'
+}
+
 export type LoadStage = {
   target: number
   durationSeconds: number
 }
 
 export type LoadProfile =
-  | { type: 'constant-vus', virtualUsers: number, durationSeconds: number }
-  | { type: 'shared-iterations', virtualUsers: number, iterations: number }
-  | { type: 'ramping-vus', startVUs: number, stages: LoadStage[] }
-  | { type: 'constant-arrival-rate', rate: number, timeUnitSeconds: number, durationSeconds: number, preAllocatedVUs: number, maxVUs: number }
+  | { type: 'constant-vus', virtualUsers: number, durationSeconds: number, payloadStrategy?: PayloadStrategy }
+  | { type: 'shared-iterations', virtualUsers: number, iterations: number, payloadStrategy?: PayloadStrategy }
+  | { type: 'ramping-vus', startVUs: number, stages: LoadStage[], payloadStrategy?: PayloadStrategy }
+  | { type: 'constant-arrival-rate', rate: number, timeUnitSeconds: number, durationSeconds: number, preAllocatedVUs: number, maxVUs: number, payloadStrategy?: PayloadStrategy }
 
 export type LoadProfileValidation =
   | { valid: true }
@@ -137,6 +153,12 @@ export function requestsPreset(): LoadProfile {
  * backend. The backend re-validates the same shape independently.
  */
 export function validateLoadProfile(profile: LoadProfile): string | undefined {
+  // Payload strategy is optional on the wire: omitting it means
+  // "sequential" on the backend. The check lives in front of the
+  // type-specific switch so we surface the wrong-enum error before
+  // unrelated field problems.
+  const strategyError = validatePayloadStrategy(profile.payloadStrategy)
+  if (strategyError) return strategyError
   switch (profile.type) {
     case 'constant-vus':
       return validateIntegerInRange('Virtual Users', profile.virtualUsers, 1, MAX_VIRTUAL_USERS)
@@ -186,6 +208,12 @@ export function validateLoadProfile(profile: LoadProfile): string | undefined {
   }
 }
 
+function validatePayloadStrategy(strategy: unknown): string | undefined {
+  if (strategy === undefined) return undefined
+  if (isPayloadStrategy(strategy)) return undefined
+  return 'Payload-Strategie muss "sequential" oder "random" sein.'
+}
+
 function validateIntegerInRange(
   label: string,
   value: number,
@@ -224,25 +252,43 @@ export type SerialisedLoadProfile = {
   timeUnit?: number
   preAllocatedVUs?: number
   maxVUs?: number
+  payloadStrategy?: PayloadStrategy
 }
 
 export function serialiseLoadProfile(profile: LoadProfile): SerialisedLoadProfile {
+  const strategy = profile.payloadStrategy
   switch (profile.type) {
     case 'constant-vus':
-      return { type: profile.type, virtualUsers: profile.virtualUsers, durationSeconds: profile.durationSeconds }
+      return strategy === undefined
+        ? { type: profile.type, virtualUsers: profile.virtualUsers, durationSeconds: profile.durationSeconds }
+        : { type: profile.type, virtualUsers: profile.virtualUsers, durationSeconds: profile.durationSeconds, payloadStrategy: strategy }
     case 'shared-iterations':
-      return { type: profile.type, virtualUsers: profile.virtualUsers, iterations: profile.iterations, useIterations: true }
+      return strategy === undefined
+        ? { type: profile.type, virtualUsers: profile.virtualUsers, iterations: profile.iterations, useIterations: true }
+        : { type: profile.type, virtualUsers: profile.virtualUsers, iterations: profile.iterations, useIterations: true, payloadStrategy: strategy }
     case 'ramping-vus':
-      return { type: profile.type, startVUs: profile.startVUs, stages: profile.stages.map(stage => ({ ...stage })) }
+      return strategy === undefined
+        ? { type: profile.type, startVUs: profile.startVUs, stages: profile.stages.map(stage => ({ ...stage })) }
+        : { type: profile.type, startVUs: profile.startVUs, stages: profile.stages.map(stage => ({ ...stage })), payloadStrategy: strategy }
     case 'constant-arrival-rate':
-      return {
-        type: profile.type,
-        rate: profile.rate,
-        timeUnit: profile.timeUnitSeconds,
-        durationSeconds: profile.durationSeconds,
-        preAllocatedVUs: profile.preAllocatedVUs,
-        maxVUs: profile.maxVUs,
-      }
+      return strategy === undefined
+        ? {
+            type: profile.type,
+            rate: profile.rate,
+            timeUnit: profile.timeUnitSeconds,
+            durationSeconds: profile.durationSeconds,
+            preAllocatedVUs: profile.preAllocatedVUs,
+            maxVUs: profile.maxVUs,
+          }
+        : {
+            type: profile.type,
+            rate: profile.rate,
+            timeUnit: profile.timeUnitSeconds,
+            durationSeconds: profile.durationSeconds,
+            preAllocatedVUs: profile.preAllocatedVUs,
+            maxVUs: profile.maxVUs,
+            payloadStrategy: strategy,
+          }
   }
 }
 

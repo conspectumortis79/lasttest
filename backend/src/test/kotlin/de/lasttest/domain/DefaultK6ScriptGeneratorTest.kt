@@ -7,9 +7,12 @@ import de.lasttest.api.LoadProfile
 import de.lasttest.api.LoadProfileType
 import de.lasttest.api.LoadStage
 import de.lasttest.api.OperationConfiguration
+import de.lasttest.api.OperationPayload
 import de.lasttest.api.ParameterValue
+import de.lasttest.api.PayloadStrategy
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
@@ -349,15 +352,20 @@ class DefaultK6ScriptGeneratorTest {
     fun `rejects duplicate unknown and empty required parameters`() {
         val id = ParameterValue("id", "path", "7")
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+        // The generator still reads from the legacy `parameterValues` field
+        // in commit 1; commit 2 will switch the read site to
+        // `OperationConfiguration.primaryPayload()`. We keep the test
+        // pointed at the legacy constructor so the validation logic it
+        // exercises remains the same shape.
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("getPet"), listOf(OperationConfiguration("getPet", listOf(id, id))), profile)
+            generator.generate(specification, "https://example.test", setOf("getPet"), listOf(OperationConfiguration("getPet", parameterValues = listOf(id, id))), profile)
         }
         assertFailsWith<IllegalArgumentException> {
             generator.generate(
                 specification,
                 "https://example.test",
                 setOf("getPet"),
-                listOf(OperationConfiguration("getPet", listOf(ParameterValue("unknown", "query", "x")))),
+                listOf(OperationConfiguration("getPet", parameterValues = listOf(ParameterValue("unknown", "query", "x")))),
                 profile,
             )
         }
@@ -366,7 +374,7 @@ class DefaultK6ScriptGeneratorTest {
                 specification,
                 "https://example.test",
                 setOf("getPet"),
-                listOf(OperationConfiguration("getPet", listOf(ParameterValue("id", "PATH", " ")))),
+                listOf(OperationConfiguration("getPet", parameterValues = listOf(ParameterValue("id", "PATH", " ")))),
                 profile,
             )
         }
@@ -934,5 +942,290 @@ class DefaultK6ScriptGeneratorTest {
                 maxVUs = 30_001,
             )
         assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
+    }
+
+    // ---- Payload pool + strategy (commit 2) -----------------------------
+
+    @Test
+    fun `emits a top-level pool selector and an if-else dispatch for multiple payloads in sequential mode`() {
+        val configuration =
+            OperationConfiguration(
+                operationId = "getPet",
+                payloads =
+                    listOf(
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42"))),
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "17"))),
+                    ),
+            )
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 10,
+                payloadStrategy = PayloadStrategy.SEQUENTIAL,
+            )
+
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+
+        // Pool selector lives at the top of the script.
+        assertContains(script, "let __lt_idx_getPet = 0;")
+        assertContains(script, "function __lt_next_getPet()")
+        assertContains(script, "__lt_idx_getPet++")
+
+        // Dispatch lives in default function and includes an if-else chain.
+        assertContains(script, "const __lt_idx_getPet = __lt_next_getPet();")
+        assertContains(script, "if (__lt_idx_getPet === 0)")
+        assertContains(script, "else if (__lt_idx_getPet === 1)")
+
+        // Each payload's URL appears literally in the script so the
+        // k6 runtime does not need a per-iteration template engine.
+        assertContains(script, "/pets/42")
+        assertContains(script, "/pets/17")
+    }
+
+    @Test
+    fun `emits a random-mode pool selector when strategy is RANDOM`() {
+        val configuration =
+            OperationConfiguration(
+                operationId = "getPet",
+                payloads =
+                    listOf(
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42"))),
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "17"))),
+                    ),
+            )
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 10,
+                payloadStrategy = PayloadStrategy.RANDOM,
+            )
+
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+
+        // No increment in random mode — the function returns a fresh
+        // index on every call.
+        assertContains(script, "Math.floor(Math.random() * 2)")
+        assertTrue(!script.contains("__lt_idx_getPet++"))
+    }
+
+    @Test
+    fun `falls back to sequential pool selector when load profile omits payloadStrategy`() {
+        val configuration =
+            OperationConfiguration(
+                operationId = "getPet",
+                payloads =
+                    listOf(
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42"))),
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "17"))),
+                    ),
+            )
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+
+        // Default strategy is sequential.
+        assertContains(script, "__lt_idx_getPet++")
+    }
+
+    @Test
+    fun `single-payload pool emits no pool selector or dispatch (legacy behaviour preserved)`() {
+        val configuration =
+            OperationConfiguration(
+                operationId = "getPet",
+                payloads = listOf(OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42")))),
+            )
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 10,
+                payloadStrategy = PayloadStrategy.SEQUENTIAL,
+            )
+
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+
+        // Pool selector only exists when there is more than one payload.
+        assertTrue(!script.contains("__lt_next_getPet"))
+        assertTrue(!script.contains("__lt_idx_getPet"))
+        // The legacy path still bakes the URL in directly.
+        assertContains(script, "/pets/42")
+    }
+
+    @Test
+    fun `migrates legacy flat fields into a single-pool payload when the pool is empty`() {
+        // The generator must accept the legacy `parameterValues` shape
+        // even when the frontend hasn't migrated yet: it falls back to
+        // OperationConfiguration.primaryPayload() and emits the
+        // single-payload path.
+        val configuration = OperationConfiguration(operationId = "getPet", parameterValues = listOf(ParameterValue("id", "path", "99")))
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+
+        assertContains(script, "/pets/99")
+        assertTrue(!script.contains("__lt_next_getPet"))
+    }
+
+    @Test
+    fun `multi-payload pool with the legacy body and bearer token is emitted per payload`() {
+        val configuration =
+            OperationConfiguration(
+                operationId = "createPet",
+                payloads =
+                    listOf(
+                        OperationPayload(
+                            parameterValues = emptyList(),
+                            requestBodyJson = """{"name":"Luna"}""",
+                            bearerToken = "t1",
+                        ),
+                        OperationPayload(
+                            parameterValues = emptyList(),
+                            requestBodyJson = """{"name":"Rocky"}""",
+                            bearerToken = "t2",
+                        ),
+                    ),
+            )
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 10,
+                payloadStrategy = PayloadStrategy.SEQUENTIAL,
+            )
+
+        val script = generator.generate(specification, "https://example.test", setOf("createPet"), listOf(configuration), profile)
+
+        // Both bodies appear in the dispatch chain.
+        assertContains(script, """JSON.stringify({"name":"Luna"})""")
+        assertContains(script, """JSON.stringify({"name":"Rocky"})""")
+        // Both bearer tokens are baked into the static blocks.
+        assertContains(script, """Bearer t1""")
+        assertContains(script, """Bearer t2""")
+        // The dispatch dispatches on the index.
+        assertContains(script, "if (__lt_idx_createPet === 0)")
+        assertContains(script, "else if (__lt_idx_createPet === 1)")
+    }
+
+    @Test
+    fun `pool selector is declared exactly once at module top-level so the per-iteration dispatch does not double-declare the counter`() {
+        // Regression: the first pool-aware version inlined the
+        // counter declaration INSIDE the `default function()` body,
+        // which clashed with the dispatch line that declared the
+        // same identifier again and made the script un-parseable for
+        // k6 ("Identifier '__lt_idx_<op>' has already been declared").
+        val configuration =
+            OperationConfiguration(
+                operationId = "getPet",
+                payloads =
+                    listOf(
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42"))),
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "17"))),
+                    ),
+            )
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 10,
+                payloadStrategy = PayloadStrategy.SEQUENTIAL,
+            )
+
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+
+        // Extract the body of `default function () { ... }` and check
+        // that the per-iteration dispatch does NOT redeclare the
+        // counter. The top-level `let` is fine — it has to live at
+        // module scope so the counter survives across iterations of
+        // the same VU.
+        val functionStart = script.indexOf("export default function ()")
+        require(functionStart >= 0) { "default function not found in generated script" }
+        val functionBody = script.substring(functionStart)
+        assertTrue(!functionBody.contains("let __lt_idx_getPet"), "let must not appear inside the function body")
+        assertTrue(!functionBody.contains("var __lt_idx_getPet"), "var must not appear either")
+        // Exactly one `let __lt_idx_getPet = 0;` declaration in the
+        // entire script (it sits at module top-level).
+        assertEquals(1, Regex("let __lt_idx_getPet = 0;").findAll(script).count())
+        // The dispatch inside `default function()` reads the counter
+        // via __lt_next_getPet() without redeclaring it.
+        assertContains(script, "const __lt_idx_getPet = __lt_next_getPet();")
+    }
+
+    @Test
+    fun `random-mode pool selector still lives at module top-level`() {
+        val configuration =
+            OperationConfiguration(
+                operationId = "getPet",
+                payloads =
+                    listOf(
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42"))),
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "17"))),
+                    ),
+            )
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 10,
+                payloadStrategy = PayloadStrategy.RANDOM,
+            )
+
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+
+        // Random mode emits a single function declaration above the
+        // default function — no `let` at all because there is no
+        // state to carry across iterations.
+        assertContains(script, "function __lt_next_getPet()")
+        assertTrue(script.contains("Math.floor(Math.random() * 2)"))
+        // The dispatch inside `default function()` still calls the
+        // top-level function without redeclaring anything.
+        assertContains(script, "const __lt_idx_getPet = __lt_next_getPet();")
+    }
+
+    @Test
+    fun `emits a per-payload counter declaration and increments it inside the dispatch branch`() {
+        // Each multi-payload branch must increment its own counter so
+        // the report can show the real call distribution, not a guess
+        // derived from executor duration and VU count.
+        val configuration =
+            OperationConfiguration(
+                operationId = "getPet",
+                payloads =
+                    listOf(
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42"))),
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "17"))),
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "99"))),
+                    ),
+            )
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 10,
+                payloadStrategy = PayloadStrategy.SEQUENTIAL,
+            )
+
+        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+
+        // One Counter declaration per payload index at the top of the
+        // generated script. The same Counter names are referenced from
+        // the dispatch branches below.
+        assertContains(script, "new Counter('lt_payload_0_getPet')")
+        assertContains(script, "new Counter('lt_payload_1_getPet')")
+        assertContains(script, "new Counter('lt_payload_2_getPet')")
+
+        // Each branch starts with the increment of its own counter so
+        // the summary export records the exact count per payload.
+        assertContains(script, "lt_payload_0_getPet.add(1)")
+        assertContains(script, "lt_payload_1_getPet.add(1)")
+        assertContains(script, "lt_payload_2_getPet.add(1)")
+
+        // No `lt_payload_*` counter for a single-payload operation:
+        // the request count is identical and would only add noise.
+        val singleProfile =
+            LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+        val singleScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), singleProfile)
+        assertTrue(!singleScript.contains("lt_payload_0_getPet"))
     }
 }

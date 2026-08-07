@@ -17,6 +17,8 @@ import {
   type FailureReason,
   type TestRun,
 } from './k6Report.ts'
+import { translate, type SupportedLanguage } from './i18n.ts'
+import { useLanguage } from './useLanguage.tsx'
 
 // Imports from React are bundled below so the file stays compact
 // and does not get mixed up with the exported type block.
@@ -34,23 +36,24 @@ type RunProgressProps = {
 }
 
 export function RunProgress({ run, now }: RunProgressProps) {
+  const { language: lang } = useLanguage()
   const elapsed = runElapsedSeconds(run, now)
   const remaining = runRemainingSeconds(run, now)
   return <div className="run-progress" role="status" aria-live="polite">
     <div className="run-progress-cell">
-      <span>Läuft seit</span>
+      <span>{translate(lang, 'runProgress.runningSince')}</span>
       <strong>{formatDurationSeconds(elapsed)}</strong>
-      <small>Seit {formatTimestamp(run.startedAt)}</small>
+      <small>{translate(lang, 'runProgress.since', { time: formatTimestamp(run.startedAt) })}</small>
     </div>
     <div className="run-progress-cell">
-      <span>Noch</span>
-      <strong>{remaining == null ? '–' : formatDurationSeconds(remaining)}</strong>
-      <small>{remaining == null ? 'Profil mit offener Dauer' : `Geplant: ${formatDurationHuman(remaining)}`}</small>
+      <span>{translate(lang, 'runProgress.remaining')}</span>
+      <strong>{remaining == null ? translate(lang, 'runProgress.remainingUndefined') : formatDurationSeconds(remaining)}</strong>
+      <small>{remaining == null ? translate(lang, 'runProgress.remainingOpenDuration') : translate(lang, 'runProgress.remainingPlanned', { duration: formatDurationHuman(remaining) })}</small>
     </div>
     <div className="run-progress-cell">
-      <span>Gestartet</span>
+      <span>{translate(lang, 'runProgress.started')}</span>
       <strong>{formatTimestamp(run.startedAt)}</strong>
-      <small>Run-ID <code>{run.id.slice(0, 8)}</code></small>
+      <small>{translate(lang, 'runProgress.runId')} <code>{run.id.slice(0, 8)}</code></small>
     </div>
   </div>
 }
@@ -62,19 +65,23 @@ export function RunProgress({ run, now }: RunProgressProps) {
 // therefore render the same core cards as the report, but more
 // compact and without the threshold box.
 //
-// As soon as k6 is done (COMPLETED or FAILED), the card gets a
-// pass/fail header on top and a run foot with run ID and report link
-// at the bottom. While k6 is still running (RUNNING/QUEUED),
-// `RunProgress` keeps being shown unchanged.
+// As soon as k6 is done (COMPLETED, FAILED, STOPPED or ABORTED),
+// the card gets a pass/fail/stopped/aborted header on top and a run
+// foot with run ID and report link at the bottom. While k6 is
+// still running (RUNNING/QUEUED), `RunProgress` keeps being shown
+// unchanged. STOPPING keeps showing the progress cells too because
+// the user explicitly asked for a stop and should see the status
+// play out, not a blank card.
 
 type RunSummaryProps = {
   run: TestRun
+  lang: SupportedLanguage
 }
 
-export function RunSummary({ run }: RunSummaryProps) {
+export function RunSummary({ run, lang }: RunSummaryProps) {
   const summary = parseK6Summary(run)
   if (!summary) {
-    return <div className="run-summary-empty">No k6 evaluation data is available (summary missing).</div>
+    return <div className="run-summary-empty">{translate(lang, 'result.noData')}</div>
   }
   const checks = metric(summary, 'checks')
   const requests = metric(summary, 'http_reqs')
@@ -93,35 +100,51 @@ export function RunSummary({ run }: RunSummaryProps) {
   const failedNames = threshold.failedMetrics
 
   return <>
-    <ResultHeader passed={passed} run={run} />
-    <ThresholdNotice passed={passed} failedMetrics={failedNames} run={run} />
-    {noRequests && <div className="run-summary-empty warning">No HTTP request was completed. The target was unreachable from the k6 container or did not respond in time.</div>}
+    <ResultHeader passed={passed} run={run} lang={lang} />
+    <ThresholdNotice passed={passed} failedMetrics={failedNames} run={run} lang={lang} />
+    {noRequests && <div className="run-summary-empty warning">{translate(lang, 'result.noRequests')}</div>}
     <div className="run-summary-cards">
-      <SummaryCard label="Checks erfolgreich" value={formatPercentage(checkRate)} detail={`${formatInteger(checks.passes)} bestanden, ${formatInteger(checks.fails)} fehlgeschlagen`} status={checksPass ? 'pass' : 'fail'} />
-      <SummaryCard label="HTTP-Fehlerrate" value={formatPercentage(failureRate)} detail={`${formatInteger(requestCount ?? 0)} Requests`} status={failureRatePass ? 'pass' : 'fail'} />
-      <SummaryCard label="p(95) Antwortzeit" value={p95 != null && Number.isFinite(p95) ? `${formatNumber(p95)} ms` : '–'} detail="Grenzwert: < 1.000 ms" status={p95Pass ? 'pass' : 'fail'} />
-      <SummaryCard label="HTTP Requests" value={formatInteger(requests.count)} detail={`${formatNumber(requests.rate)}/s`} />
-      <SummaryCard label="Iterationen" value={formatInteger(metric(summary, 'iterations').count)} detail={`${formatNumber(metric(summary, 'iterations').rate)}/s`} />
-      <SummaryCard label="Laufzeit" value={formatDurationHuman(runElapsedSeconds(run, parseFinishedAt(run)))} detail={`Exit-Code ${run.exitCode ?? '–'}`} />
+      <SummaryCard label={translate(lang, 'summary.checksRate')} value={formatPercentage(checkRate)} detail={translate(lang, 'summary.checksDetail', { passed: formatInteger(checks.passes), failed: formatInteger(checks.fails) })} status={checksPass ? 'pass' : 'fail'} />
+      <SummaryCard label={translate(lang, 'summary.failureRate')} value={formatPercentage(failureRate)} detail={translate(lang, 'summary.requestsDetail', { count: formatInteger(requestCount ?? 0) })} status={failureRatePass ? 'pass' : 'fail'} />
+      <SummaryCard label={translate(lang, 'summary.p95')} value={p95 != null && Number.isFinite(p95) ? `${formatNumber(p95)} ms` : '–'} detail={translate(lang, 'summary.p95.threshold')} status={p95Pass ? 'pass' : 'fail'} />
+      <SummaryCard label={translate(lang, 'summary.requests')} value={formatInteger(requests.count)} detail={`${formatNumber(requests.rate)}/s`} />
+      <SummaryCard label={translate(lang, 'summary.iterations')} value={formatInteger(metric(summary, 'iterations').count)} detail={`${formatNumber(metric(summary, 'iterations').rate)}/s`} />
+      <SummaryCard label={translate(lang, 'summary.runtime')} value={formatDurationHuman(runElapsedSeconds(run, parseFinishedAt(run)))} detail={translate(lang, 'summary.exitCodeSuffix', { code: String(run.exitCode ?? '–') })} />
     </div>
   </>
 }
 
 // ---- ResultHeader -----------------------------------------------------------
 //
-// Shows "PASSED" or "FAILED" as a pill. Only rendered when k6 has
-// finished the run — the in-progress view (RunProgress) is left
-// untouched.
+// Shows the terminal status as a pill. COMPLETED runs are PASSED
+// (threshold met) or FAILED (threshold violated). STOPPED and
+// ABORTED are user-initiated and have their own pills so the user
+// sees immediately that the run was cut short, not failed.
 
 type ResultHeaderProps = {
-  passed: boolean
+  passed: boolean | null
   run: TestRun
+  lang: SupportedLanguage
 }
 
-function ResultHeader({ passed, run }: ResultHeaderProps) {
+function ResultHeader({ passed, run, lang }: ResultHeaderProps) {
+  const pill =
+    run.status === 'STOPPED'
+      ? { className: 'is-stopped', text: translate(lang, 'status.STOPPED') }
+      : run.status === 'ABORTED'
+        ? { className: 'is-aborted', text: translate(lang, 'status.ABORTED') }
+        : passed
+          ? { className: 'is-pass', text: translate(lang, 'status.COMPLETED') }
+          : { className: 'is-fail', text: translate(lang, 'status.FAILED') }
   return <div className="run-result-head">
-    <span className={`status-badge is-${passed ? 'pass' : 'fail'}`}>{passed ? 'PASSED' : 'FAILED'}</span>
-    <span className="run-result-exit">Exit-Code {run.exitCode ?? '–'}</span>
+    <span className={`status-badge ${pill.className}`}>{pill.text}</span>
+    <span className="run-result-exit">{translate(lang, 'status.exitCode', { code: String(run.exitCode ?? '–') })}</span>
+    {run.cancelledAt && <span className="run-result-stop-reason">
+      {run.cancelledByForce
+        ? translate(lang, 'status.cancelled.sigkill', { time: formatTimestamp(run.cancelledAt) })
+        : translate(lang, 'status.cancelled.sigterm', { time: formatTimestamp(run.cancelledAt) })
+      }
+    </span>}
   </div>
 }
 
@@ -133,19 +156,44 @@ function ResultHeader({ passed, run }: ResultHeaderProps) {
 // thresholds are involved.
 
 type ThresholdNoticeProps = {
-  passed: boolean
+  passed: boolean | null
   failedMetrics: string[]
   run: TestRun
+  lang: SupportedLanguage
 }
 
-function ThresholdNotice({ passed, failedMetrics, run }: ThresholdNoticeProps) {
+function ThresholdNotice({ passed, failedMetrics, run, lang }: ThresholdNoticeProps) {
+  // User-stopped runs get their own headline so the user does not
+  // see "All 2 thresholds met" on a run that never reached the
+  // planned duration.
+  if (run.status === 'STOPPED') {
+    return <div className="run-notice is-stopped" role="status">
+      <span className="run-notice-check" aria-hidden="true">■</span>
+      <span>{translate(lang, 'result.stopped.notice')}</span>
+      <span className="run-notice-detail">
+        {passed
+          ? translate(lang, 'result.stopped.thresholdsMet')
+          : failedMetrics.length === 0
+            ? translate(lang, 'result.stopped.thresholdsUnknown')
+            : translate(lang, 'result.stopped.thresholdsViolated', { n: failedMetrics.length })
+        }
+      </span>
+    </div>
+  }
+  if (run.status === 'ABORTED') {
+    return <div className="run-notice is-aborted" role="alert">
+      <span className="run-notice-check" aria-hidden="true">⚠</span>
+      <span>{translate(lang, 'result.aborted.notice')}</span>
+      <span className="run-notice-detail">{translate(lang, 'result.aborted.detail')}</span>
+    </div>
+  }
   if (passed) {
     return <div className="run-notice is-pass" role="status">
       <span className="run-notice-check" aria-hidden="true">✓</span>
-      <span>Alle <strong>2</strong> Thresholds eingehalten:
+      <span>{translate(lang, 'result.passed', { n: 2 })}:
         <code>http_req_duration</code>, <code>http_req_failed</code>
       </span>
-      <span className="run-notice-detail">Testdauer {formatDurationHuman(runElapsedSeconds(run, parseFinishedAt(run)))}</span>
+      <span className="run-notice-detail">{translate(lang, 'result.runDuration', { duration: formatDurationHuman(runElapsedSeconds(run, parseFinishedAt(run))) })}</span>
     </div>
   }
   const metricChips = failedMetrics.map((name, i) => (
@@ -156,8 +204,12 @@ function ThresholdNotice({ passed, failedMetrics, run }: ThresholdNoticeProps) {
   ))
   return <div className="run-notice is-fail" role="alert">
     <span className="run-notice-check" aria-hidden="true">✗</span>
-    <span><strong>{failedMetrics.length}</strong> Threshold{failedMetrics.length === 1 ? '' : 's'} verletzt: {metricChips}</span>
-    <span className="run-notice-detail">Testdauer {formatDurationHuman(runElapsedSeconds(run, parseFinishedAt(run)))}</span>
+    <span>
+      <strong>{failedMetrics.length}</strong>{' '}
+      {failedMetrics.length === 1 ? translate(lang, 'result.failed', { n: failedMetrics.length }) : translate(lang, 'result.failed_plural', { n: failedMetrics.length })}
+      : {metricChips}
+    </span>
+    <span className="run-notice-detail">{translate(lang, 'result.runDuration', { duration: formatDurationHuman(runElapsedSeconds(run, parseFinishedAt(run))) })}</span>
   </div>
 }
 
@@ -210,15 +262,16 @@ const HARD_FAILURE_KINDS: ReadonlySet<FailureKind> = new Set<FailureKind>([
 type RunFailureProps = {
   run: TestRun
   reason: FailureReason
+  lang: SupportedLanguage
 }
 
-export function RunFailure({ run, reason }: RunFailureProps) {
+export function RunFailure({ run, reason, lang }: RunFailureProps) {
   return <>
-    <ResultHeader passed={false} run={run} />
-    <ThresholdNotice passed={false} failedMetrics={summariseThresholds(run).failedMetrics} run={run} />
+    <ResultHeader passed={false} run={run} lang={lang} />
+    <ThresholdNotice passed={false} failedMetrics={summariseThresholds(run).failedMetrics} run={run} lang={lang} />
     <div className={`run-failure kind-${reason.kind}`} role="alert">
       <div className="run-failure-head">
-        <span className="run-failure-label">{labelForFailure(reason.kind)}</span>
+        <span className="run-failure-label">{labelForFailure(reason.kind, lang)}</span>
         <strong>{reason.summary}</strong>
       </div>
       <p className="run-failure-detail">{reason.detail}</p>
@@ -227,17 +280,18 @@ export function RunFailure({ run, reason }: RunFailureProps) {
   </>
 }
 
-function labelForFailure(kind: FailureKind): string {
-  switch (kind) {
-    case 'dns': return 'DNS-Auflösung'
-    case 'connection-refused': return 'Verbindung abgelehnt'
-    case 'connection-timeout': return 'Verbindungs-Timeout'
-    case 'tls': return 'TLS-Fehler'
-    case 'http': return 'HTTP-Fehler'
-    case 'script': return 'Skript-Fehler'
-    case 'process': return 'k6 nicht verfügbar'
-    case 'unknown': return 'Fehler'
-  }
+function labelForFailure(kind: FailureKind, lang: SupportedLanguage): string {
+  const map = {
+    dns: { en: 'DNS resolution', de: 'DNS-Auflösung' },
+    'connection-refused': { en: 'Connection refused', de: 'Verbindung abgelehnt' },
+    'connection-timeout': { en: 'Connection timeout', de: 'Verbindungs-Timeout' },
+    tls: { en: 'TLS error', de: 'TLS-Fehler' },
+    http: { en: 'HTTP error', de: 'HTTP-Fehler' },
+    script: { en: 'Script error', de: 'Skript-Fehler' },
+    process: { en: 'k6 missing', de: 'k6 nicht verfügbar' },
+    unknown: { en: 'Error', de: 'Fehler' },
+  } as const
+  return map[kind][lang]
 }
 
 // ---- RunStatusView ---------------------------------------------------------
@@ -258,11 +312,49 @@ type RunStatusViewProps = {
 }
 
 export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) {
+  // The report reacts to the live language choice. Reading the
+  // hook here means the user can flip the language in the
+  // settings drawer while looking at a finished run and the
+  // threshold notice / summary cards re-render immediately.
+  const { language: lang } = useLanguage()
   if (run.status === 'RUNNING' || run.status === 'QUEUED') {
     return <RunProgress run={run} now={now} />
   }
+  // STOPPING sits between RUNNING and a terminal state: the user
+  // asked for a graceful stop, k6 is finishing its current
+  // iterations, and the backend will flip the run to STOPPED
+  // (or ABORTED after the grace period) once the process exits.
+  // We keep showing the progress cells so the dashboard does not
+  // blank out exactly when the user is watching for the stop to
+  // land.
+  if (run.status === 'STOPPING') {
+    return <RunProgress run={run} now={now} />
+  }
   if (run.status === 'COMPLETED') {
-    return <RunSummary run={run} />
+    return <RunSummary run={run} lang={lang} />
+  }
+  if (run.status === 'STOPPED') {
+    // Graceful stop acknowledged by k6: same shape as COMPLETED
+    // but with a STOPPED pill so the user can tell that the run
+    // did not run for its planned duration.
+    return <RunSummary run={run} lang={lang} />
+  }
+  if (run.status === 'ABORTED') {
+    // SIGKILL by the user — there are partial metrics at best
+    // but no full threshold pass. Show the typed failure block
+    // if we can recognise one (usually `process` — k6 was
+    // killed), otherwise fall back to a hand-rolled placeholder
+    // so the call to RunFailure stays type-safe when no
+    // classification was possible (e.g. error text was empty).
+    const reason = reasonOverride ?? summariseFailure(run.error)
+    if (reason) return <RunFailure run={run} reason={reason} lang={lang} />
+    const placeholder = {
+      kind: 'process' as const,
+      summary: translate(lang, 'summary.runtime') === 'Runtime' ? 'k6 aborted' : 'k6 abgebrochen',
+      detail: translate(lang, 'result.aborted.detail'),
+      hint: 'Wenn die k6-Ausgabe unvollständig erscheint, ist das erwartet — der Prozess wurde sofort beendet.',
+    }
+    return <RunFailure run={run} reason={placeholder} lang={lang} />
   }
   if (run.status === 'FAILED') {
     // A FAILED run can have two very different causes:
@@ -281,12 +373,12 @@ export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) 
     // server actually answered, so the threshold metrics are
     // meaningful and should stay visible.
     const hardFailure = reason && HARD_FAILURE_KINDS.has(reason.kind)
-    if (hardFailure) return <RunFailure run={run} reason={reason} />
+    if (hardFailure) return <RunFailure run={run} reason={reason} lang={lang} />
     const threshold = summariseThresholds(run)
     if (threshold.failedMetrics.length > 0) {
-      return <RunSummary run={run} />
+      return <RunSummary run={run} lang={lang} />
     }
-    if (reason) return <RunFailure run={run} reason={reason} />
+    if (reason) return <RunFailure run={run} reason={reason} lang={lang} />
   }
   return null
 }
