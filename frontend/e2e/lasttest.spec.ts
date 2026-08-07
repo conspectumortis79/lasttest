@@ -2251,3 +2251,48 @@ test('selects the badge of the k6 run that was just started', async ({ page }) =
   await expect(selected).toHaveClass(/active/)
   expect(await selected.getAttribute('title')).not.toBe(firstRunTitle)
 })
+
+test('renders boolean and enum parameters as dropdowns, other parameters stay text inputs', async ({ page }) => {
+  // Pin the language first — the rest of the suite uses the
+  // German labels and `useLanguage` now defaults to English.
+  await page.addInitScript(() => localStorage.setItem('lasttest.language', 'de'))
+  await page.reload()
+
+  await importDemo(page)
+  // Expand the card for `GET /products` — that's the demo op with
+  // an enum (`category`), a boolean (`available`) and a plain
+  // number (`maxPrice`) so we cover both dropdown kinds + the
+  // input fallback.
+  const card = page.locator('.operation-card', { hasText: 'listProducts' })
+  await card.locator('button.expand-toggle').click()
+  await expect(card.locator('.pool-table tbody tr').first()).toBeVisible()
+
+  // Look up the cell by the parameter's aria-label rather than
+  // column index — the table also carries a `#` row label and a
+  // Bearer / Aktion column, so positional lookups are brittle.
+  const firstRow = card.locator('.pool-table tbody tr').first()
+
+  // `category` is an OpenAPI `enum`, so the user must be able to
+  // pick from the three values + an empty option (the example in
+  // the demo declares `books` as the default).
+  const categorySelect = firstRow.locator('select.parameter-select').filter({
+    has: page.locator('option', { hasText: 'books' }),
+  })
+  await expect(categorySelect).toHaveCount(1)
+  const categoryOptions = await categorySelect.locator('option').allInnerTexts()
+  expect(categoryOptions).toEqual(['(nicht gesetzt)', 'books', 'hardware', 'software'])
+  expect(await categorySelect.inputValue()).toBe('books')
+
+  // `available` is a boolean — two options + empty placeholder.
+  const availableSelect = firstRow.locator('select.parameter-select').filter({
+    has: page.locator('option', { hasText: 'true' }),
+  })
+  await expect(availableSelect).toHaveCount(1)
+  const availableOptions = await availableSelect.locator('option').allInnerTexts()
+  expect(availableOptions).toEqual(['(nicht gesetzt)', 'true', 'false'])
+
+  // `maxPrice` is a plain number — must stay a text input.
+  const maxPriceInput = firstRow.getByLabel(/maxPrice/)
+  await expect(maxPriceInput).toBeVisible()
+  await expect(maxPriceInput.locator('xpath=ancestor::td[1]//select')).toHaveCount(0)
+})

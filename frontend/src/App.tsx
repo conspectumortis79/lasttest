@@ -17,9 +17,10 @@ import {
 } from './k6Report.ts'
 import { buildRunMenuItems, type MenuItem } from './runMenuItems.ts'
 import { MenuItemIcon } from './runMenuIcons.tsx'
-import { TopToolbar } from './TopToolbar.tsx'
+import { TopToolbar, type ToolbarDocId } from './TopToolbar.tsx'
 import { SettingsDrawer } from './SettingsDrawer.tsx'
 import { DocPopup } from './DocPopup.tsx'
+import { WikiPopup } from './WikiPopup.tsx'
 import { useLanguage, LanguageProvider } from './useLanguage.tsx'
 import { translate, formatters, type SupportedLanguage } from './i18n.ts'
 import { RunStatusView } from './runStatusView.tsx'
@@ -38,7 +39,9 @@ import {
   createOperationSettings,
   hasMultipleServers,
   isOperationValid,
+  parameterInputKind,
   parameterKey,
+  parameterSelectOptions,
   validateOperationSettings,
   validateParameterValue,
   validateRequestBody,
@@ -88,9 +91,17 @@ function LoadTestApp() {
   // the same language state and stay in sync.
   const { language, setLanguage } = useLanguage()
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // Markdown popup: id of the doc currently shown (null = closed).
-  const [openDoc, setOpenDoc] = useState<'userGuide' | 'readme' | null>(null)
-  const handleOpenDoc = (doc: 'userGuide' | 'readme') => setOpenDoc(doc)
+  // Popup state for the top-toolbar nav buttons. `openDoc` is the
+  // id of the popup currently shown (`'userGuide'`, `'readme'`,
+  // `'wiki'`); `wikiInitialQuery` lets the toolbar seed the wiki
+  // search with a pre-filled term so a future "Help on this
+  // term" affordance can deep-link into the glossary.
+  const [openDoc, setOpenDoc] = useState<ToolbarDocId | null>(null)
+  const [wikiInitialQuery, setWikiInitialQuery] = useState<string>('')
+  const handleOpenDoc = (doc: ToolbarDocId, initialQuery?: string) => {
+    if (doc === 'wiki') setWikiInitialQuery(initialQuery ?? '')
+    setOpenDoc(doc)
+  }
   const [specification, setSpecification] = useState(sample)
   const [specificationUrl, setSpecificationUrl] = useState('')
   const [imported, setImported] = useState<ImportedSpecification>()
@@ -798,7 +809,7 @@ function LoadTestApp() {
       onLanguageChange={setLanguage}
     />
     <DocPopup
-      doc={openDoc}
+      doc={openDoc === 'userGuide' || openDoc === 'readme' ? openDoc : null}
       language={language}
       onClose={() => setOpenDoc(null)}
       strings={{
@@ -809,6 +820,23 @@ function LoadTestApp() {
         prev: translate(language, 'doc.popup.prev'),
         next: translate(language, 'doc.popup.next'),
         dismiss: translate(language, 'doc.popup.close'),
+      }}
+    />
+    <WikiPopup
+      open={openDoc === 'wiki'}
+      language={language}
+      initialQuery={wikiInitialQuery}
+      onClose={() => setOpenDoc(null)}
+      strings={{
+        title: translate(language, 'wiki.popup.title'),
+        placeholder: translate(language, 'wiki.popup.placeholder'),
+        open: translate(language, 'wiki.popup.open'),
+        openHint: translate(language, 'wiki.popup.openHint'),
+        dismiss: translate(language, 'wiki.popup.dismiss'),
+        noMatch: translate(language, 'wiki.popup.noMatch'),
+        allTermsHeading: translate(language, 'wiki.popup.allTermsHeading'),
+        suggestionsHeading: translate(language, 'wiki.popup.suggestionsHeading'),
+        matchedOnLabel: translate(language, 'wiki.popup.matchedOnLabel'),
       }}
     />
   </>
@@ -1015,15 +1043,43 @@ function OperationEditor({
                     const value = payload.parameterValues[key] ?? ''
                     const errorMessage = validation.parameterErrors[key]
                     const errorId = errorMessage ? `${operation.operationId}-p${payloadIndex}-${parameter.name}-error` : undefined
+                    // `parameterInputKind` decides whether the field
+                    // is rendered as a plain `<input>` (default) or as
+                    // a `<select>` dropdown. OpenAPI `boolean`
+                    // parameters and every parameter that declares an
+                    // `enum` are surfaced as a dropdown so the user
+                    // cannot pick a value that the spec does not
+                    // allow. The wire format stays a string — k6 reads
+                    // the literal "true" / "false" directly.
+                    const inputKind = parameterInputKind(parameter.schema)
+                    const cellLabel = `${operation.operationId} · Payload ${payloadIndex + 1}: ${parameter.name}`
                     return (
                       <td key={key}>
-                        <input
-                          aria-label={`${operation.operationId} · Payload ${payloadIndex + 1}: ${parameter.name}`}
-                          aria-invalid={errorMessage ? true : undefined}
-                          aria-describedby={errorId}
-                          value={value}
-                          onChange={event => onPayloadField(payloadIndex, 'parameterValues', { [key]: event.target.value })}
-                        />
+                        {inputKind === 'text'
+                          ? <input
+                              aria-label={cellLabel}
+                              aria-invalid={errorMessage ? true : undefined}
+                              aria-describedby={errorId}
+                              value={value}
+                              onChange={event => onPayloadField(payloadIndex, 'parameterValues', { [key]: event.target.value })}
+                            />
+                          : <select
+                              className="parameter-select"
+                              aria-label={cellLabel}
+                              aria-invalid={errorMessage ? true : undefined}
+                              aria-describedby={errorId}
+                              value={parameterSelectOptions(parameter, inputKind).includes(value) ? value : ''}
+                              onChange={event => onPayloadField(payloadIndex, 'parameterValues', { [key]: event.target.value })}
+                            >
+                              {/* Empty option lets the user unselect
+                                  (or — for required fields — forces
+                                  an explicit choice before the row is
+                                  considered valid). */}
+                              <option value="">{translate(language, parameter.required ? 'ops.param.requiredPlaceholder' : 'ops.param.optionalPlaceholder')}</option>
+                              {parameterSelectOptions(parameter, inputKind).map(option => (
+                                <option key={option} value={option}>{option}</option>
+                              ))}
+                            </select>}
                         {errorMessage && <div className="parameter-error" role="alert" id={errorId}>{errorMessage}</div>}
                       </td>
                     )

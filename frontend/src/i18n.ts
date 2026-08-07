@@ -20,9 +20,21 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'toolbar.nav.dashboard': 'Dashboard',
     'toolbar.nav.userGuide': 'User Guide',
     'toolbar.nav.readme': 'README',
+    'toolbar.nav.wiki': 'Wiki',
     'toolbar.settings.title': 'Settings',
     'lang.pill.aria': 'Current language: {lang}. Open settings to change.',
     'settings.btn.aria': 'Open settings',
+
+    // Wiki popup
+    'wiki.popup.title': 'Wiki — k6 glossary',
+    'wiki.popup.placeholder': 'Search a term (e.g. VU, preAllocatedVUs, arrival rate)…',
+    'wiki.popup.open': 'Open',
+    'wiki.popup.openHint': 'Open the explanation in a new window',
+    'wiki.popup.dismiss': 'Close',
+    'wiki.popup.noMatch': 'No matching term. Try a shorter query or a k6 field name (e.g. preAllocatedVUs).',
+    'wiki.popup.allTermsHeading': 'All terms',
+    'wiki.popup.suggestionsHeading': 'Did you mean',
+    'wiki.popup.matchedOnLabel': 'Matched on',
 
     // Settings drawer
     'drawer.title': 'Settings',
@@ -152,6 +164,8 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'ops.pool.removeEnabledTitle': 'Remove payload',
     'ops.pool.removeDisabledTitle': 'At least 1 payload is required',
     'ops.pool.rowErrorFallback': 'Payload {n}: a required parameter or the request body is invalid.',
+    'ops.param.requiredPlaceholder': 'Please select …',
+    'ops.param.optionalPlaceholder': '(not set)',
     'ops.bearer.placeholder': 'Token',
     'ops.bearer.placeholderOptional': 'Optional',
     'ops.bearer.cellAria': '{operationId} · Payload {n}: Bearer token',
@@ -478,9 +492,21 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'toolbar.nav.dashboard': 'Dashboard',
     'toolbar.nav.userGuide': 'User Guide',
     'toolbar.nav.readme': 'README',
+    'toolbar.nav.wiki': 'Wiki',
     'toolbar.settings.title': 'Einstellungen',
     'lang.pill.aria': 'Aktuelle Sprache: {lang}. Einstellungen öffnen zum Wechseln.',
     'settings.btn.aria': 'Einstellungen öffnen',
+
+    // Wiki popup
+    'wiki.popup.title': 'Wiki — k6-Glossar',
+    'wiki.popup.placeholder': 'Begriff suchen (z. B. VU, preAllocatedVUs, Arrival-Rate)…',
+    'wiki.popup.open': 'Öffnen',
+    'wiki.popup.openHint': 'Erklärung in einem neuen Fenster öffnen',
+    'wiki.popup.dismiss': 'Schließen',
+    'wiki.popup.noMatch': 'Kein passender Begriff. Versuche eine kürzere Suche oder einen k6-Feldnamen (z. B. preAllocatedVUs).',
+    'wiki.popup.allTermsHeading': 'Alle Begriffe',
+    'wiki.popup.suggestionsHeading': 'Meinten Sie',
+    'wiki.popup.matchedOnLabel': 'Aufgelöst über',
 
     // Settings drawer
     'drawer.title': 'Einstellungen',
@@ -555,6 +581,8 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'ops.pool.removeEnabledTitle': 'Payload entfernen',
     'ops.pool.removeDisabledTitle': 'Mindestens 1 Payload erforderlich',
     'ops.pool.rowErrorFallback': 'Payload {n}: ein Pflichtparameter oder der Request-Body ist ungültig.',
+    'ops.param.requiredPlaceholder': 'Bitte wählen …',
+    'ops.param.optionalPlaceholder': '(nicht gesetzt)',
     'ops.bearer.placeholder': 'Token',
     'ops.bearer.placeholderOptional': 'Optional',
     'ops.bearer.cellAria': '{operationId} · Payload {n}: Bearer-Token',
