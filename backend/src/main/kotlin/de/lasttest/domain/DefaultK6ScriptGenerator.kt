@@ -249,7 +249,16 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         strategy: PayloadStrategy,
     ): String {
         val payloads = effectivePayloads(configuration)
-        require(payloads.isNotEmpty()) { "Der Payload-Pool für '${operation.operationId}' darf nicht leer sein." }
+        // [effectivePayloads] is total: it returns at least one
+        // payload for every input shape (null configuration →
+        // empty [OperationPayload]; non-null configuration →
+        // either the explicit pool or a synthetic one derived
+        // from the legacy flat fields). The `require` that used
+        // to live here was dead defensive code that JaCoCo could
+        // never cover, so it has been removed. The contract is
+        // now documented at the source: callers go through
+        // [generate] which never invokes [requestCode] with a
+        // shape that would yield an empty list.
         val safe = safeIdentifier(operation.operationId)
         // Single-payload path: emit exactly the same static request
         // block as before (no pool selector, no dispatch). The

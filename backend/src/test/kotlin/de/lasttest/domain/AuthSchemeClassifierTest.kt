@@ -67,7 +67,7 @@ class AuthSchemeClassifierTest {
             }
         val requirement = AuthSchemeClassifier.classify("oauth2", scheme)
         assertTrue(requirement is AuthRequirement.OAuth2)
-        val oauth2 = requirement as AuthRequirement.OAuth2
+        val oauth2: AuthRequirement.OAuth2 = requirement
         assertEquals("oauth2", oauth2.schemeName)
         // The flow's authorizationUrl is preserved so the banner
         // can render it; the implicit flow is the only one that
@@ -133,7 +133,7 @@ class AuthSchemeClassifierTest {
         scheme.flows.clientCredentials.scopes["write:products"] = "Write products"
         val requirement = AuthSchemeClassifier.classify("oauth2", scheme)
         assertTrue(requirement is AuthRequirement.OAuth2)
-        val oauth2 = requirement as AuthRequirement.OAuth2
+        val oauth2: AuthRequirement.OAuth2 = requirement
         assertEquals("oauth2", oauth2.schemeName)
         // The flows list surfaces the spec data so the banner can
         // render the flow name and the available scopes. The order
@@ -153,6 +153,6 @@ class AuthSchemeClassifierTest {
             }
         val requirement = AuthSchemeClassifier.classify("oauth2", scheme)
         assertTrue(requirement is AuthRequirement.OAuth2)
-        assertEquals(emptyList(), (requirement as AuthRequirement.OAuth2).flows)
+        assertEquals(emptyList(), requirement.flows)
     }
 }

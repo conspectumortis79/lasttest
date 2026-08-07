@@ -23,7 +23,7 @@ export const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
   'ABORTED',
 ])
 
-export type RunMenuState =
+type RunMenuState =
   | 'in-flight'
   | 'terminal-cancellable'
   | 'terminal-aborted'

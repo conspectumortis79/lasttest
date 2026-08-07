@@ -993,15 +993,14 @@ function LoadTestApp() {
  */
 function RunDetail({ run, runNow }: { run: TestRun, runNow: number }) {
   const { language } = useLanguage()
-  // Der Detail-Block zeigt den live-Status des aktuell gewählten
-  // Runs. Der zugehörige Endpunkt steht bereits im Badge-Grid
-  // darüber, also hier kein Duplikat — nur Status, Metriken und
-  // der Report-Button. Der Report-Button lebt jetzt im
-  // ResultHeader (Bestanden / Abgebrochen-Pille), nicht mehr in
-  // einer eigenen Header-Zeile darüber. Über `showReportButton`
-  // teilen wir RunStatusView mit, dass wir den Link einblenden
-  // wollen — der Vollreport in TestRunReport.tsx lässt das Flag
-  // weg, weil der Report selbst das Link-Ziel ist.
+  // The detail block shows the live status of the currently selected
+  // run. The associated endpoint is already rendered in the badge
+  // grid above, so we do not duplicate it here — only the status,
+  // metrics and report button. The report button now lives inside
+  // the ResultHeader (PASSED / ABORTED pill), no longer in its own
+  // header row above. Via `showReportButton` we tell RunStatusView
+  // to render the link; the full report in TestRunReport.tsx omits
+  // the flag because the report itself is the link's destination.
   return <>
     <TestRunSummary run={run} />
     <RunStatusView run={run} now={runNow} showReportButton />

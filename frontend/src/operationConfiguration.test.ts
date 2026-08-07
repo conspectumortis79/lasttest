@@ -329,6 +329,9 @@ test('validateParameterValue validates uuid date date-time and email formats', (
 
   deepEqual(validateParameterValue('2026-01-01', { type: 'string', format: 'date' }), { valid: true })
   deepEqual(validateParameterValue('2026-13-99', { type: 'string', format: 'date' }), { valid: false, message: 'Ungültig: erwartet ein Datum im Format JJJJ-MM-TT.' })
+  // A value that does not match the date pattern at all — the
+  // `&&` short-circuits to false before Date.parse is consulted.
+  deepEqual(validateParameterValue('not-a-date', { type: 'string', format: 'date' }), { valid: false, message: 'Ungültig: erwartet ein Datum im Format JJJJ-MM-TT.' })
 
   deepEqual(validateParameterValue('2026-01-01T12:30:45Z', { type: 'string', format: 'date-time' }), { valid: true })
   deepEqual(validateParameterValue('not-a-date-time', { type: 'string', format: 'date-time' }), { valid: false, message: 'Ungültig: erwartet einen Zeitstempel im ISO-8601-Format.' })
@@ -584,6 +587,10 @@ test('validateOperationSettings flags an empty required request body as an error
     parameterErrors: {},
     bodyError: 'Ungültig: Pflicht-Request-Body ist leer.',
   })
+  // isOperationValid short-circuits on the first operand when
+  // parameterErrors is empty but bodyError is set — this
+  // pins the `bodyError === undefined` false branch.
+  equal(isOperationValid(validateOperationSettings(operation, settings)), false)
 })
 
 // ---- OperationPayload / migrateOperationSettings ----------------------------
@@ -719,6 +726,30 @@ test('migrateOperationSettings is idempotent when called twice', () => {
 
   deepEqual(twice, once)
   equal(twice.payloads.length, 1)
+})
+
+test('migrateOperationSettings defaults undefined legacy auth fields to empty strings', () => {
+  // Older settings persisted before Basic auth / API key /
+  // OAuth 2.0 shipped won't carry the fields; the migration
+  // must default them to empty strings via the `??` short-circuit.
+  // We cast through `unknown` because the test deliberately
+  // simulates the pre-migration shape.
+  const settings = {
+    payloads: [],
+    parameterValues: {},
+    requestBodyJson: '',
+    bearerToken: '',
+  } as unknown as OperationSettings
+
+  const migrated = migrateOperationSettings(settings)
+  equal(migrated.basicAuthUsername, '')
+  equal(migrated.basicAuthPassword, '')
+  equal(migrated.apiKey, '')
+  equal(migrated.oauth2Token, '')
+  equal(migrated.payloads[0].basicAuthUsername, '')
+  equal(migrated.payloads[0].basicAuthPassword, '')
+  equal(migrated.payloads[0].apiKey, '')
+  equal(migrated.payloads[0].oauth2Token, '')
 })
 
 test('migrateOperationSettings clones the legacy parameterValues to decouple mutation', () => {
@@ -1054,4 +1085,33 @@ test('parameterSelectOptions returns an empty list for text-kind parameters', ()
     schema: { type: 'integer' },
   }
   deepEqual(parameterSelectOptions(parameter, 'text'), [])
+})
+
+test('parameterSelectOptions falls back to an empty list when the kind is enum but the parameter has no schema', () => {
+  // Edge case: a caller asks for 'enum' options on a parameter
+  // without a schema. The `parameter.schema?.enum` safe-call
+  // short-circuits to undefined, so the `&&` is false, and the
+  // helper returns [] instead of throwing.
+  const parameter: ApiParameter = {
+    name: 'id',
+    location: 'path',
+    required: true,
+    example: 7,
+  }
+  deepEqual(parameterSelectOptions(parameter, 'enum'), [])
+})
+
+test('parameterSelectOptions falls back to an empty list when the enum is empty', () => {
+  // Edge case: a caller asks for 'enum' options on a parameter
+  // whose schema declares an empty enum. The `?.enum` is
+  // truthy (the array exists) but the `&&` requires the array
+  // to be non-empty — the function returns [].
+  const parameter: ApiParameter = {
+    name: 'status',
+    location: 'query',
+    required: false,
+    example: 'pending',
+    schema: { type: 'string', enum: [] },
+  }
+  deepEqual(parameterSelectOptions(parameter, 'enum'), [])
 })

@@ -6,7 +6,7 @@ export type ApiParameter = {
   schema?: ParameterSchema
 }
 
-export type ParameterSchemaType = 'string' | 'integer' | 'number' | 'boolean'
+type ParameterSchemaType = 'string' | 'integer' | 'number' | 'boolean'
 
 export type ParameterSchema = {
   type: ParameterSchemaType
@@ -19,7 +19,7 @@ export type ParameterSchema = {
   pattern?: string
 }
 
-export type ParameterValidation =
+type ParameterValidation =
   | { valid: true }
   | { valid: false, message: string }
 
@@ -29,7 +29,7 @@ export type RequestBodySchema = {
   required: string[]
 }
 
-export type OperationValidation = {
+type OperationValidation = {
   parameterErrors: Record<string, string>
   bodyError?: string
 }
@@ -67,7 +67,7 @@ export type Operation = {
  * `AuthRequirement` on the Kotlin side. The frontend only needs to
  * `switch` on the kind — the `schemeName` is purely diagnostic.
  */
-export type OAuth2Flow = {
+type OAuth2Flow = {
   type: string
   authorizationUrl?: string
   tokenUrl?: string
@@ -75,7 +75,7 @@ export type OAuth2Flow = {
   scopes: string[]
 }
 
-export type AuthRequirement =
+type AuthRequirement =
   | { kind: 'basic', schemeName: string }
   | { kind: 'bearer', schemeName: string }
   | { kind: 'apiKey', schemeName: string, headerName: string }
@@ -188,7 +188,7 @@ export type OperationPayload = {
   oauth2Token: string
 }
 
-export type OperationConfiguration = {
+type OperationConfiguration = {
   operationId: string
   /**
    * Pool of complete request datasets. The k6 generator uses this
@@ -244,7 +244,7 @@ export function parameterKey(parameter: Pick<ApiParameter, 'location' | 'name'>)
  * `format: uuid|email|date|...`) stays a text input — the validator
  * is already in charge of the format check.
  */
-export type ParameterInputKind = 'text' | 'enum' | 'boolean'
+type ParameterInputKind = 'text' | 'enum' | 'boolean'
 
 export function parameterInputKind(schema: ParameterSchema | undefined): ParameterInputKind {
   if (schema === undefined) return 'text'

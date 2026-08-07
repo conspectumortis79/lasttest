@@ -392,8 +392,18 @@ class LocalK6TestRunService(
                 }
             // Output may still be in flight from the reader thread;
             // give it a short head-start so the most recent bytes
-            // make it into the snapshot before we sample.
-            Thread.sleep(50)
+            // make it into the snapshot before we sample. The
+            // catch block above re-sets the interrupt flag on
+            // waitFor(), which would otherwise abort this sleep
+            // and prevent the run entry from being updated with
+            // the terminal status / exit code. Swallow the
+            // interrupt so the head-start is best-effort and the
+            // bookkeeping below always runs.
+            try {
+                Thread.sleep(50)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
 
             val cancellation = cancellationRequested.remove(run.id)
             val summary = if (Files.exists(summaryFile)) mapOf("raw" to Files.readString(summaryFile)) else null

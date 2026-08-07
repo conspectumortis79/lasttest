@@ -714,7 +714,7 @@ class SwaggerSpecificationImporterTest {
         assertEquals(1, operation.authRequirements.size)
         val requirement = operation.authRequirements.single()
         assertTrue(requirement is AuthRequirement.OAuth2)
-        val oauth2 = requirement as AuthRequirement.OAuth2
+        val oauth2: AuthRequirement.OAuth2 = requirement
         assertEquals("oauth2", oauth2.schemeName)
         // The flow data must travel through the importer so the
         // banner can render the flow name + scopes.

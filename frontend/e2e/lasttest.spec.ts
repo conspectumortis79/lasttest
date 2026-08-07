@@ -312,7 +312,7 @@ test('collapses all endpoints on import and toggles a single card via the expand
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
 
-  // Direkt nach dem Import ist jede Karte eingeklappt: aria-expanded="false".
+  // Directly after the import every card is collapsed: aria-expanded="false".
   const toggles = page.locator('.operation-card button.expand-toggle')
   await expect(toggles).toHaveCount(6)
   for (let index = 0; index < 6; index += 1) {
@@ -320,13 +320,13 @@ test('collapses all endpoints on import and toggles a single card via the expand
   }
   await expect(page.getByLabel('listProducts · Payload 1: category')).toHaveCount(0)
 
-  // Klick auf den Ausklapp-Button von listProducts: nur diese Karte ist sichtbar.
+  // Click the expand button of listProducts: only that card becomes visible.
   await expandOperation(page, 'listProducts')
   await expect(toggles.nth(0)).toHaveAttribute('aria-expanded', 'true')
   await expect(toggles.nth(1)).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByLabel('listProducts · Payload 1: category')).toBeVisible()
 
-  // Erneuter Klick klappt wieder ein.
+  // Clicking again collapses the card.
   await toggles.nth(0).click()
   await expect(toggles.nth(0)).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByLabel('listProducts · Payload 1: category')).toHaveCount(0)
@@ -362,7 +362,7 @@ paths:
   await expect(page.getByRole('heading', { name: 'Other API' })).toBeVisible()
   await expect(page.locator('.operation-card')).toHaveCount(1)
   await expect(page.getByLabel('Endpunkt GET /widgets auswählen')).toBeChecked()
-  // Alle Demo-Karten sind nach dem Neuimport verschwunden.
+  // All demo cards are gone after re-importing.
   await expect(page.getByLabel('Operation listProducts')).toHaveCount(0)
 })
 
@@ -420,12 +420,11 @@ paths:
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
   await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 30_000 })
-  // Bei einem unerreichbaren Endpoint liefert k6 zwar Threshold-Metriken
-  // (http_req_failed.value=1), aber der Run war technisch nicht
-  // erfolgreich. Die UI priorisiert dann den typisierten Failure-Block
-  // (Connection refused), damit der User die eigentliche Ursache sieht
-  // — Threshold-Karten mit „100 % HTTP-Fehlerrate“ waeren hier
-  // irrefuehrend.
+  // On an unreachable endpoint k6 still emits threshold metrics
+  // (http_req_failed.value=1), but the run was not actually successful.
+  // The UI then prioritises the typed failure block ("Connection refused")
+  // so the user sees the root cause; a "100 % HTTP error rate" threshold
+  // card would be misleading here.
   await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
   await expect(page.locator('.run-failure').locator('.run-failure-label')).toHaveText('Verbindung abgelehnt')
   await expect(page.locator('.result-header-actions').getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })).toBeVisible()
@@ -476,7 +475,7 @@ test('runs the Basic-Auth demo endpoint end-to-end and shows the base64 Authoriz
   // controller accepts when the Authorization header decodes to
   // "alice:s3cret". The yellow "Demo-Credentials" banner surfaces
   // these values to the user right above the pool editor and the
-  // "In Felder übernehmen" button populates the inputs in one click.
+  // "Apply to fields" button populates the inputs in one click.
   const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
   await expect(specification).toContainText('Lasttest Demo API')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
@@ -487,7 +486,7 @@ test('runs the Basic-Auth demo endpoint end-to-end and shows the base64 Authoriz
   await page.getByLabel('Endpunkt GET /products/admin/stats auswählen').check()
 
   // The yellow demo banner must be visible with the live demo
-  // credentials, and the "In Felder übernehmen" button must
+  // credentials, and the "Apply to fields" button must
   // populate the username and password inputs in one click.
   const banner = page.locator('.demo-banner')
   await expect(banner).toBeVisible()
@@ -529,7 +528,7 @@ test('runs the Basic-Auth demo endpoint end-to-end and shows the base64 Authoriz
 test('shows the demo credentials banner for the bearer demo endpoint and populates the field with one click', async ({ page }) => {
   // Mirrors the Basic-Auth demo test for the searchProducts endpoint:
   // the yellow demo banner is visible, carries the demo bearer token,
-  // and the "In Felder übernehmen" button copies the token into the
+  // and the "Apply to fields" button copies the token into the
   // Bearer-Token input.
   const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
   await expect(specification).toContainText('Lasttest Demo API')
@@ -565,7 +564,7 @@ test('does not show the demo credentials banner on non-demo operations', async (
 test('shows the demo credentials banner for the Basic-Auth demo endpoint and populates the username and password fields with one click', async ({ page }) => {
   // Mirrors the Bearer / API-key / OAuth 2.0 tests for getAdminStats:
   // the yellow demo banner is visible, carries the demo username +
-  // password, and the "In Felder übernehmen" button populates both
+  // password, and the "Apply to fields" button populates both
   // inputs in a single click.
   const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
   await expect(specification).toContainText('Lasttest Demo API')
@@ -587,7 +586,7 @@ test('shows the demo credentials banner for the Basic-Auth demo endpoint and pop
 test('shows the demo credentials banner for the OAuth 2.0 demo endpoint and populates the access-token field with one click', async ({ page }) => {
   // Mirrors the Basic-Auth / Bearer / API-key tests for getMe:
   // the yellow demo banner is visible, carries the flow + scope
-  // metadata, and the "In Felder übernehmen" button populates
+  // metadata, and the "Apply to fields" button populates
   // the password-style access-token input.
   const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
   await expect(specification).toContainText('Lasttest Demo API')
@@ -647,7 +646,7 @@ test('runs the OAuth 2.0 demo endpoint end-to-end and sends the Bearer Authoriza
 test('shows the demo credentials banner for the API-key demo endpoint and populates the X-API-Key field with one click', async ({ page }) => {
   // Mirrors the Basic-Auth / Bearer demo tests for lookupProduct:
   // the yellow demo banner is visible, carries the demo key + the
-  // spec-declared header name, and the "In Felder übernehmen"
+  // spec-declared header name, and the "Apply to fields"
   // button populates the password-style input.
   const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
   await expect(specification).toContainText('Lasttest Demo API')
@@ -783,7 +782,7 @@ paths:
   const emailInput = page.getByLabel('listItems · Payload 1: email')
   const enabledInput = page.getByLabel('listItems · Payload 1: enabled')
 
-  // Schema-Typen werden als kleiner Hinweis angezeigt.
+  // Schema types are rendered as a small hint next to the input.
   await expect(page.locator('tr', { has: idInput }).locator('.type-hint')).toHaveText('int64')
   await expect(page.locator('tr', { has: countInput }).locator('.type-hint')).toHaveText('int32')
   await expect(page.locator('tr', { has: priceInput }).locator('.type-hint')).toHaveText('double')
@@ -795,7 +794,7 @@ paths:
 // are all schema-conformant and do not trigger any hint.
   await expect(card.locator('.parameter-error')).toHaveCount(0)
 
-  // int64: Buchstaben → rote Fehlermeldung.
+  // int64: letters → red error message.
   await idInput.fill('abc')
   const idBox = page.locator('tr', { has: idInput })
   await expect(idBox.locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Ganzzahl (long).')
@@ -809,7 +808,7 @@ paths:
   await countInput.fill('2147483648')
   await expect(page.locator('tr', { has: countInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Ganzzahl (int32).')
 
-  // int32: unter minimum → eigene minimum-Meldung.
+  // int32: below minimum → dedicated minimum message.
   await countInput.fill('0')
   await expect(page.locator('tr', { has: countInput }).locator('.parameter-error')).toHaveText('Ungültig: Wert muss ≥ 1 sein.')
 
@@ -817,7 +816,7 @@ paths:
   await countInput.fill('50')
   await expect(page.locator('tr', { has: countInput }).locator('.parameter-error')).toHaveCount(0)
 
-  // double: Buchstaben → Fehlermeldung.
+  // double: letters → error message.
   await priceInput.fill('not-a-number')
   await expect(page.locator('tr', { has: priceInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Zahl (double).')
 
@@ -841,11 +840,11 @@ paths:
   await emailInput.fill('user@example.com')
   await expect(page.locator('tr', { has: emailInput }).locator('.parameter-error')).toHaveCount(0)
 
-  // boolean: „yes“ ist nicht erlaubt.
+  // boolean: "yes" is not allowed.
   await enabledInput.fill('yes')
   await expect(page.locator('tr', { has: enabledInput }).locator('.parameter-error')).toHaveText('Ungültig: erwartet true oder false.')
 
-  // boolean: „true“ ist erlaubt.
+  // boolean: "true" is allowed.
   await enabledInput.fill('true')
   await expect(page.locator('tr', { has: enabledInput }).locator('.parameter-error')).toHaveCount(0)
 })
@@ -881,7 +880,7 @@ paths:
   await expect(page.getByRole('heading', { name: /Typed API/ })).toBeVisible()
   await expect(page.locator('.operation-card')).toHaveCount(1)
 
-  // Karten aufklappen, damit das id-Feld sichtbar wird.
+  // Expand the card so the id field becomes visible.
   const card = page.locator('.operation-card').first()
   const toggle = card.locator('button.expand-toggle')
   await toggle.click()
@@ -893,7 +892,7 @@ paths:
   // With an empty value, everything is valid → button is enabled.
   await expect(startButton).toBeEnabled()
 
-  // Buchstaben in das int64-Feld → Fehlermeldung + Button deaktiviert.
+  // Letters in the int64 field → error message + button disabled.
   await idInput.fill('abc')
   await expect(card.locator('.parameter-error')).toHaveText('Ungültig: erwartet eine Ganzzahl (long).')
   await expect(page.getByRole('alert').filter({ hasText: 'Bitte korrigiere die rot markierten Eingaben' })).toBeVisible()
@@ -907,7 +906,7 @@ paths:
   await page.getByLabel('Endpunkt GET /items auswählen').check()
   await expect(startButton).toBeDisabled()
 
-  // Korrekten Wert eingeben → Fehler verschwindet, Button wird wieder aktiv.
+  // Enter a valid value → error disappears, button becomes enabled again.
   await idInput.fill('42')
   await expect(card.locator('.parameter-error')).toHaveCount(0)
   await expect(startButton).toBeEnabled()
@@ -965,7 +964,7 @@ paths:
   await expect(bodyInput).toHaveValue(/.+/)
   await expect(startButton).toBeEnabled()
 
-  // JSON-Body entfernen → Pflicht-Body fehlt → Button deaktiviert.
+  // Remove the JSON body → required body is missing → button is disabled.
   await bodyInput.fill('')
   await expect(card.locator('.parameter-error')).toHaveText('Ungültig: Pflicht-Request-Body ist leer.')
   await expect(startButton).toBeDisabled()
@@ -975,17 +974,17 @@ paths:
   await expect(card.locator('.parameter-error')).toHaveText('Ungültig: kein gültiges JSON.')
   await expect(startButton).toBeDisabled()
 
-  // JSON ok, aber Pflichtfeld fehlt.
+  // JSON is valid, but a required field is missing.
   await bodyInput.fill('{"price":1.5}')
   await expect(card.locator('.parameter-error')).toHaveText('Ungültig: Pflichtfeld „name“ fehlt.')
   await expect(startButton).toBeDisabled()
 
-  // JSON ok, aber falscher Typ.
+  // JSON is valid, but a field has the wrong type.
   await bodyInput.fill('{"name":"Luna","price":"viel"}')
   await expect(card.locator('.parameter-error')).toContainText('erwartet eine Zahl (double)')
   await expect(startButton).toBeDisabled()
 
-  // Unter minimum.
+  // Below the minimum.
   await bodyInput.fill('{"name":"Luna","price":0}')
   await expect(card.locator('.parameter-error')).toContainText('Wert muss ≥ 0.01 sein')
   await expect(startButton).toBeDisabled()
@@ -1071,29 +1070,29 @@ paths:
 test('renders the new load profile editor with presets and validates stages', async ({ page }) => {
   await importDemo(page)
 
-  // Lastprofil-Sektion ist sichtbar; Default ist constant-vus mit 10 VUs / 30 s.
+  // Load profile section is visible; default is constant-vus with 10 VUs / 30 s.
   const profileSelect = page.locator('.profile-type-select')
   await expect(profileSelect).toBeVisible()
   await expect(profileSelect).toHaveValue('constant-vus')
 
-  // Profil auf Ramping-VUs umschalten.
+  // Switch the profile to Ramping-VUs.
   await profileSelect.selectOption('ramping-vus')
   const editor = page.locator('[data-testid="load-profile-editor"]')
   await expect(editor).toBeVisible()
 
-  // Stages-Tabelle mit den 4 Spike-Preset-Stages.
+  // Stages table with the 4 Spike-preset stages.
   const stageRows = editor.locator('.stages-table tbody tr')
   await expect(stageRows).toHaveCount(4)
   // Targets des Spike-Presets: 0, 800, 800, 0.
   const firstStageTarget = stageRows.nth(0).locator('input[type="number"]').first()
   await expect(firstStageTarget).toHaveValue('0')
 
-  // Spitze-Preset klicken, um Stages auf 0, 800, 800, 0 zu setzen.
+  // Click the Spike preset to set stages to 0, 800, 800, 0.
   await editor.getByRole('button', { name: 'Spike', exact: true }).click()
   await expect(stageRows).toHaveCount(4)
 
-  // "Plateau erlaubt": zwei Stages mit demselben Target (800, 800) sollen
-  // keinen Validierungsfehler werfen.
+  // "Plateau is allowed": two stages with the same target (800, 800) must
+  // not raise a validation error.
   const errorBox = editor.locator('.parameter-error')
   await expect(errorBox).toHaveCount(0)
 
@@ -1105,7 +1104,7 @@ test('renders the new load profile editor with presets and validates stages', as
   await stageRows.nth(0).locator('button.stage-remove').click()
   await expect(stageRows).toHaveCount(4)
 
-  // Auf Constant-Arrival-Rate wechseln → 5 spezifische Felder.
+  // Switch to Constant-Arrival-Rate → 5 specific fields.
   await profileSelect.selectOption('constant-arrival-rate')
   await expect(editor.getByLabel('Rate (Anfragen)')).toBeVisible()
   await expect(editor.getByLabel('pro Sekunden')).toBeVisible()
@@ -1120,22 +1119,22 @@ test('clicking a preset marks it as selected and switches the selection to the n
   const spike = editor.getByRole('button', { name: 'Spike', exact: true })
   const soak = editor.getByRole('button', { name: 'Soak', exact: true })
 
-  // Vor dem Klick: kein Preset ist markiert.
+  // Before clicking: no preset is marked.
   await expect(spike).not.toHaveClass(/selected/)
   await expect(soak).not.toHaveClass(/selected/)
 
-  // Klick auf Spike → Spike bekommt die .selected-Klasse, Soak nicht.
+  // Click Spike → Spike gets the .selected class, Soak does not.
   await spike.click()
   await expect(spike).toHaveClass(/selected/)
   await expect(spike).toHaveAttribute('aria-pressed', 'true')
   await expect(soak).not.toHaveClass(/selected/)
   await expect(soak).toHaveAttribute('aria-pressed', 'false')
 
-  // Maus weg vom Spike → der Lila-Look muss bleiben (selected, nicht hovered).
+  // Mouse away from Spike → the purple look must remain (selected, not hovered).
   await page.mouse.move(0, 0)
   await expect(spike).toHaveClass(/selected/)
 
-  // Klick auf Soak → Soak wird markiert, Spike verliert die Markierung.
+  // Click Soak → Soak becomes selected, Spike loses the selection.
   await soak.click()
   await expect(soak).toHaveClass(/selected/)
   await expect(soak).toHaveAttribute('aria-pressed', 'true')
@@ -1150,19 +1149,19 @@ test('changing the profile-type dropdown clears the selected preset', async ({ p
   const spike = editor.getByRole('button', { name: 'Spike', exact: true })
   const soak = editor.getByRole('button', { name: 'Soak', exact: true })
 
-  // Spike klicken → ist markiert.
+  // Click Spike → it is selected.
   await spike.click()
   await expect(spike).toHaveClass(/selected/)
 
-  // User wechselt das Lastprofil im Dropdown von constant-vus auf ramping-vus.
-  // Spike (das nur ramping-vus liefert) ist weiter klickbar, aber die
+  // User switches the load profile in the dropdown from constant-vus to ramping-vus.
+  // Spike (which only supplies ramping-vus) remains clickable, but the
   // The selection itself should be reset because the user has now
   // consciously chosen a different type.
   await profileSelect.selectOption('ramping-vus')
   await expect(spike).not.toHaveClass(/selected/)
   await expect(soak).not.toHaveClass(/selected/)
 
-  // Erneuter Klick auf Soak markiert Soak wieder.
+  // Clicking Soak again re-marks it.
   await soak.click()
   await expect(soak).toHaveClass(/selected/)
 
@@ -1176,7 +1175,7 @@ test('k6-Konsolenausgabe wird auch im Erfolgsfall angezeigt', async ({ page }) =
   await page.getByLabel('Virtual Users').fill('1')
   await page.getByLabel('Dauer (Sekunden)').fill('1')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
-  // Erst das Pass-Badge abwarten — dann ist der Run gelaufen.
+  // First wait for the pass badge — then the run is done.
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
 
   // Beide <details>-Bloecke muessen jetzt aufklappbar sein.
@@ -1185,7 +1184,7 @@ test('k6-Konsolenausgabe wird auch im Erfolgsfall angezeigt', async ({ page }) =
   await expect(consoleDetails).toBeVisible()
   await expect(jsonDetails).toBeVisible()
 
-  // Inhalt der Konsole ist nicht leer.
+  // The console content is not empty.
   await consoleDetails.locator('summary').click()
   await expect(consoleDetails.locator('pre')).not.toHaveText('')
 })
@@ -1197,8 +1196,8 @@ test('Report-Button sitzt fest direkt unter der Run-ID (rechtsbündig) — Detai
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
 
-  // Strukturelemente: Button lebt jetzt im Header (.result-header-actions),
-  // die Details (k6-Konsolenausgabe + k6-JSON-Rohdaten) in .result-extras.
+  // Structural elements: the button now lives in the header (.result-header-actions),
+  // the details (k6 console output + raw k6 JSON) live in .result-extras.
   const resultCard = page.locator('section.card.result')
   const headerActions = resultCard.locator('.result-header-actions')
   const reportBtn = headerActions.getByRole('link', { name: 'Ausführlicher K6-Testbericht' })
@@ -1223,21 +1222,20 @@ test('Report-Button sitzt fest direkt unter der Run-ID (rechtsbündig) — Detai
   const rightPadding = 32
   expect(cardRight - (btnClosed.x + btnClosed.width)).toBeLessThan(rightPadding)
 
-  // 2) Details nutzen die volle Kartenbreite: ihr rechter Rand liegt
-  //    ebenfalls am rechten Inhaltsrand (gleiche Toleranz).
+  // 2) Details use the full card width: their right edge also sits
+  //    at the right content edge (same tolerance).
   expect(cardRight - (consoleClosed.x + consoleClosed.width)).toBeLessThan(rightPadding)
   expect(cardRight - (jsonClosed.x + jsonClosed.width)).toBeLessThan(rightPadding)
 
-  // 3) Details sind breiter als der Button (volle Breite vs. nur
-  //    Button-Breite).
+  // 3) Details are wider than the button (full width vs. button width only).
   expect(consoleClosed.width).toBeGreaterThan(btnClosed.width)
   expect(jsonClosed.width).toBeGreaterThan(btnClosed.width)
 
-  // 4) Initialposition des Buttons merken (alle <details> zu). Wir
-  //    messen die Position RELATIV zum Header — sonst haengt das
-  //    Ergebnis am Page-Scroll (das Aufklappen der Details
-  //    verlaengert die Seite und aendert die Viewport-Y, obwohl der
-  //    Button im Layout wirklich an der gleichen Stelle sitzt).
+  // 4) Record the initial position of the button (all <details> closed). We
+  //    measure the position RELATIVE to the header — otherwise the result
+  //    depends on page scroll (opening the details lengthens the page and
+  //    changes the viewport Y, even though the button stays at the same
+  //    place in the layout).
   const readBtnRel = () => page.evaluate(() => {
     const btn = document.querySelector('.report-btn')
     const header = document.querySelector('.result-header')
@@ -1248,21 +1246,21 @@ test('Report-Button sitzt fest direkt unter der Run-ID (rechtsbündig) — Detai
   })
   const initialRel = await readBtnRel()
 
-  // 5) k6-Konsolenausgabe aufklappen — Button darf nicht mitwandern.
+  // 5) Open the k6 console output — button must not move.
   await consoleDetails.locator('summary').click()
   await expect(consoleDetails).toHaveAttribute('open', '')
   const afterConsoleRel = await readBtnRel()
   expect(Math.abs(afterConsoleRel.dy - initialRel.dy)).toBeLessThan(1.5)
   expect(Math.abs(afterConsoleRel.dx - initialRel.dx)).toBeLessThan(1.5)
 
-  // 6) k6-JSON-Rohdaten zusaetzlich aufklappen — Button bleibt fix.
+  // 6) Open the raw k6 JSON in addition — button stays put.
   await jsonDetails.locator('summary').click()
   await expect(jsonDetails).toHaveAttribute('open', '')
   const afterBothRel = await readBtnRel()
   expect(Math.abs(afterBothRel.dy - initialRel.dy)).toBeLessThan(1.5)
   expect(Math.abs(afterBothRel.dx - initialRel.dx)).toBeLessThan(1.5)
 
-  // 7) Beide Details wieder zuklappen — Button immer noch am selben Ort.
+  // 7) Close both details again — button is still at the same place.
   await consoleDetails.locator('summary').click()
   await jsonDetails.locator('summary').click()
   const finalRel = await readBtnRel()
@@ -1282,36 +1280,36 @@ test('report page renders the ramp-grafik for a completed ramping-vus run', asyn
   await profileSelect.selectOption('ramping-vus')
   await page.locator('[data-testid="load-profile-editor"]').getByRole('button', { name: 'Spike', exact: true }).click()
 
-  // 200 ms reichen, damit der Demo-Endpunkt unter lasttest/demo-api
-  // antwortet; Stages sind 0/2s, 800/10s, 800/30s, 0/2s ≈ 44 s.
+  // 200 ms is enough for the demo endpoint under lasttest/demo-api
+  // to answer; stages are 0/2s, 800/10s, 800/30s, 0/2s ≈ 44 s.
   // We shorten the stages for the E2E test by changing the editor
   // values directly.
   const stageRows = page.locator('.stages-table tbody tr')
   await expect(stageRows).toHaveCount(4)
-  // Setze alle Durations auf 1 s → Lauf dauert ~4 s.
+  // Set all stage durations to 1 s → run takes ~4 s.
   for (let i = 0; i < 4; i++) {
     const durationInput = stageRows.nth(i).locator('input[type="number"]').nth(1)
     await durationInput.fill('1')
   }
 
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
-  // Warten bis der Run-Status PASSED ist (das Badge zeigt "PASSED"
-  // bzw. "FAILED", nicht den internen Status "COMPLETED").
+  // Wait until the run status is PASSED (the badge shows "PASSED" /
+  // "FAILED", not the internal status "COMPLETED").
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 60_000 })
 
   // Open the report link.
   const reportLink = page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })
   const [reportPage] = await Promise.all([page.context().waitForEvent('page'), reportLink.click()])
 
-  // Lastprofil-Sektion und Ramp-Grafik sind sichtbar.
+  // Load profile section and ramp chart are visible.
   await expect(reportPage.getByRole('heading', { name: /Lastprofil.*Lastverlauf/ })).toBeVisible()
-  // SVG mit Soll-Linie (lila) ist im Ramp-Card.
+  // SVG with the target line (purple) is in the ramp card.
   const rampSvg = reportPage.locator('.ramp-svg').first()
   await expect(rampSvg).toBeVisible()
-  // Legende zeigt beide Linien.
+  // Legend shows both lines.
   await expect(reportPage.getByText('Geplant (Soll)')).toBeVisible()
   await expect(reportPage.getByText('Tatsächlich (Ist)')).toBeVisible()
-  // Stages-Tabelle ist ebenfalls da.
+  // Stages table is also present.
   const stagesTable = reportPage.locator('table[aria-label="Stages des Lastprofils"]')
   await expect(stagesTable).toBeVisible()
   await expect(stagesTable.locator('tbody tr')).toHaveCount(4)
@@ -1319,8 +1317,8 @@ test('report page renders the ramp-grafik for a completed ramping-vus run', asyn
 
 // ---- Run-Status-View: RunProgress / RunSummary / RunFailure ----------------
 //
-// Diese Tests decken die drei neuen Live-Sichten ab, die nach dem
-// Klick auf „k6-Lasttest starten“ im Haupt-Editor erscheinen.
+// These tests cover the three new live views that appear in the
+// main editor after clicking "k6-Lasttest starten".
 
 test('shows the live progress card while a k6 run is QUEUED or RUNNING', async ({ page }) => {
   // Picks a slightly longer run so that the polling animation is
@@ -1330,8 +1328,8 @@ test('shows the live progress card while a k6 run is QUEUED or RUNNING', async (
   await page.getByLabel('Dauer (Sekunden)').fill('5')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
-  // Status-Badge ist sichtbar. Da der Test asynchron auf den Lauf
-  // wartet, kann die Karte sowohl RUNNING als auch schon COMPLETED
+  // Status badge is visible. Because the test waits asynchronously for the run,
+  // the card may be either RUNNING or already COMPLETED,
   // so we only check the time-display component.
   await expect(page.locator('.status.running, .status.queued, .status-badge.is-pass').first()).toBeVisible({ timeout: 30_000 })
 
@@ -1349,10 +1347,10 @@ test('renders a compact summary card grid after a successful smoke test complete
   await page.getByLabel('Dauer (Sekunden)').fill('1')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
-  // Warten auf COMPLETED.
+  // Wait for COMPLETED.
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
 
-  // Sechs Metrik-Karten sind sichtbar (Checks, Fehlerrate, p95, Requests, Iterationen, Laufzeit).
+  // Six metric cards are visible (Checks, error rate, p(95), requests, iterations, runtime).
   const cards = page.locator('.run-summary-card')
   await expect(cards).toHaveCount(6)
   await expect(page.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
@@ -1390,9 +1388,9 @@ paths:
   await page.getByLabel('Dauer (Sekunden)').fill('2')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
-  // Status FAILED — die UI rendert je nach Ursache entweder
-  // .run-failure (kein Threshold verletzt) oder .run-summary-cards
-  // (Threshold verletzt). Beide signalisieren FAILED.
+  // Status FAILED — the UI renders either .run-failure (no threshold
+  // violated) or .run-summary-cards (threshold violated) depending on the
+  // root cause. Both signal FAILED.
   await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 60_000 })
   await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
 
@@ -1406,7 +1404,7 @@ paths:
 })
 
 test('renders a typed failure card with connection-refused when the port is not open', async ({ page }) => {
-  // 127.0.0.1:1 ist der Standard-„Verbindung abgelehnt“-Endpunkt auf jedem System.
+  // 127.0.0.1:1 is the default "connection refused" endpoint on every system.
   const unreachableSpec = `openapi: 3.0.3
 info:
   title: Connection Refused
@@ -1434,9 +1432,9 @@ paths:
 
   await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 60_000 })
 
-  // Bei einem Connection Refused liefert k6 zwar Threshold-Metriken,
-  // aber der Run war technisch nicht erfolgreich. Die UI priorisiert
-  // daher die typed-failure-Karte mit Label "Verbindung abgelehnt".
+  // On a Connection Refused k6 still emits threshold metrics, but the
+  // run was not actually successful. The UI therefore prioritises the
+  // typed-failure card with the label "Verbindung abgelehnt".
   await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
   await expect(page.locator('.run-failure-label')).toHaveText('Verbindung abgelehnt')
   await expect(page.locator('.run-failure')).toBeVisible()
@@ -1462,13 +1460,13 @@ test('the completed summary card grid is also visible in the report popup', asyn
 })
 
 // =============================================================================
-// Sektion A: Import-Robustheit
+// Section A: Import robustness
 // =============================================================================
 //
-// Diese Tests decken reale Spec-Formate ab (Swagger 2.0, OpenAPI 3.0 als JSON
-// und YAML, mit Auth-Schemes, mit Pfad-/Header-/Cookie-Parametern, mit
-// deprecated Operations, mit mehreren Tags) und pruefen, dass die UI das
-// jeweilige Spec fehlerfrei einliest und alle Operations korrekt darstellt.
+// These tests cover real spec formats (Swagger 2.0, OpenAPI 3.0 as JSON
+// and YAML, with auth schemes, with path/header/cookie parameters, with
+// deprecated operations, with multiple tags) and verify that the UI
+// imports each spec without errors and renders all operations correctly.
 
 test.describe('A) Import-Robustheit', () => {
   test('importiert eine Swagger-2.0-Specifikation im JSON-Format', async ({ page }) => {
@@ -1520,10 +1518,10 @@ test.describe('A) Import-Robustheit', () => {
   })
 
   test('importiert eine Specifikation mit apiKey-Authentifizierung', async ({ page }) => {
-    // apiKey in Header ohne Parameter-Eintrag: das Schema selbst wird
-    // nicht zu einem Eingabefeld (das macht nur Bearer). Wir pruefen
-    // daher nur, dass die Operation geladen und die Bearer-Token-Box
-    // als "dokumentierte Auth" markiert wird.
+    // apiKey in a header without a parameter entry: the schema itself does
+    // not become an input field (only Bearer does). We therefore only check
+    // that the operation loads and the Bearer-Token box is marked as the
+    // "documented auth" of the operation.
     const apiKeySpec = `openapi: 3.0.3
 info: { title: "API-Key API", version: "1" }
 paths:
@@ -1547,8 +1545,8 @@ components:
   })
 
   test('importiert eine Specifikation mit Basic-Authentifizierung', async ({ page }) => {
-    // Basic-Auth: das Backend setzt bearerAuth=false (es ist kein
-    // Bearer-Schema). Wir verifizieren Import + Operationskarten-Anzahl.
+    // Basic auth: the backend sets bearerAuth=false (it is not a Bearer
+    // scheme). We verify the import and the operation-card count.
     const basicSpec = `openapi: 3.0.3
 info: { title: "Basic Auth API", version: "1" }
 paths:
@@ -1647,7 +1645,7 @@ paths:
     })
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Deprecated API' })).toBeVisible()
-    // Beide Karten werden gerendert (auch die deprecated).
+    // Both cards are rendered (also the deprecated one).
     await expect(page.locator('.operation-card')).toHaveCount(2)
   })
 
@@ -1679,8 +1677,8 @@ paths:
   })
 
   test('behaelt doppelte operationIds aus der Spec ohne Absturz', async ({ page }) => {
-    // Der Importer erlaubt doppelte operationIds (er generiert eindeutige
-    // Skript-Identifier spaeter). Beide Karten muessen gerendert werden.
+    // The importer allows duplicate operationIds (it generates unique
+    // script identifiers later). Both cards must be rendered.
     const duplicateSpec = `openapi: 3.0.3
 info: { title: "Duplicate API", version: "1" }
 paths:
@@ -1717,8 +1715,8 @@ components:
       name: 'cyclic.yaml', mimeType: 'application/yaml', buffer: Buffer.from(cyclicSpec),
     })
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-    // Entweder wird die Spec trotzdem geladen, oder der Importer meldet einen Fehler.
-    // Beides ist akzeptabel; Hauptsache kein Endlos-Stacktrace.
+    // Either the spec still loads, or the importer surfaces an error.
+    // Both are acceptable; the only requirement is no infinite stack trace.
     const error = page.locator('.error')
     const heading = page.getByRole('heading', { name: 'Cyclic API' })
     await expect(error.or(heading)).toBeVisible({ timeout: 10_000 })
@@ -1727,22 +1725,22 @@ components:
   test('re-importiert die gleiche Spec ist eine No-Op fuer die UI', async ({ page }) => {
     await importDemo(page)
     await expect(page.locator('.operation-card')).toHaveCount(6)
-    // Erneutes Importieren mit dem gleichen Demo-File.
+    // Re-import the same demo file.
     await page.locator('input[type="file"]').setInputFiles(demoSpecification)
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-    // Heading bleibt sichtbar, Karten-Anzahl unveraendert.
+    // Heading stays visible, card count unchanged.
     await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(6)
   })
 })
 
 // =============================================================================
-// Sektion B: Parameter-Validierung
+// Section B: Parameter validation
 // =============================================================================
 //
-// Diese Tests pruefen Detailfaelle der OpenAPI-Schema-Validierung, die ueber
-// die bestehenden Tests hinausgehen: minLength/maxLength, min/max, array-
-// Grenzen, date- und date-time-Formate, Pflichtfelder in JSON-Bodies.
+// These tests cover edge cases of the OpenAPI schema validation that go
+// beyond the existing tests: minLength/maxLength, min/max, array bounds,
+// date and date-time formats, required fields in JSON bodies.
 
 test.describe('B) Parameter-Validierung', () => {
   test('lehnt String ab, der kuerzer als minLength ist', async ({ page }) => {
@@ -1899,10 +1897,9 @@ paths:
   })
 
   test('lehnt JSON-Body mit leerem Array ab, wenn mindestens ein Objekt erforderlich ist', async ({ page }) => {
-    // Property minItems ist im aktuellen JSON-Schema-Subset nicht
-    // validiert; stattdessen testen wir, dass ein JSON-Array (statt
-    // Objekt) sauber abgelehnt wird, weil der Body-Validator ein
-    // Objekt erwartet.
+    // The minItems property is not validated in the current JSON-Schema
+    // subset; instead we test that a JSON array (rather than an object) is
+    // cleanly rejected because the body validator expects an object.
     const spec = `openapi: 3.0.3
 info: { title: "Array Body", version: "1" }
 paths:
@@ -1954,7 +1951,7 @@ paths:
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const bodyInput = page.getByLabel('createItem · Payload 1: JSON Request-Body')
     await bodyInput.fill('{"name": "Luna", "extra": 42, "nested": {"x": 1}}')
-    // Pflichtfeld "name" ist gesetzt -> keine Fehlermeldung.
+    // Required field "name" is set -> no error message.
     await expect(page.locator('tr', { has: bodyInput }).locator('.parameter-error')).toHaveCount(0)
   })
 
@@ -1981,13 +1978,13 @@ paths:
 })
 
 // =============================================================================
-// Sektion C: Load-Profile-Varianten
+// Section C: Load profile variants
 // =============================================================================
 //
-// Diese Tests klicken die Preset-Buttons (Smoke, Load, Stress, Spike, Soak)
-// und pruefen, dass die Stages korrekt befuellt werden. Ausserdem werden
-// alle vier Executor-Typen (constant-vus, ramping-vus, shared-iterations,
-// constant-arrival-rate) getestet.
+// These tests click the preset buttons (Smoke, Load, Stress, Spike, Soak)
+// and verify that the stages are filled in correctly. They also cover
+// all four executor types (constant-vus, ramping-vus, shared-iterations,
+// constant-arrival-rate).
 
 test.describe('C) Load-Profile-Varianten', () => {
   test('Smoke-Preset liefert 1 VU ueber 30 s', async ({ page }) => {
@@ -2003,7 +2000,7 @@ test.describe('C) Load-Profile-Varianten', () => {
     await importDemo(page)
     const editor = page.locator('[data-testid="load-profile-editor"]')
     await editor.getByRole('button', { name: 'Load', exact: true }).click()
-    // Load-Preset schaltet auf ramping-vus um, mit 4 Stages.
+    // Load preset switches to ramping-vus with 4 stages.
     await expect(page.locator('.profile-type-select')).toHaveValue('ramping-vus')
     await expect(editor.locator('.stages-table tbody tr')).toHaveCount(4)
   })
@@ -2029,8 +2026,8 @@ test.describe('C) Load-Profile-Varianten', () => {
     await importDemo(page)
     const editor = page.locator('[data-testid="load-profile-editor"]')
     await editor.getByRole('button', { name: 'Soak', exact: true }).click()
-    // Soak = 60s + 5min + 55min + 60s; wir verifizieren die Stages-Form
-    // und dass der Profil-Typ auf ramping-vus umgeschaltet wurde.
+    // Soak = 60s + 5min + 55min + 60s; we verify the stages shape and
+    // that the profile type was switched to ramping-vus.
     await expect(page.locator('.profile-type-select')).toHaveValue('ramping-vus')
     await expect(editor.locator('.stages-table tbody tr')).toHaveCount(4)
   })
@@ -2054,7 +2051,7 @@ test.describe('C) Load-Profile-Varianten', () => {
     const editor = page.locator('[data-testid="load-profile-editor"]')
     await expect(editor.getByLabel('Iterationen')).toBeVisible()
     await expect(editor.getByLabel('Virtual Users')).toBeVisible()
-    // Dauer-Feld ist hier nicht relevant.
+    // Duration field is not relevant here.
     await expect(editor.getByLabel('Dauer (Sekunden)')).toHaveCount(0)
   })
 
@@ -2073,8 +2070,8 @@ test.describe('C) Load-Profile-Varianten', () => {
     await page.locator('.profile-type-select').selectOption('ramping-vus')
     const editor = page.locator('[data-testid="load-profile-editor"]')
     await editor.getByRole('button', { name: 'Spike', exact: true }).click()
-    // Spike-Preset hat zwei Stages mit demselben Target (800) -> Plateau,
-    // das ist legitim und darf keinen Fehler werfen.
+    // The Spike preset has two stages with the same target (800) -> a plateau,
+    // which is legitimate and must not raise a validation error.
     await expect(editor.locator('.parameter-error')).toHaveCount(0)
   })
 
@@ -2092,12 +2089,11 @@ test.describe('C) Load-Profile-Varianten', () => {
 })
 
 // =============================================================================
-// Sektion D: Live-Run-Szenarien
+// Section D: Live run scenarios
 // =============================================================================
 //
-// Vollstaendige k6-Laeufe gegen die lokale Demo-API, um zu zeigen, dass
-// verschiedene HTTP-Methoden, Auth-Varianten und Konfigurationen
-// tatsaechlich durchlaufen.
+// Full k6 runs against the local demo API, to show that different HTTP
+// methods, auth variants and configurations actually run end to end.
 
 test.describe('D) Live-Run-Szenarien', () => {
   test('GET-Run mit Query-Parameter schliesst erfolgreich ab', async ({ page }) => {
@@ -2124,10 +2120,10 @@ test.describe('D) Live-Run-Szenarien', () => {
   })
 
   test('PUT-Run mit Pfad-Parameter endet als FAILED (Demo-API antwortet 400)', async ({ page }) => {
-    // Die lokale Demo-API validiert PUT-Bodies anders als das Spec es
-    // erwartet -> der k6-Lauf meldet 100 % Fehler und der Threshold
-    // http_req_failed<0.05 schlaegt an. Wir verifizieren daher den
-    // FAILED-Status samt Diagnose statt eines sauberen COMPLETED.
+    // The local demo API validates PUT bodies differently than the spec
+    // expects -> the k6 run reports 100 % failures and the threshold
+    // http_req_failed<0.05 trips. We therefore verify the FAILED status
+    // with its diagnostic cards instead of a clean COMPLETED.
     await importDemo(page)
     await page.getByLabel('Endpunkt GET /products auswählen').uncheck()
     await expandOperation(page, 'updateProduct')
@@ -2144,8 +2140,8 @@ test.describe('D) Live-Run-Szenarien', () => {
   })
 
   test('DELETE-Run mit Bearer-Token endet als FAILED (Demo-API antwortet 404)', async ({ page }) => {
-    // Die lokale Demo-API hat fuer /products/{id} kein DELETE -> k6 sieht
-    // 100 % Fehler. Wir verifizieren FAILED samt Summary-Cards.
+    // The local demo API does not implement DELETE for /products/{id} -> k6 sees
+    // 100 % failures. We verify FAILED with the summary cards.
     await importDemo(page)
     await page.getByLabel('Endpunkt GET /products auswählen').uncheck()
     await expandOperation(page, 'deleteProduct')
@@ -2236,8 +2232,8 @@ paths:
     await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 30_000 })
     const failureCard = page.locator('.run-failure')
     await expect(failureCard).toBeVisible()
-    // DNS-Fehler wird entweder als kind-dns oder kind-connection klassifiziert,
-    // je nach k6-Output-Format. Die Diagnose-Region enthaelt den Hostnamen.
+    // DNS errors are classified as either kind-dns or kind-connection
+    // depending on the k6 output format. The diagnostic region contains the hostname.
     await expect(failureCard.locator('.run-failure-detail'))
       .toContainText('does-not-exist-anywhere.invalid')
   })
@@ -2252,7 +2248,7 @@ paths:
     await page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i }).click()
     const report = await popupPromise
     await report.waitForLoadState('networkidle')
-    // "Generiertes k6-Testskript" ist ein <summary>-Element, kein Heading.
+    // "Generiertes k6-Testskript" is a <summary> element, not a heading.
     await expect(report.getByText('Generiertes k6-Testskript', { exact: true })).toBeVisible()
   })
 
@@ -2283,7 +2279,7 @@ paths:
   })
 
   test('Run mit URL-Spec-Import schliesst ab', async ({ page, request }) => {
-    // Sicherstellen, dass der Demo-Swagger-UI-Endpoint erreichbar ist.
+    // Make sure the demo Swagger-UI endpoint is reachable.
     const swaggerResponse = await request.get('/demo-swagger-ui')
     expect(swaggerResponse.ok()).toBeTruthy()
     const specUrl = page.getByLabel('URL zur Swagger-UI oder OpenAPI-Spezifikation')
@@ -2298,22 +2294,22 @@ paths:
 })
 
 // =============================================================================
-// Sektion E: UI-State und Form-Verhalten
+// Section E: UI state and form behaviour
 // =============================================================================
 //
-// Diese Tests pruefen, dass die UI ihren Zustand korrekt verwaltet:
-// Auswahl zuruecksetzen nach Fehler, Base-URL-Eingabe, Server-Dropdown-
-// Override, Browser-History etc.
+// These tests verify that the UI manages its state correctly:
+// reset selection after an error, base URL input, server dropdown
+// override, browser history, etc.
 
 test.describe('E) UI-State und Form-Verhalten', () => {
   test('fehlgeschlagener Import hinterlaesst die vorherige Spec-Anzeige', async ({ page }) => {
     await importDemo(page)
     await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
-    // Jetzt eine ungueltige Spec einreichen.
+    // Now submit an invalid spec.
     const textarea = page.getByLabel('Swagger / OpenAPI-Dokumentation')
     await textarea.fill('openapi: 3.0.3\ninfo: {title: Empty, version: "1"}\npaths: {}')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-    // Validierung schlaegt fehl, vorherige Spec bleibt sichtbar.
+    // Validation fails, the previous spec stays visible.
     await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
   })
 
@@ -2354,9 +2350,9 @@ paths:
   })
 
   test('Seiten-Refresh laedt die Demo-Spec automatisch wieder in den Editor', async ({ page }) => {
-    // Beim Mount ruft die App /api/demo-specification ab und schreibt
-    // das Ergebnis in das Textarea — ein Reload reproduziert dieses
-    // Verhalten ohne JS-Fehler.
+    // On mount the app calls /api/demo-specification and writes the result
+    // into the textarea — a reload reproduces this behaviour without a JS
+    // error.
     await importDemo(page)
     await page.reload()
     await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation'))
@@ -2389,8 +2385,8 @@ paths:
     const startButton = page.getByRole('button', { name: 'k6-Lasttest starten' })
     await expect(startButton).toBeEnabled()
     await startButton.click()
-    // Waehrend des Laufs (oder kurz danach) muss der Button entweder
-    // deaktiviert sein oder einen anderen Text haben.
+    // During the run (or shortly after) the button must be either disabled
+    // or have a different text.
     await expect(page.locator('.status.running, .status.queued, .status-badge.is-pass, .status-badge.is-fail').first())
       .toBeVisible({ timeout: 30_000 })
   })

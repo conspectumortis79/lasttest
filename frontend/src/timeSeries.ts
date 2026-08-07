@@ -3,7 +3,7 @@
 // Returns empty arrays on network or server errors so the UI can
 // transparently fall back to "target only".
 
-export type TimeSeriesPoint = {
+type TimeSeriesPoint = {
   /** ISO-8601 timestamp. */
   time: string
   /** Measured value (VUs as integer, RPS as float). */

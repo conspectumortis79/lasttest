@@ -14,9 +14,9 @@ export const MAX_PRE_ALLOCATED_VUS = 30_000
 // integer number of seconds (k6 itself supports up to '60s'). We mirror that
 // range so the validator cannot silently let through '5m' which the executor
 // would reject at runtime.
-export const ALLOWED_TIME_UNITS_SECONDS: readonly number[] = Array.from({ length: 60 }, (_, index) => index + 1)
+const ALLOWED_TIME_UNITS_SECONDS: readonly number[] = Array.from({ length: 60 }, (_, index) => index + 1)
 
-export type LoadProfileType = 'constant-vus' | 'shared-iterations' | 'ramping-vus' | 'constant-arrival-rate'
+type LoadProfileType = 'constant-vus' | 'shared-iterations' | 'ramping-vus' | 'constant-arrival-rate'
 
 /**
  * How the generator picks the next payload from a per-endpoint pool
@@ -44,10 +44,6 @@ export type LoadProfile =
   | { type: 'shared-iterations', virtualUsers: number, iterations: number, payloadStrategy?: PayloadStrategy }
   | { type: 'ramping-vus', startVUs: number, stages: LoadStage[], payloadStrategy?: PayloadStrategy }
   | { type: 'constant-arrival-rate', rate: number, timeUnitSeconds: number, durationSeconds: number, preAllocatedVUs: number, maxVUs: number, payloadStrategy?: PayloadStrategy }
-
-export type LoadProfileValidation =
-  | { valid: true }
-  | { valid: false, message: string }
 
 // ---- Factory & presets ------------------------------------------------------
 //
@@ -276,7 +272,7 @@ function validateIntegerInRange(
 // place where we *could* convert to milliseconds; we deliberately do not
 // because the k6 generated script reads the value as-is.
 
-export type SerialisedLoadProfile = {
+type SerialisedLoadProfile = {
   type: LoadProfileType
   virtualUsers?: number
   durationSeconds?: number

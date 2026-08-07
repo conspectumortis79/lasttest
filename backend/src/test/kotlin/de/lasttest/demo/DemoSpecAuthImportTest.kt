@@ -54,13 +54,12 @@ class DemoSpecAuthImportTest {
         assertEquals(1, apiKey.authRequirements.size)
         val apiKeyReq = apiKey.authRequirements.single()
         assertTrue(apiKeyReq is AuthRequirement.ApiKey)
-        assertEquals("X-API-Key", (apiKeyReq as AuthRequirement.ApiKey).headerName)
+        assertEquals("X-API-Key", apiKeyReq.headerName)
 
         // --- getMe / OAuth 2.0 -----------------------------------------
         assertEquals(1, oauth2.authRequirements.size)
         val oauth2Req = oauth2.authRequirements.single()
         assertTrue(oauth2Req is AuthRequirement.OAuth2)
-        oauth2Req as AuthRequirement.OAuth2
         // The spec declares two flows (clientCredentials +
         // authorizationCode). The importer surfaces them in the
         // order the spec declares them so the banner can render

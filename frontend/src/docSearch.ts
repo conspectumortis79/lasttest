@@ -19,7 +19,7 @@
 export const HIGHLIGHT_CLASS = 'doc-search-hit'
 export const ACTIVE_CLASS = 'doc-search-hit--active'
 
-export type HitRange = { start: number; end: number }
+type HitRange = { start: number; end: number }
 
 /**
  * Replaces text nodes inside `root` with a fragment that wraps

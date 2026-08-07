@@ -37,7 +37,7 @@ function readStoredLanguage(): SupportedLanguage {
   return DEFAULT_LANGUAGE
 }
 
-export type LanguageContextValue = {
+type LanguageContextValue = {
   language: SupportedLanguage
   setLanguage: (next: SupportedLanguage) => void
 }

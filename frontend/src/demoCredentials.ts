@@ -58,7 +58,7 @@ export type DemoOAuth2 = {
   readonly scopes: ReadonlyArray<string>
 }
 
-export type DemoCredentials = DemoBasicAuth | DemoBearerToken | DemoApiKey | DemoOAuth2
+type DemoCredentials = DemoBasicAuth | DemoBearerToken | DemoApiKey | DemoOAuth2
 
 export const DEMO_CREDENTIALS: ReadonlyArray<DemoCredentials> = [
   {

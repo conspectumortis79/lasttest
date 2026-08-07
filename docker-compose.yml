@@ -47,14 +47,14 @@ services:
   # fast, k6-native. The data lands in the default database `k6`,
   # retention policy `autogen`.
   #
-  # Persistenz via benanntem Volume. Beim ersten Start wird die
-  # Datenbank `k6` automatisch angelegt und ein Admin-User mit
-  # Schreib-/Leserechten erstellt.
+  # Persistence via named volume. On first start, the `k6`
+  # database is created automatically and an admin user with
+  # read/write permissions is provisioned.
   influxdb:
     container_name: lasttest-influxdb
     image: influxdb:1.11
     ports:
-      # UI unter http://localhost:8086/ erreichbar (Login siehe unten)
+      # UI reachable at http://localhost:8086/ (login details below)
       - "8086:8086"
     volumes:
       - influxdb-data:/var/lib/influxdb
