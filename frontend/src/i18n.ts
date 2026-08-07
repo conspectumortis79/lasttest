@@ -40,6 +40,16 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'drawer.title': 'Settings',
     'drawer.section.language': 'Language',
     'drawer.lang.hint.default': 'Default',
+    'drawer.section.notifications': 'Notifications',
+    'drawer.notifications.enabled': 'Browser notifications',
+    'drawer.notifications.enabled.hint': 'Show a desktop notification when a k6 run finishes.',
+    'drawer.notifications.onSuccess': 'On successful completion',
+    'drawer.notifications.onFailure': 'On failure (FAILED, STOPPED, ABORTED)',
+    'drawer.notifications.permission.denied': 'Notifications are blocked by the browser. Enable them in the site settings to use this feature.',
+    'notification.completed.title': 'k6 run completed',
+    'notification.completed.body': 'Run {id} finished successfully.',
+    'notification.failed.title': 'k6 run finished with a failure',
+    'notification.failed.body': 'Run {id} ended with status {status}.',
 
     // Walkthrough — UI step explanations (English)
     'walk.stepNavAria': 'Walkthrough steps',
@@ -512,6 +522,16 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'drawer.title': 'Einstellungen',
     'drawer.section.language': 'Sprache',
     'drawer.lang.hint.default': 'Standard',
+    'drawer.section.notifications': 'Benachrichtigungen',
+    'drawer.notifications.enabled': 'Browser-Benachrichtigungen',
+    'drawer.notifications.enabled.hint': 'Desktop-Benachrichtigung anzeigen, wenn ein k6-Lauf endet.',
+    'drawer.notifications.onSuccess': 'Bei erfolgreichem Abschluss',
+    'drawer.notifications.onFailure': 'Bei Fehler (FAILED, STOPPED, ABORTED)',
+    'drawer.notifications.permission.denied': 'Benachrichtigungen sind im Browser blockiert. Aktiviere sie in den Website-Einstellungen, um diese Funktion zu nutzen.',
+    'notification.completed.title': 'k6-Lauf abgeschlossen',
+    'notification.completed.body': 'Lauf {id} wurde erfolgreich beendet.',
+    'notification.failed.title': 'k6-Lauf mit Fehler beendet',
+    'notification.failed.body': 'Lauf {id} endete mit Status {status}.',
 
     // Doc popup
     'doc.popup.search': 'Im Dokument suchen…',

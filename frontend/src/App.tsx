@@ -6,6 +6,12 @@ import {
   removeAllOtherFailed,
   removeRun,
 } from './runDashboard.ts'
+import {
+  detectTerminalTransitions,
+  loadNotificationSettings,
+  saveNotificationSettings,
+  type NotificationSettings,
+} from './runNotifications.ts'
 import './App.css'
 import { TestRunReportPage } from './TestRunReport.tsx'
 import {
@@ -18,7 +24,7 @@ import {
 import { buildRunMenuItems, type MenuItem } from './runMenuItems.ts'
 import { MenuItemIcon } from './runMenuIcons.tsx'
 import { TopToolbar, type ToolbarDocId } from './TopToolbar.tsx'
-import { SettingsDrawer } from './SettingsDrawer.tsx'
+import { SettingsDrawer, type NotificationPermissionState } from './SettingsDrawer.tsx'
 import { DocPopup } from './DocPopup.tsx'
 import { WikiPopup } from './WikiPopup.tsx'
 import { useLanguage, LanguageProvider } from './useLanguage.tsx'
@@ -54,6 +60,54 @@ import { type FetchedSpecification, validateSpecificationUrl } from './specifica
 import { fetchWithRetry } from './retryFetch.ts'
 
 type ImportResponse = ImportedSpecification & { message?: string }
+
+/**
+ * Reads the current browser-level Notification permission. Falls
+ * back to `'default'` when `Notification` is not available (SSR,
+ * older browsers, jsdom). The loaded value feeds the disabled
+ * state of the Settings drawer so the user sees the actual
+ * browser state, not a stale cached value.
+ */
+function getNotificationPermission(): NotificationPermissionState {
+  if (typeof window === 'undefined' || typeof Notification === 'undefined') return 'default'
+  return Notification.permission as NotificationPermissionState
+}
+
+/**
+ * Fires one browser notification per terminal transition. The
+ * function is purely side-effecting; it never touches React
+ * state. Skips silently when the tab is in the foreground
+ * (the user can already see the badge colour change) and when
+ * the browser has not granted permission.
+ *
+ * The title / body are localised via the synchronous `translate`
+ * helper so the notification copy matches the active language
+ * even when the user switched languages mid-run.
+ */
+function fireTerminalNotifications(
+  transitions: { runId: string, kind: 'COMPLETED' | 'FAILED', status: TestRun['status'] }[],
+  language: SupportedLanguage,
+): void {
+  if (transitions.length === 0) return
+  if (typeof window === 'undefined' || typeof Notification === 'undefined') return
+  if (Notification.permission !== 'granted') return
+  if (!document.hidden) return
+  for (const entry of transitions) {
+    if (entry.kind === 'COMPLETED') {
+      // eslint-disable-next-line no-new
+      new Notification(translate(language, 'notification.completed.title'), {
+        body: translate(language, 'notification.completed.body', { id: entry.runId }),
+        tag: `lasttest-run-${entry.runId}`,
+      })
+    } else {
+      // eslint-disable-next-line no-new
+      new Notification(translate(language, 'notification.failed.title'), {
+        body: translate(language, 'notification.failed.body', { id: entry.runId, status: entry.status }),
+        tag: `lasttest-run-${entry.runId}`,
+      })
+    }
+  }
+}
 
 const sample = `openapi: 3.0.3
 info:
@@ -91,6 +145,52 @@ function LoadTestApp() {
   // the same language state and stay in sync.
   const { language, setLanguage } = useLanguage()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Browser-Notification settings. The settings live next to the
+  // drawer in App.tsx so the polling effect below can react to
+  // `in-flight → terminal` transitions on every refresh tick.
+  // Persistence mirrors the language hook: localStorage, versioned
+  // key, defaults on parse failure. The permission state is read
+  // from the browser on mount and refreshed after the user asks
+  // for permission.
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(
+    () => loadNotificationSettings(typeof localStorage !== 'undefined' ? localStorage : null),
+  )
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermissionState>(
+    () => getNotificationPermission(),
+  )
+
+  // Persist notification settings as soon as the user toggles
+  // anything. Mirror the language hook's failure-tolerance — a
+  // missing or full localStorage must not break the UI.
+  useEffect(() => {
+    saveNotificationSettings(notificationSettings, typeof localStorage !== 'undefined' ? localStorage : null)
+  }, [notificationSettings])
+
+  /**
+   * Asks the browser for Notification permission and, on
+   * `granted`, flips the master toggle to `true`. The user
+   * gesture originates in the Settings drawer (the master
+   * checkbox) — the actual `requestPermission()` call must run
+   * synchronously inside that handler, which is why the drawer
+   * forwards the gesture to this callback instead of asking
+   * directly.
+   */
+  async function handleRequestNotificationPermission() {
+    if (typeof window === 'undefined' || typeof Notification === 'undefined') return
+    let permission: NotificationPermission = 'default'
+    try {
+      permission = await Notification.requestPermission()
+    } catch {
+      // Some browsers (Safari prior to 16, embedded WebViews)
+      // throw rather than return 'denied'. Treat the throw as
+      // a denial and leave the toggle off.
+      permission = 'denied'
+    }
+    setNotificationPermission(permission as NotificationPermissionState)
+    if (permission === 'granted') {
+      setNotificationSettings({ ...notificationSettings, enabled: true })
+    }
+  }
   // Popup state for the top-toolbar nav buttons. `openDoc` is the
   // id of the popup currently shown (`'userGuide'`, `'readme'`,
   // `'wiki'`); `wikiInitialQuery` lets the toolbar seed the wiki
@@ -209,15 +309,23 @@ function LoadTestApp() {
         }),
       )
       setRuns(current => {
+        // Build the next snapshot first, then diff it against
+        // the current one. The pure helper in
+        // `runNotifications.ts` returns at most one entry per run
+        // and ignores post-terminal follow-up transitions
+        // (STOPPED → ABORTED) so the user gets exactly one
+        // notification per run.
         const next = { ...current }
         for (const run of updated) {
           if (run !== null) next[run.id] = run
         }
+        const transitions = detectTerminalTransitions(current, next, notificationSettings)
+        fireTerminalNotifications(transitions, language)
         return next
       })
     }, 1000)
     return () => window.clearTimeout(timer)
-  }, [runs])
+  }, [runs, notificationSettings, language])
 
   async function fetchSpecFromUrl(url: string): Promise<FetchedSpecification> {
     const response = await fetch('/api/specifications/fetch-url', {
@@ -805,8 +913,12 @@ function LoadTestApp() {
     <SettingsDrawer
       open={settingsOpen}
       language={language}
+      notificationSettings={notificationSettings}
+      notificationPermission={notificationPermission}
       onClose={() => setSettingsOpen(false)}
       onLanguageChange={setLanguage}
+      onNotificationSettingsChange={setNotificationSettings}
+      onRequestNotificationPermission={handleRequestNotificationPermission}
     />
     <DocPopup
       doc={openDoc === 'userGuide' || openDoc === 'readme' ? openDoc : null}

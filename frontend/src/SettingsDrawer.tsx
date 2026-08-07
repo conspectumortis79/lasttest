@@ -1,18 +1,44 @@
 // Slide-in settings drawer that opens from the right edge of the
-// viewport. Body exposes language selection (radio group) and a
-// placeholder Theme section so the drawer has more than one
-// setting. Backdrop click and Escape close the drawer.
+// viewport. Body exposes the language picker and a notifications
+// section that drives the browser's per-run completion
+// notifications. The actual Notification-Permission flow lives
+// in App.tsx (it touches the global `Notification` API); the
+// drawer just hands the user gesture up and renders the granted
+// / denied state the parent reports.
 import { useEffect, useRef } from 'react'
 import { SUPPORTED_LANGUAGES, translate, type SupportedLanguage } from './i18n.ts'
+import type { NotificationSettings } from './runNotifications.ts'
+
+export type NotificationPermissionState = 'default' | 'granted' | 'denied'
 
 type SettingsDrawerProps = {
   open: boolean
   language: SupportedLanguage
+  notificationSettings: NotificationSettings
+  notificationPermission: NotificationPermissionState
   onClose: () => void
   onLanguageChange: (next: SupportedLanguage) => void
+  onNotificationSettingsChange: (next: NotificationSettings) => void
+  /**
+   * Called when the user activates the master toggle. The parent
+   * asks the browser for Notification permission and only commits
+   * `enabled: true` when the permission is granted. When the
+   * browser denies, the parent keeps `enabled: false` and the
+   * drawer surfaces the hint.
+   */
+  onRequestNotificationPermission: () => void
 }
 
-export function SettingsDrawer({ open, language, onClose, onLanguageChange }: SettingsDrawerProps) {
+export function SettingsDrawer({
+  open,
+  language,
+  notificationSettings,
+  notificationPermission,
+  onClose,
+  onLanguageChange,
+  onNotificationSettingsChange,
+  onRequestNotificationPermission,
+}: SettingsDrawerProps) {
   const closeBtnRef = useRef<HTMLButtonElement | null>(null)
 
   // Move focus into the drawer when it opens so keyboard users
@@ -28,6 +54,10 @@ export function SettingsDrawer({ open, language, onClose, onLanguageChange }: Se
     document.addEventListener('keydown', handleKey)
     return () => document.removeEventListener('keydown', handleKey)
   }, [open, onClose])
+
+  const subCheckboxesDisabled = notificationPermission === 'denied'
+  const masterDisabled = notificationPermission === 'denied'
+  const subCheckboxesVisible = notificationSettings.enabled && !subCheckboxesDisabled
 
   return <>
     <div
@@ -62,7 +92,7 @@ export function SettingsDrawer({ open, language, onClose, onLanguageChange }: Se
           {SUPPORTED_LANGUAGES.map(entry => {
             const checked = entry.code === language
             const hint = entry.hint
-              ? translate(language, 'drawer.lang.hint.default' as 'drawer.lang.hint.default')
+              ? translate(language, 'drawer.lang.hint.default')
               : ''
             return <label
               key={entry.code}
@@ -83,6 +113,71 @@ export function SettingsDrawer({ open, language, onClose, onLanguageChange }: Se
               </span>
             </label>
           })}
+        </div>
+
+        <h3 className="drawer-section">{translate(language, 'drawer.section.notifications')}</h3>
+        <div className="drawer-checkbox-group" role="group" aria-label={translate(language, 'drawer.section.notifications')}>
+          <label className={`drawer-checkbox ${notificationSettings.enabled ? 'is-selected' : ''}`}>
+            <input
+              type="checkbox"
+              checked={notificationSettings.enabled}
+              disabled={masterDisabled}
+              onChange={event => {
+                if (event.target.checked) {
+                  // Hand the user gesture up so App.tsx can call
+                  // `Notification.requestPermission()`. The actual
+                  // commit of `enabled: true` happens in the parent
+                  // once the permission is `granted`.
+                  onRequestNotificationPermission()
+                } else {
+                  onNotificationSettingsChange({ ...notificationSettings, enabled: false })
+                }
+              }}
+            />
+            <span className="drawer-checkbox-text">
+              <span className="drawer-checkbox-label">{translate(language, 'drawer.notifications.enabled')}</span>
+              <span className="drawer-checkbox-hint">{translate(language, 'drawer.notifications.enabled.hint')}</span>
+            </span>
+          </label>
+          {subCheckboxesVisible
+            ? <>
+              <label
+                className={`drawer-checkbox drawer-checkbox-sub ${notificationSettings.onSuccess ? 'is-selected' : ''}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={notificationSettings.onSuccess}
+                  onChange={() => onNotificationSettingsChange({
+                    ...notificationSettings,
+                    onSuccess: !notificationSettings.onSuccess,
+                  })}
+                />
+                <span className="drawer-checkbox-text">
+                  <span className="drawer-checkbox-label">{translate(language, 'drawer.notifications.onSuccess')}</span>
+                </span>
+              </label>
+              <label
+                className={`drawer-checkbox drawer-checkbox-sub ${notificationSettings.onFailure ? 'is-selected' : ''}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={notificationSettings.onFailure}
+                  onChange={() => onNotificationSettingsChange({
+                    ...notificationSettings,
+                    onFailure: !notificationSettings.onFailure,
+                  })}
+                />
+                <span className="drawer-checkbox-text">
+                  <span className="drawer-checkbox-label">{translate(language, 'drawer.notifications.onFailure')}</span>
+                </span>
+              </label>
+            </>
+            : null}
+          {notificationPermission === 'denied'
+            ? <p className="drawer-checkbox-warning" role="status">
+              {translate(language, 'drawer.notifications.permission.denied')}
+            </p>
+            : null}
         </div>
       </div>
     </aside>
