@@ -131,6 +131,14 @@ export function DocPopup({ doc, language, onClose, strings }: DocPopupProps) {
   const closeRef = useRef<HTMLButtonElement | null>(null)
   const [search, setSearch] = useState('')
   const [hits, setHits] = useState(0)
+  // Zero-based index of the currently-focused hit in the
+  // highlighted `<mark>` list. We track this in state instead of
+  // trying to infer it from `document.activeElement`: after the
+  // search auto-scrolls to the first hit the focused element is
+  // still the search input, so an activeElement lookup would
+  // always return -1 and every "next" press would jump back to
+  // hit 0 (and every "prev" press would jump to the last hit).
+  const [currentHitIndex, setCurrentHitIndex] = useState(0)
   // External focus request for the walkthrough: when set, the
   // walkthrough switches its active step to this id. The DocPopup
   // increments a counter (rather than toggling the same value) so
@@ -153,6 +161,7 @@ export function DocPopup({ doc, language, onClose, strings }: DocPopupProps) {
     if (!open) return
     setSearch('')
     setHits(0)
+    setCurrentHitIndex(0)
     setFocusStepRaw(null)
   }, [open, doc, language])
 
@@ -179,6 +188,7 @@ export function DocPopup({ doc, language, onClose, strings }: DocPopupProps) {
     const q = value.trim()
     if (!q) {
       setHits(0)
+      setCurrentHitIndex(0)
       return
     }
     const regex = buildSearchRegex(q)
@@ -191,8 +201,11 @@ export function DocPopup({ doc, language, onClose, strings }: DocPopupProps) {
     // highlight class that the prev/next buttons use, so the
     // visible feedback is identical.
     if (count > 0) {
+      setCurrentHitIndex(0)
       const first = body.querySelector<HTMLElement>(`mark.${HIGHLIGHT_CLASS}`) ?? null
       if (first) scrollToMatch(first, walkthroughActiveStep, setFocusStep)
+    } else {
+      setCurrentHitIndex(0)
     }
   }, [walkthroughActiveStep, setFocusStep])
 
@@ -201,14 +214,24 @@ export function DocPopup({ doc, language, onClose, strings }: DocPopupProps) {
     if (!body) return
     const hits = collectHits(body)
     if (!hits.length) return
-    const first = hits[0]!
-    const last = hits[hits.length - 1]!
-    const current = document.activeElement
-    let idx = hits.findIndex(h => h === current || h.contains(current))
-    if (idx === -1) idx = direction === 1 ? -1 : hits.length
-    const next = hits[Math.max(0, Math.min(hits.length - 1, idx + direction))] ?? first ?? last
+    // Cycle through the hits by computing the next index from
+    // `currentHitIndex` rather than trying to derive it from
+    // `document.activeElement`. The browser focus stays on the
+    // search input, so an activeElement lookup would always miss
+    // and the previous implementation always jumped to hit 0
+    // ("next") or the last hit ("prev"). We clamp into
+    // [0, hits.length) so a stale index from before a re-search
+    // cannot send us out of bounds.
+    const length = hits.length
+    const baseIndex = currentHitIndex >= 0 && currentHitIndex < length ? currentHitIndex : 0
+    const nextIndex = direction === 1
+      ? (baseIndex + 1) % length
+      : (baseIndex - 1 + length) % length
+    const next = hits[nextIndex]
+    if (next === undefined) return
+    setCurrentHitIndex(nextIndex)
     scrollToMatch(next, walkthroughActiveStep, setFocusStep)
-  }, [walkthroughActiveStep, setFocusStep])
+  }, [currentHitIndex, walkthroughActiveStep, setFocusStep])
 
   const title = doc ? docTitle(doc, language) : ''
   const fileName = doc ? docFileName(doc) : ''
