@@ -973,11 +973,28 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 
 /* ---- Result-Header, Notice und Foot (Pass + Fail nach k6-Abschluss) ---- */
 
+/* Header row that carries the BESTANDEN / FAILED / STOPPED / ABORTED
+   pill, the Exit-Code caption, the optional stop reason and the
+   "Ausführlicher k6-Testbericht" link (right-aligned). `flex-end`
+   keeps every child's bottom edge on the same baseline so the
+   bigger `.report-btn` (its own padding/font-size) hangs down from
+   the same line as the small status pill — the visual goal stated
+   in the request: "Die Unterkante des ausführlicher k6-Testbericht
+   soll dabei auf höhe der Unterkante vom bestanden-Badge links
+   sein." */
 .run-result-head {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: .65rem;
   margin: .9rem 0 .55rem;
+}
+
+/* Pushes the report link to the right edge of the row. Combined
+   with the parent's `align-items: flex-end` the link's bottom edge
+   sits exactly on the bottom edge of the status pill, which is
+   what the request asks for. */
+.run-result-head .report-btn {
+  margin-left: auto;
 }
 .status-badge {
   padding: .2rem .6rem;

@@ -76,9 +76,17 @@ export function RunProgress({ run, now }: RunProgressProps) {
 type RunSummaryProps = {
   run: TestRun
   lang: SupportedLanguage
+  /**
+   * Render the „Ausführlicher k6-Testbericht" link in the
+   * ResultHeader row (right-aligned, bottom-edge aligned with the
+   * status pill). Only the dashboard in App.tsx needs this — the
+   * full report view in TestRunReport.tsx already lives behind
+   * that link and must not show it again.
+   */
+  showReportButton?: boolean
 }
 
-export function RunSummary({ run, lang }: RunSummaryProps) {
+export function RunSummary({ run, lang, showReportButton }: RunSummaryProps) {
   const summary = parseK6Summary(run)
   if (!summary) {
     return <div className="run-summary-empty">{translate(lang, 'result.noData')}</div>
@@ -100,7 +108,7 @@ export function RunSummary({ run, lang }: RunSummaryProps) {
   const failedNames = threshold.failedMetrics
 
   return <>
-    <ResultHeader passed={passed} run={run} lang={lang} />
+    <ResultHeader passed={passed} run={run} lang={lang} showReportButton={showReportButton} />
     <ThresholdNotice passed={passed} failedMetrics={failedNames} run={run} lang={lang} />
     {noRequests && <div className="run-summary-empty warning">{translate(lang, 'result.noRequests')}</div>}
     <div className="run-summary-cards">
@@ -125,9 +133,17 @@ type ResultHeaderProps = {
   passed: boolean | null
   run: TestRun
   lang: SupportedLanguage
+  /**
+   * When true, render the „Ausführlicher k6-Testbericht" link on
+   * the same row as the status pill. The link is right-aligned via
+   * `margin-left: auto` and its bottom edge is aligned with the
+   * pill's bottom edge via `align-items: flex-end` on
+   * `.run-result-head` (see App.css).
+   */
+  showReportButton?: boolean
 }
 
-function ResultHeader({ passed, run, lang }: ResultHeaderProps) {
+function ResultHeader({ passed, run, lang, showReportButton }: ResultHeaderProps) {
   const pill =
     run.status === 'STOPPED'
       ? { className: 'is-stopped', text: translate(lang, 'status.STOPPED') }
@@ -145,6 +161,9 @@ function ResultHeader({ passed, run, lang }: ResultHeaderProps) {
         : translate(lang, 'status.cancelled.sigterm', { time: formatTimestamp(run.cancelledAt) })
       }
     </span>}
+    {showReportButton && (
+      <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">{translate(lang, 'report.open')}</a>
+    )}
   </div>
 }
 
@@ -215,11 +234,15 @@ function ThresholdNotice({ passed, failedMetrics, run, lang }: ThresholdNoticePr
 
 // ---- ResultFoot removed ----------------------------------------------------
 //
-// The report button has moved to the card header in App.tsx
-// (`.result-header-actions`) and sits there in its own row,
-// right-aligned directly under the run ID. The k6 console output
-// and the k6 JSON raw-data details therefore regain the full card
-// width in `.result-extras`.
+// The report button has moved from its own header row into
+// `ResultHeader` (next to the BESTANDEN / ABGEBROCHEN pill) so it
+// sits on the same horizontal line as the status badge and stays
+// right-aligned via `margin-left: auto`. The k6 console output and
+// the k6 JSON raw-data details therefore keep the full card width
+// in `.result-extras`. The button is only rendered when the caller
+// passes `showReportButton` (currently only the dashboard in
+// App.tsx does; the full report view in TestRunReport.tsx leaves
+// it off because the report itself is the link's destination).
 
 function parseFinishedAt(run: TestRun): number {
   const finished = new Date(run.finishedAt ?? '').getTime()
@@ -263,11 +286,17 @@ type RunFailureProps = {
   run: TestRun
   reason: FailureReason
   lang: SupportedLanguage
+  /**
+   * Forwarded to `ResultHeader` so the dashboard can keep its
+   * „Ausführlicher k6-Testbericht" link visible next to the
+   * FAIL/ABORTED pill; the full report view leaves it off.
+   */
+  showReportButton?: boolean
 }
 
-export function RunFailure({ run, reason, lang }: RunFailureProps) {
+export function RunFailure({ run, reason, lang, showReportButton }: RunFailureProps) {
   return <>
-    <ResultHeader passed={false} run={run} lang={lang} />
+    <ResultHeader passed={false} run={run} lang={lang} showReportButton={showReportButton} />
     <ThresholdNotice passed={false} failedMetrics={summariseThresholds(run).failedMetrics} run={run} lang={lang} />
     <div className={`run-failure kind-${reason.kind}`} role="alert">
       <div className="run-failure-head">
@@ -309,9 +338,18 @@ type RunStatusViewProps = {
    * site has already preprocessed `run.error` (e.g. to truncate it).
    */
   reasonOverride?: FailureReason
+  /**
+   * Render the „Ausführlicher k6-Testbericht" link in the terminal
+   * ResultHeader row. The dashboard (App.tsx) sets this to true so
+   * the link sits on the same vertical line as the status pill
+   * (BESTANDEN / ABGEBROCHEN / …) and is right-aligned; the full
+   * report view (TestRunReport.tsx) leaves it off because the
+   * report itself is the link's destination.
+   */
+  showReportButton?: boolean
 }
 
-export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) {
+export function RunStatusView({ run, now, reasonOverride, showReportButton }: RunStatusViewProps) {
   // The report reacts to the live language choice. Reading the
   // hook here means the user can flip the language in the
   // settings drawer while looking at a finished run and the
@@ -331,13 +369,13 @@ export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) 
     return <RunProgress run={run} now={now} />
   }
   if (run.status === 'COMPLETED') {
-    return <RunSummary run={run} lang={lang} />
+    return <RunSummary run={run} lang={lang} showReportButton={showReportButton} />
   }
   if (run.status === 'STOPPED') {
     // Graceful stop acknowledged by k6: same shape as COMPLETED
     // but with a STOPPED pill so the user can tell that the run
     // did not run for its planned duration.
-    return <RunSummary run={run} lang={lang} />
+    return <RunSummary run={run} lang={lang} showReportButton={showReportButton} />
   }
   if (run.status === 'ABORTED') {
     // SIGKILL by the user — there are partial metrics at best
@@ -347,14 +385,14 @@ export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) 
     // so the call to RunFailure stays type-safe when no
     // classification was possible (e.g. error text was empty).
     const reason = reasonOverride ?? summariseFailure(run.error)
-    if (reason) return <RunFailure run={run} reason={reason} lang={lang} />
+    if (reason) return <RunFailure run={run} reason={reason} lang={lang} showReportButton={showReportButton} />
     const placeholder = {
       kind: 'process' as const,
       summary: translate(lang, 'summary.runtime') === 'Runtime' ? 'k6 aborted' : 'k6 abgebrochen',
       detail: translate(lang, 'result.aborted.detail'),
       hint: 'Wenn die k6-Ausgabe unvollständig erscheint, ist das erwartet — der Prozess wurde sofort beendet.',
     }
-    return <RunFailure run={run} reason={placeholder} lang={lang} />
+    return <RunFailure run={run} reason={placeholder} lang={lang} showReportButton={showReportButton} />
   }
   if (run.status === 'FAILED') {
     // A FAILED run can have two very different causes:
@@ -373,12 +411,12 @@ export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) 
     // server actually answered, so the threshold metrics are
     // meaningful and should stay visible.
     const hardFailure = reason && HARD_FAILURE_KINDS.has(reason.kind)
-    if (hardFailure) return <RunFailure run={run} reason={reason} lang={lang} />
+    if (hardFailure) return <RunFailure run={run} reason={reason} lang={lang} showReportButton={showReportButton} />
     const threshold = summariseThresholds(run)
     if (threshold.failedMetrics.length > 0) {
-      return <RunSummary run={run} lang={lang} />
+      return <RunSummary run={run} lang={lang} showReportButton={showReportButton} />
     }
-    if (reason) return <RunFailure run={run} reason={reason} lang={lang} />
+    if (reason) return <RunFailure run={run} reason={reason} lang={lang} showReportButton={showReportButton} />
   }
   return null
 }

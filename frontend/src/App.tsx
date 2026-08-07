@@ -853,15 +853,15 @@ function RunDetail({ run, runNow }: { run: TestRun, runNow: number }) {
   // Der Detail-Block zeigt den live-Status des aktuell gewählten
   // Runs. Der zugehörige Endpunkt steht bereits im Badge-Grid
   // darüber, also hier kein Duplikat — nur Status, Metriken und
-  // der Report-Button.
+  // der Report-Button. Der Report-Button lebt jetzt im
+  // ResultHeader (Bestanden / Abgebrochen-Pille), nicht mehr in
+  // einer eigenen Header-Zeile darüber. Über `showReportButton`
+  // teilen wir RunStatusView mit, dass wir den Link einblenden
+  // wollen — der Vollreport in TestRunReport.tsx lässt das Flag
+  // weg, weil der Report selbst das Link-Ziel ist.
   return <>
-    <header className="result-detail-header">
-      {(run.status === 'COMPLETED' || run.status === 'FAILED') && (
-        <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">{translate(language, 'report.open')}</a>
-      )}
-    </header>
     <TestRunSummary run={run} />
-    <RunStatusView run={run} now={runNow} />
+    <RunStatusView run={run} now={runNow} showReportButton />
     {((run.consoleOutput ?? run.error) || run.summary) && <div className="result-extras">
       <div className="result-extras-details">
         {(run.consoleOutput ?? run.error) && <details><summary>{translate(language, 'report.console')}</summary><pre>{run.consoleOutput ?? run.error}</pre></details>}
