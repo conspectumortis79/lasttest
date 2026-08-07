@@ -142,6 +142,48 @@ button:disabled { opacity: .5; cursor: wait; }
 .drawer-radio-label { font-size: 13px; color: #fff; }
 .drawer-radio-hint { font-size: 11px; color: #93a2b8; }
 
+/* Notifications section: a checkbox-group mirrors the radio-group
+   layout so the language picker and the notification toggles feel
+   like siblings. The "sub" variant indents the success/failure
+   sub-toggles so the hierarchy is visible at a glance. */
+.drawer-checkbox-group {
+  display: grid;
+  gap: 6px;
+}
+.drawer-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #233049;
+  border-radius: 8px;
+  background: #121a27d9;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.drawer-checkbox:hover { border-color: #7d63ff; }
+.drawer-checkbox.is-selected { border-color: #7d63ff; background: rgba(125, 99, 255, .07); }
+.drawer-checkbox-sub { margin-left: 18px; padding: 8px 12px; }
+.drawer-checkbox input {
+  accent-color: #7d63ff;
+  margin: 2px 0 0;
+  flex-shrink: 0;
+}
+.drawer-checkbox input[disabled] { cursor: not-allowed; }
+.drawer-checkbox-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.drawer-checkbox-label { font-size: 13px; color: #fff; }
+.drawer-checkbox-hint { font-size: 11px; color: #93a2b8; }
+.drawer-checkbox-warning {
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #f0c98a;
+  background: rgba(240, 201, 138, .08);
+  border: 1px solid rgba(240, 201, 138, .35);
+  border-radius: 6px;
+}
+
 /* The toolbar is the first i18n surface; when it grows past a
    narrow viewport, the nav links collapse so the lang pill and
    settings button stay reachable. */
