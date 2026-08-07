@@ -1,6 +1,15 @@
-import { deepEqual, equal } from 'node:assert/strict'
+import { deepEqual, equal, ok } from 'node:assert/strict'
 import { test } from 'node:test'
-import { isInFlight, isTerminalRun, pickActiveRunId, sortRunsByCreatedAt } from './runDashboard.ts'
+import {
+  hasOtherFailedRun,
+  isInFlight,
+  isTerminalRun,
+  pickActiveRunId,
+  pickActiveRunIdAfterStart,
+  removeAllOtherFailed,
+  removeRun,
+  sortRunsByCreatedAt,
+} from './runDashboard.ts'
 import type { TestRun } from './k6Report.ts'
 
 function makeRun(id: string, createdAt: string, status: 'QUEUED' | 'RUNNING' | 'STOPPING' | 'COMPLETED' | 'FAILED' | 'STOPPED' | 'ABORTED' = 'RUNNING'): TestRun {
@@ -133,4 +142,122 @@ test('pickActiveRunId returns the newest run when nothing is in flight', () => {
 test('pickActiveRunId returns undefined when no run has been started yet', () => {
   equal(pickActiveRunId({}, undefined), undefined)
   equal(pickActiveRunId({}, 'stale-id'), undefined)
+})
+
+test('pickActiveRunIdAfterStart selects the run the user just started', () => {
+  // The reported bug: the user clicks "k6-Lasttest starten" a
+  // second time, the new badge appears in the grid — but the
+  // focus stays on the previous (finished) run, so nothing in
+  // the UI signals that a new test is running. The freshly
+  // started run must win the selection.
+  const runs = {
+    old: makeRun('old', '2026-01-01T00:00:00Z', 'COMPLETED'),
+    fresh: makeRun('fresh', '2026-01-02T00:00:00Z', 'QUEUED'),
+  }
+  equal(pickActiveRunIdAfterStart(runs, 'fresh', 'old'), 'fresh')
+})
+
+test('pickActiveRunIdAfterStart selects the started run even while an older one is still in flight', () => {
+  // Parallel runs: the previous run is still RUNNING, so the
+  // regular rule would keep it focused. Starting a new run is an
+  // explicit user action and must move the focus anyway.
+  const runs = {
+    old: makeRun('old', '2026-01-01T00:00:00Z', 'RUNNING'),
+    fresh: makeRun('fresh', '2026-01-02T00:00:00Z', 'QUEUED'),
+  }
+  equal(pickActiveRunIdAfterStart(runs, 'fresh', 'old'), 'fresh')
+})
+
+test('pickActiveRunIdAfterStart selects the started run when it is the first one', () => {
+  const runs = { fresh: makeRun('fresh', '2026-01-01T00:00:00Z', 'QUEUED') }
+  equal(pickActiveRunIdAfterStart(runs, 'fresh', undefined), 'fresh')
+})
+
+test('pickActiveRunIdAfterStart falls back to the regular rule when the started run is not in the map', () => {
+  // Defensive: the started run should always be in the map the
+  // caller just built, but the helper must never hand back a
+  // dangling id if that ever stops holding.
+  const runs = { old: makeRun('old', '2026-01-01T00:00:00Z', 'RUNNING') }
+  equal(pickActiveRunIdAfterStart(runs, 'missing', 'old'), 'old')
+  equal(pickActiveRunIdAfterStart(runs, 'missing', undefined), 'old')
+  equal(pickActiveRunIdAfterStart({}, 'missing', undefined), undefined)
+})
+
+test('removeRun drops the targeted id and keeps every other entry', () => {
+  const runs = {
+    a: makeRun('a', '2026-01-01T00:00:00Z', 'FAILED'),
+    b: makeRun('b', '2026-01-02T00:00:00Z', 'COMPLETED'),
+    c: makeRun('c', '2026-01-03T00:00:00Z', 'STOPPED'),
+  }
+  const next = removeRun(runs, 'b')
+  deepEqual(Object.keys(next).sort(), ['a', 'c'])
+  // The returned map is a fresh reference — the caller can
+  // rely on referential inequality to short-circuit React
+  // memoisation when nothing actually changed.
+  ok(next !== runs)
+})
+
+test('removeRun on an unknown id is a no-op and returns the same reference', () => {
+  const runs = { a: makeRun('a', '2026-01-01T00:00:00Z') }
+  equal(removeRun(runs, 'unknown'), runs)
+})
+
+test('removeAllOtherFailed keeps the focused run and drops every other FAILED run', () => {
+  const runs = {
+    keep: makeRun('keep', '2026-01-04T00:00:00Z', 'FAILED'),
+    failed: makeRun('failed', '2026-01-03T00:00:00Z', 'FAILED'),
+    completed: makeRun('completed', '2026-01-02T00:00:00Z', 'COMPLETED'),
+    stopped: makeRun('stopped', '2026-01-01T00:00:00Z', 'STOPPED'),
+  }
+  const next = removeAllOtherFailed(runs, 'keep')
+  const ids = Object.keys(next).sort()
+  deepEqual(ids, ['completed', 'keep', 'stopped'])
+  // STOPPED is intentionally preserved — the user asked for
+  // the FAILED status, not for every non-success outcome.
+})
+
+test('removeAllOtherFailed on an empty map returns an empty map', () => {
+  deepEqual(removeAllOtherFailed({}, 'anything'), {})
+})
+
+test('removeAllOtherFailed leaves the map unchanged when there are no FAILED runs', () => {
+  const runs = {
+    a: makeRun('a', '2026-01-01T00:00:00Z', 'COMPLETED'),
+    b: makeRun('b', '2026-01-02T00:00:00Z', 'STOPPED'),
+    keep: makeRun('keep', '2026-01-03T00:00:00Z', 'COMPLETED'),
+  }
+  const next = removeAllOtherFailed(runs, 'keep')
+  deepEqual(Object.keys(next).sort(), ['a', 'b', 'keep'])
+})
+
+test('hasOtherFailedRun is true when a second FAILED run is in the map', () => {
+  const runs = {
+    me: makeRun('me', '2026-01-01T00:00:00Z', 'FAILED'),
+    other: makeRun('other', '2026-01-02T00:00:00Z', 'FAILED'),
+  }
+  equal(hasOtherFailedRun(runs, 'me'), true)
+})
+
+test('hasOtherFailedRun is false when the current id is the only FAILED run', () => {
+  const runs = {
+    me: makeRun('me', '2026-01-01T00:00:00Z', 'FAILED'),
+    completed: makeRun('completed', '2026-01-02T00:00:00Z', 'COMPLETED'),
+  }
+  equal(hasOtherFailedRun(runs, 'me'), false)
+})
+
+test('hasOtherFailedRun ignores non-FAILED sibling statuses', () => {
+  // STOPPED, ABORTED and COMPLETED siblings must not flip the
+  // predicate — only FAILED counts.
+  const runs = {
+    me: makeRun('me', '2026-01-01T00:00:00Z', 'COMPLETED'),
+    stopped: makeRun('stopped', '2026-01-02T00:00:00Z', 'STOPPED'),
+    aborted: makeRun('aborted', '2026-01-03T00:00:00Z', 'ABORTED'),
+    completed: makeRun('completed', '2026-01-04T00:00:00Z', 'COMPLETED'),
+  }
+  equal(hasOtherFailedRun(runs, 'me'), false)
+})
+
+test('hasOtherFailedRun on an empty map returns false', () => {
+  equal(hasOtherFailedRun({}, 'anything'), false)
 })

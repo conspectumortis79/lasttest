@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { isTerminalRun, pickActiveRunId } from './runDashboard.ts'
+import {
+  isTerminalRun,
+  pickActiveRunId,
+  pickActiveRunIdAfterStart,
+  removeAllOtherFailed,
+  removeRun,
+} from './runDashboard.ts'
 import './App.css'
 import { TestRunReportPage } from './TestRunReport.tsx'
 import {
@@ -11,6 +17,11 @@ import {
 } from './k6Report.ts'
 import { buildRunMenuItems, type MenuItem } from './runMenuItems.ts'
 import { MenuItemIcon } from './runMenuIcons.tsx'
+import { TopToolbar } from './TopToolbar.tsx'
+import { SettingsDrawer } from './SettingsDrawer.tsx'
+import { DocPopup } from './DocPopup.tsx'
+import { useLanguage, LanguageProvider } from './useLanguage.tsx'
+import { translate, formatters, type SupportedLanguage } from './i18n.ts'
 import { RunStatusView } from './runStatusView.tsx'
 import { useRunClock } from './useRunClock.ts'
 import { LoadProfileEditor } from './LoadProfileEditor.tsx'
@@ -64,10 +75,22 @@ paths:
 
 function App() {
   const reportRunId = new URLSearchParams(window.location.search).get('report')
-  return reportRunId ? <TestRunReportPage runId={reportRunId} /> : <LoadTestApp />
+  return (
+    <LanguageProvider>
+      {reportRunId ? <TestRunReportPage runId={reportRunId} /> : <LoadTestApp />}
+    </LanguageProvider>
+  )
 }
 
 function LoadTestApp() {
+  // i18n chrome (toolbar + settings drawer). The hook lives here
+  // — not in a deeper component — so the toolbar and drawer share
+  // the same language state and stay in sync.
+  const { language, setLanguage } = useLanguage()
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  // Markdown popup: id of the doc currently shown (null = closed).
+  const [openDoc, setOpenDoc] = useState<'userGuide' | 'readme' | null>(null)
+  const handleOpenDoc = (doc: 'userGuide' | 'readme') => setOpenDoc(doc)
   const [specification, setSpecification] = useState(sample)
   const [specificationUrl, setSpecificationUrl] = useState('')
   const [imported, setImported] = useState<ImportedSpecification>()
@@ -192,7 +215,7 @@ function LoadTestApp() {
       body: JSON.stringify({ url }),
     })
     const data = await response.json()
-    if (!response.ok) throw new Error(data.message ?? 'Abruf fehlgeschlagen')
+    if (!response.ok) throw new Error(data.message ?? translate(language, 'error.fetchFailed'))
     return data as FetchedSpecification
   }
 
@@ -231,7 +254,7 @@ function LoadTestApp() {
       setOperationSettings(createOperationSettings(data.operations))
       setCollapsed(new Set(data.operations.map(operation => operation.operationId)))
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Import fehlgeschlagen')
+      setError(cause instanceof Error ? cause.message : translate(language, 'error.importFailed'))
     } finally {
       setBusy(false)
     }
@@ -265,13 +288,15 @@ function LoadTestApp() {
       // immediately sees the live status. The map shape keeps
       // parallel runs in their own slots without overwriting each
       // other. The active-run selection rule lives in
-      // [pickActiveRunId] (unit-tested) so the focus logic stays
-      // observable in isolation.
+      // [pickActiveRunIdAfterStart] (unit-tested) so the focus
+      // logic stays observable in isolation: the run the user just
+      // started always wins the selection, even when an older
+      // (finished) run was still focused.
       const nextRuns = { ...runs, [data.id]: data }
       setRuns(nextRuns)
-      setActiveRunId(pickActiveRunId(nextRuns, activeRunId))
+      setActiveRunId(pickActiveRunIdAfterStart(nextRuns, data.id, activeRunId))
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Test konnte nicht gestartet werden')
+      setError(cause instanceof Error ? cause.message : translate(language, 'error.startTestFailed'))
     } finally {
       setBusy(false)
     }
@@ -425,6 +450,36 @@ function LoadTestApp() {
       case 'rerun':
         await rerunRun(run.id)
         return
+      case 'remove-from-view':
+        // Frontend-only cleanup: drops the clicked badge from
+        // the in-memory runs map. The backend still holds the
+        // run; a page refresh would re-hydrate it from
+        // /api/test-runs. The dashboard focus is re-evaluated
+        // via pickActiveRunId so the detail card keeps pointing
+        // at a run that is still in the map — or hides if no
+        // run is left. The remaining badges re-sort on the next
+        // render via the existing sortRunsByCreatedAt call in
+        // the grid.
+        setRuns(current => {
+          const next = removeRun(current, run.id)
+          setActiveRunId(pickActiveRunId(next, activeRunId))
+          return next
+        })
+        return
+      case 'remove-all-other-failed':
+        // Bulk frontend cleanup: keeps the clicked badge but
+        // drops every other FAILED run from the in-memory map.
+        // STOPPED and ABORTED are intentionally preserved — the
+        // user asked for "failed" (the FAILED status), not for
+        // every non-success outcome. Focus is re-evaluated so
+        // the detail card survives the removal even when the
+        // previously-focused run was a different FAILED badge.
+        setRuns(current => {
+          const next = removeAllOtherFailed(current, run.id)
+          setActiveRunId(pickActiveRunId(next, activeRunId))
+          return next
+        })
+        return
     }
   }
 
@@ -432,7 +487,7 @@ function LoadTestApp() {
     try {
       await copyTextToClipboard(text)
     } catch (cause) {
-      setRunActionError(cause instanceof Error ? cause.message : 'Kopieren in die Zwischenablage fehlgeschlagen.')
+      setRunActionError(cause instanceof Error ? cause.message : translate(language, 'error.copyFailed'))
     }
   }
 
@@ -476,7 +531,7 @@ function LoadTestApp() {
         setRuns(current => ({ ...current, [updated.id]: updated }))
       }
     } catch (cause) {
-      setRunActionError(cause instanceof Error ? cause.message : 'Cancel fehlgeschlagen.')
+      setRunActionError(cause instanceof Error ? cause.message : translate(language, 'error.cancelFailedNoStatus'))
     }
   }
 
@@ -490,53 +545,56 @@ function LoadTestApp() {
       const fresh = (await response.json()) as TestRun
       // Add the new run to the dashboard and surface it as the
       // active one — same shape as `startTest()` so the user
-      // sees a consistent focus transfer.
+      // sees a consistent focus transfer: the rerun badge is
+      // selected right away instead of leaving the focus on the
+      // run it was started from.
       setRuns(current => {
         const next = { ...current, [fresh.id]: fresh }
-        setActiveRunId(pickActiveRunId(next, activeRunId))
+        setActiveRunId(pickActiveRunIdAfterStart(next, fresh.id, activeRunId))
         return next
       })
     } catch (cause) {
-      setRunActionError(cause instanceof Error ? cause.message : 'Rerun fehlgeschlagen.')
+      setRunActionError(cause instanceof Error ? cause.message : translate(language, 'error.rerunFailedNoStatus'))
     }
   }
 
-  return <main>
+  return <>
+    <TopToolbar language={language} onOpenSettings={() => setSettingsOpen(true)} onOpenDoc={handleOpenDoc} />
+    <main>
     <header>
       <div className="mark">k6</div>
-      <div><h1>lasttest</h1><p>Swagger / OpenAPI importieren. Endpunkte konfigurieren. Last messen.</p></div>
+      <div><h1>lasttest</h1><p>{translate(language, 'app.tagline')}</p></div>
     </header>
 
     <section className="card">
       <div className="step">1</div>
-      <h2>Swagger / OpenAPI-Dokumentation</h2>
+      <h2>{translate(language, 'spec.card.title')}</h2>
       <label className="url-import">
-        <span className="url-label">URL zur Swagger-UI oder OpenAPI-Spezifikation</span>
+        <span className="url-label">{translate(language, 'spec.url.label')}</span>
         <input
           type="url"
-          placeholder="https://api.example.com/swagger-ui oder http://localhost:8286/demo-swagger-ui"
-          aria-label="URL zur Swagger-UI oder OpenAPI-Spezifikation"
+          placeholder={translate(language, 'spec.url.placeholder')}
+          aria-label={translate(language, 'spec.url.label')}
           value={specificationUrl}
           onChange={event => setSpecificationUrl(event.target.value)}
           spellCheck={false}
         />
         <small>
-          Wird beim „Validieren &amp; importieren“ geladen. Die Spezifikation wird zusätzlich in den Textbereich
-          übernommen und kann vor dem Import noch bearbeitet werden.
+          {translate(language, 'spec.url.hint')}
         </small>
       </label>
-      <textarea className="specification-textarea" aria-label="Swagger / OpenAPI-Dokumentation" value={specification} onChange={event => setSpecification(event.target.value)} spellCheck={false} />
+      <textarea className="specification-textarea" aria-label={translate(language, 'spec.card.title')} value={specification} onChange={event => setSpecification(event.target.value)} spellCheck={false} />
       <div className="actions">
-        <label className="upload">Datei öffnen<input type="file" accept=".yaml,.yml,.json" onChange={async event => {
+        <label className="upload">{translate(language, 'spec.file.open')}<input type="file" accept=".yaml,.yml,.json" onChange={async event => {
           const file = event.target.files?.[0]
           if (file) setSpecification(await file.text())
         }} /></label>
-        <button onClick={importSpecification} disabled={busy}>Validieren & importieren</button>
+        <button onClick={importSpecification} disabled={busy}>{translate(language, 'spec.import')}</button>
       </div>
       {lastFetched && (
         <p className="fetched-info" aria-live="polite">
-          Geladen aus <code>{lastFetched.resolvedUrl}</code>
-          {lastFetched.source === 'swagger-ui' ? ' (über Swagger-UI)' : ' (direkt)'}.
+          {translate(language, 'spec.fetched.from', { url: '' }).trim()} <code>{lastFetched.resolvedUrl}</code>
+          {lastFetched.source === 'swagger-ui' ? translate(language, 'spec.fetched.swaggerUi') : translate(language, 'spec.fetched.direct')}.
         </p>
       )}
     </section>
@@ -548,7 +606,7 @@ function LoadTestApp() {
       <section className="card">
         <div className="step">2</div>
         <h2>{imported.title} <small>v{imported.version}</small></h2>
-        <p>{imported.operations.length} Operationen erkannt. Parameter, JSON-Body und Bearer-Token können je Endpunkt angepasst werden.</p>
+        <p>{translate(language, 'ops.opsDetected', { n: imported.operations.length })}</p>
         <div className="operations">
           {imported.operations.map(operation => <OperationEditor
             key={operation.operationId}
@@ -556,6 +614,7 @@ function LoadTestApp() {
             selected={selected.has(operation.operationId)}
             settings={operationSettings[operation.operationId]}
             expanded={!collapsed.has(operation.operationId)}
+            language={language}
             onToggle={() => toggle(operation.operationId)}
             onToggleExpand={() => toggleExpanded(operation.operationId)}
             onPayloadField={(payloadIndex, field, patch) => updatePayloadField(operation.operationId, payloadIndex, field, patch)}
@@ -567,12 +626,12 @@ function LoadTestApp() {
 
       <section className="card">
         <div className="step">3</div>
-        <h2>Lastprofil</h2>
+        <h2>{translate(language, 'profile.card.title')}</h2>
         <div className="lastprofil-row">
           <div className="lastprofil-left">
             {hasMultipleServers(imported.servers) && (
               <div className="server-selector">
-                <label htmlFor="base-url-select">Server auswählen</label>
+                <label htmlFor="base-url-select">{translate(language, 'ops.serverSelector.label')}</label>
                 <select
                   id="base-url-select"
                   value={baseUrl}
@@ -591,13 +650,13 @@ function LoadTestApp() {
                     return options
                   })()}
                 </select>
-                <small>Die Eingabe unten überschreibt die Auswahl und erlaubt eigene URLs.</small>
+                <small>{translate(language, 'ops.serverSelector.hint')}</small>
               </div>
             )}
-            <label className="base-url-label">Base URL<input value={baseUrl} onChange={event => setBaseUrl(event.target.value)} /></label>
+            <label className="base-url-label">{translate(language, 'ops.baseUrl')}<input value={baseUrl} onChange={event => setBaseUrl(event.target.value)} /></label>
           </div>
           <fieldset className="strategy-box">
-            <legend className="sr-only">Payload-Strategie</legend>
+            <legend className="sr-only">{translate(language, 'ops.payloadStrategy')}</legend>
             <div className="strategy-box-title">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
                 <path d="M2 4h12M2 8h12M2 12h12" strokeLinecap="round" />
@@ -605,7 +664,7 @@ function LoadTestApp() {
                 <circle cx="10" cy="8" r="1.3" fill="currentColor" stroke="none" />
                 <circle cx="7" cy="12" r="1.3" fill="currentColor" stroke="none" />
               </svg>
-              <span>Payload-Strategie</span>
+              <span>{translate(language, 'ops.payloadStrategy')}</span>
             </div>
             <div className="strategy-options">
               <label>
@@ -617,8 +676,8 @@ function LoadTestApp() {
                   onChange={() => setLoadProfile({ ...loadProfile, payloadStrategy: 'sequential' })}
                 />
                 <span>
-                  <span className="opt-name">Sequenziell</span>
-                  <span className="opt-desc">1, 2, …, letzter, dann wieder 1 — Round-Robin mit Wrap-Around</span>
+                  <span className="opt-name">{translate(language, 'ops.payloadStrategy.sequential')}</span>
+                  <span className="opt-desc">{translate(language, 'ops.payloadStrategy.sequential.desc')}</span>
                 </span>
               </label>
               <label>
@@ -630,17 +689,25 @@ function LoadTestApp() {
                   onChange={() => setLoadProfile({ ...loadProfile, payloadStrategy: 'random' })}
                 />
                 <span>
-                  <span className="opt-name">Zufällig</span>
-                  <span className="opt-desc">pro Iteration ein zufälliger Payload aus dem Pool</span>
+                  <span className="opt-name">{translate(language, 'ops.payloadStrategy.random')}</span>
+                  <span className="opt-desc">{translate(language, 'ops.payloadStrategy.random.desc')}</span>
                 </span>
               </label>
             </div>
             <small className="strategy-box-hint">
-              Bei nur <code>1</code> Payload sind beide Modi identisch.
+              {(() => {
+                const template = translate(language, 'ops.payloadStrategy.hint', { n: 1 })
+                // Spring `1` into a <code>1</code> token so it is
+                // visually consistent with the rest of the app's
+                // mono-spaced code chips. The helper template just
+                // knows the literal character, not the markup.
+                const [before, after] = template.split('1')
+                return <>{before}<code>1</code>{after}</>
+              })()}
             </small>
           </fieldset>
         </div>
-        <LoadProfileEditor profile={loadProfile} onChange={setLoadProfile} disabled={busy} />
+        <LoadProfileEditor profile={loadProfile} language={language} onChange={setLoadProfile} disabled={busy} />
         {(() => {
           const selectedOperation = imported.operations.find(operation => selected.has(operation.operationId))
           const selectedValidation = selectedOperation
@@ -650,10 +717,10 @@ function LoadTestApp() {
           const hint = !selectedOperation
             ? undefined
             : hasValidationErrors
-              ? 'Bitte korrigiere die rot markierten Eingaben, bevor der Lasttest startet.'
+              ? translate(language, 'ops.validation.fixErrors')
               : selectedOperation.hasRequestBody
-                ? 'JSON-Body und Parameter werden gegen die OpenAPI-Spezifikation geprüft.'
-                : 'Parameter werden gegen die OpenAPI-Spezifikation geprüft.'
+                ? translate(language, 'ops.validation.hintWithBody')
+                : translate(language, 'ops.validation.hintNoBody')
           return <>
             {hasValidationErrors && <div className="error validation-summary" role="alert">{hint}</div>}
             {!hasValidationErrors && hint && <p className="validation-hint">{hint}</p>}
@@ -667,7 +734,7 @@ function LoadTestApp() {
       <header className="result-header">
         <div className="result-header-top">
           <div className="step">4</div>
-          <h2>Testläufe</h2>
+          <h2>{translate(language, 'run.card.title')}</h2>
         </div>
       </header>
 
@@ -675,7 +742,7 @@ function LoadTestApp() {
           own evenly-sized column. The badge is the focus target
           (klick- und tastaturbedienbar), so the user does not need a
           separate tab strip below. */}
-      <h3 className="run-grid-heading">Laufende &amp; erledigte Tests</h3>
+      <h3 className="run-grid-heading">{translate(language, 'run.grid.heading')}</h3>
       <div className="run-grid" role="tablist" aria-label="Testläufe">
         {Object.values(runs)
           .sort((a, b) => {
@@ -717,11 +784,34 @@ function LoadTestApp() {
     {runMenu && <RunContextMenu
       menu={runMenu}
       run={runs[runMenu.runId]}
+      runs={runs}
+      language={language}
       onAction={item => runMenuAction(runs[runMenu.runId]!, item)}
       onClose={() => setRunMenu(null)}
       menuRef={runMenuRef}
     />}
-  </main>
+    </main>
+    <SettingsDrawer
+      open={settingsOpen}
+      language={language}
+      onClose={() => setSettingsOpen(false)}
+      onLanguageChange={setLanguage}
+    />
+    <DocPopup
+      doc={openDoc}
+      language={language}
+      onClose={() => setOpenDoc(null)}
+      strings={{
+        search: translate(language, 'doc.popup.search'),
+        counterTemplate: hits => formatters.docPopupCounter[language](hits),
+        closeAria: translate(language, 'common.close'),
+        noResults: translate(language, 'doc.popup.noResults'),
+        prev: translate(language, 'doc.popup.prev'),
+        next: translate(language, 'doc.popup.next'),
+        dismiss: translate(language, 'doc.popup.close'),
+      }}
+    />
+  </>
 }
 
 /**
@@ -731,6 +821,7 @@ function LoadTestApp() {
  * simple.
  */
 function RunDetail({ run, runNow }: { run: TestRun, runNow: number }) {
+  const { language } = useLanguage()
   // Der Detail-Block zeigt den live-Status des aktuell gewählten
   // Runs. Der zugehörige Endpunkt steht bereits im Badge-Grid
   // darüber, also hier kein Duplikat — nur Status, Metriken und
@@ -738,15 +829,15 @@ function RunDetail({ run, runNow }: { run: TestRun, runNow: number }) {
   return <>
     <header className="result-detail-header">
       {(run.status === 'COMPLETED' || run.status === 'FAILED') && (
-        <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">Ausführlicher K6-Testbericht</a>
+        <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">{translate(language, 'report.open')}</a>
       )}
     </header>
     <TestRunSummary run={run} />
     <RunStatusView run={run} now={runNow} />
     {((run.consoleOutput ?? run.error) || run.summary) && <div className="result-extras">
       <div className="result-extras-details">
-        {(run.consoleOutput ?? run.error) && <details><summary>k6-Konsolenausgabe</summary><pre>{run.consoleOutput ?? run.error}</pre></details>}
-        {run.summary && <details><summary>k6-JSON-Rohdaten</summary><pre>{run.summary.raw}</pre></details>}
+        {(run.consoleOutput ?? run.error) && <details><summary>{translate(language, 'report.console')}</summary><pre>{run.consoleOutput ?? run.error}</pre></details>}
+        {run.summary && <details><summary>{translate(language, 'report.json')}</summary><pre>{run.summary.raw}</pre></details>}
       </div>
     </div>}
   </>
@@ -813,6 +904,7 @@ type OperationEditorProps = {
   selected: boolean
   settings?: OperationSettings
   expanded: boolean
+  language: SupportedLanguage
   onToggle: () => void
   onToggleExpand: () => void
   onPayloadField: (payloadIndex: number, field: 'parameterValues' | 'requestBodyJson' | 'bearerToken', patch: Record<string, string> | string) => void
@@ -823,6 +915,7 @@ type OperationEditorProps = {
 function OperationEditor({
   operation,
   selected,
+  language,
   expanded,
   settings,
   onToggle,
@@ -874,8 +967,8 @@ function OperationEditor({
       className="expand-toggle"
       onClick={onToggleExpand}
       aria-expanded={expanded}
-      aria-label={expanded ? 'Endpunkt einklappen' : 'Endpunkt aufklappen'}
-      title={expanded ? 'Einklappen' : 'Aufklappen'}
+      aria-label={translate(language, expanded ? 'ops.card.collapse.aria' : 'ops.card.expand.aria')}
+      title={translate(language, expanded ? 'ops.card.collapse.title' : 'ops.card.expand.title')}
     >
       <svg className="chevron" viewBox="0 0 12 12" aria-hidden="true">
         {expanded
@@ -886,11 +979,10 @@ function OperationEditor({
 
     {expanded && <div className="payload-pool">
       <p className="pool-hint">
-        Jede Zeile ist ein kompletter Datensatz. Mit der Strategie im Lastprofil
-        wählst du, ob der Pool der Reihe nach durchlaufen oder zufällig gezogen wird.
+        {translate(language, 'ops.pool.hint')}
       </p>
       <div className="pool-table-wrap">
-        <table className="pool-table" aria-label={`Payload-Pool für ${operation.operationId}`}>
+        <table className="pool-table" aria-label={translate(language, 'ops.pool.tableAria', { operationId: operation.operationId })}>
           <thead>
             <tr>
               <th className="pool-col-index">#</th>
@@ -902,14 +994,14 @@ function OperationEditor({
                     <div className="pool-th-meta">
                       <span className="pool-th-loc">{parameter.location}</span>
                       {typeLabel && <span className="type-hint">{typeLabel}</span>}
-                      {parameter.required && <em className="pool-th-req">Pflicht</em>}
+                      {parameter.required && <em className="pool-th-req">{translate(language, 'ops.payload.required')}</em>}
                     </div>
                   </th>
                 )
               })}
-              {operation.hasRequestBody && <th className="col-wide">JSON-Body</th>}
+              {operation.hasRequestBody && <th className="col-wide">{translate(language, 'report.payload.jsonSummary')}</th>}
               <th>Bearer</th>
-              <th className="col-actions" aria-label="Aktionen"></th>
+              <th className="col-actions" aria-label={translate(language, 'profile.stages.action') as string}></th>
             </tr>
           </thead>
           <tbody>
@@ -953,8 +1045,8 @@ function OperationEditor({
                     <input
                       type="password"
                       autoComplete="off"
-                      aria-label={`${operation.operationId} · Payload ${payloadIndex + 1}: Bearer-Token`}
-                      placeholder={operation.bearerAuth ? 'Token' : 'Optional'}
+                      aria-label={translate(language, 'ops.bearer.cellAria', { operationId: operation.operationId, n: payloadIndex + 1 })}
+                      placeholder={translate(language, operation.bearerAuth ? 'ops.bearer.placeholder' : 'ops.bearer.placeholderOptional')}
                       value={payload.bearerToken}
                       onChange={event => onPayloadField(payloadIndex, 'bearerToken', event.target.value)}
                     />
@@ -963,10 +1055,10 @@ function OperationEditor({
                     <button
                       type="button"
                       className="row-remove"
-                      aria-label={`Payload ${payloadIndex + 1} entfernen`}
+                      aria-label={translate(language, 'ops.pool.removeAria', { n: payloadIndex + 1 })}
                       disabled={settings.payloads.length <= 1}
                       onClick={() => onRemovePayload(payloadIndex)}
-                      title={settings.payloads.length <= 1 ? 'Mindestens 1 Payload erforderlich' : 'Payload entfernen'}
+                      title={translate(language, settings.payloads.length <= 1 ? 'ops.pool.removeDisabledTitle' : 'ops.pool.removeEnabledTitle')}
                     >×</button>
                   </td>
                 </tr>
@@ -975,10 +1067,10 @@ function OperationEditor({
           </tbody>
         </table>
       </div>
-      <button type="button" className="pool-add" onClick={onAddPayload}>+ Payload hinzufügen</button>
+      <button type="button" className="pool-add" onClick={onAddPayload}>{translate(language, 'ops.pool.add')}</button>
       {hasPoolError && (
         <div className="parameter-error" role="alert" style={{ marginTop: '.6rem' }}>
-          {firstProblem!.bodyError ?? `Payload ${firstProblem!.index + 1}: Pflichtparameter oder Body ist ungültig.`}
+          {firstProblem!.bodyError ?? translate(language, 'ops.pool.rowErrorFallback', { n: firstProblem!.index + 1 })}
         </div>
       )}
     </div>}
@@ -1016,12 +1108,16 @@ function formatParameterType(schema: unknown): string | undefined {
 function RunContextMenu({
   menu,
   run,
+  runs,
+  language,
   onAction,
   onClose,
   menuRef,
 }: {
   menu: { runId: string, x: number, y: number }
   run: TestRun | undefined
+  runs: Record<string, TestRun>
+  language: SupportedLanguage
   onAction: (item: MenuItem) => void
   onClose: () => void
   menuRef: React.RefObject<HTMLDivElement | null>
@@ -1030,7 +1126,12 @@ function RunContextMenu({
   // disappears from the map, but render nothing if it slipped
   // through.
   if (!run) { onClose(); return null }
-  const groups = buildRunMenuItems(run)
+  // The full runs map is passed so the menu can disable the
+  // "remove all other failed" item when no other FAILED run
+  // is in the dashboard. Without it the user could click the
+  // action with no visible effect. The active language comes
+  // from the toolbar so the labels match the rest of the UI.
+  const groups = buildRunMenuItems(run, language, runs)
   // Clamp the position so the menu stays inside the viewport.
   // We use 8px padding from the viewport edge so the rounded
   // corners and the focus ring do not get clipped.

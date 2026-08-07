@@ -19,6 +19,8 @@ export const menuIconPaths: Record<MenuItemAction, string> = {
   stop: 'M6 6h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z',
   'force-abort': 'M12 3a9 9 0 1 0 9 9 M5.6 5.6l12.8 12.8',
   rerun: 'M3 12a9 9 0 0 1 15.5-6.3L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-15.5 6.3L3 16 M3 21v-5h5',
+  'remove-from-view': 'M4 7h16 M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2 M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13 M10 11v6 M14 11v6',
+  'remove-all-other-failed': 'M3 6h18 M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2 M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14 M9 10v8 M12 10v8 M15 10v8',
 }
 
 export const KNOWN_MENU_ACTIONS: MenuItemAction[] = [
@@ -30,4 +32,6 @@ export const KNOWN_MENU_ACTIONS: MenuItemAction[] = [
   'stop',
   'force-abort',
   'rerun',
+  'remove-from-view',
+  'remove-all-other-failed',
 ]

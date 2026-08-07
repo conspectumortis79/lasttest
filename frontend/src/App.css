@@ -4,6 +4,576 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradie
 button, input, textarea { font: inherit; }
 button, .upload { border: 0; border-radius: 9px; background: #7d63ff; color: white; font-weight: 700; padding: .75rem 1.1rem; cursor: pointer; }
 button:disabled { opacity: .5; cursor: wait; }
+
+/* ============================================================================
+   Top toolbar (sticky brand + nav + lang pill + settings gear)
+   ============================================================================ */
+.top-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 24px;
+  background: rgba(11, 16, 24, .85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid #233049;
+  font-size: 13px;
+}
+.top-toolbar-brand {
+  display: inline-flex; align-items: center; gap: 10px;
+  color: #fff; font-weight: 700;
+}
+.top-toolbar-mark {
+  width: 28px; height: 28px; border-radius: 8px;
+  display: grid; place-items: center;
+  font-weight: 900; font-size: 13px; color: #0b1018;
+  background: linear-gradient(135deg, #55e6c1, #9df0db);
+}
+.top-toolbar-nav {
+  display: flex; gap: 4px;
+  margin-left: 12px;
+  color: #93a2b8;
+}
+.top-toolbar-nav-link {
+  padding: 6px 10px; border-radius: 6px;
+  color: inherit; text-decoration: none;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.top-toolbar-nav-link:focus-visible { outline: 2px solid #7d63ff; outline-offset: 2px; }
+.top-toolbar-nav-link:hover { background: #1a2638; color: #fff; }
+.top-toolbar-nav-link.is-active { background: #1a2638; color: #fff; }
+.top-toolbar-spacer { flex: 1; }
+
+.lang-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 8px;
+  background: #1a2638;
+  border: 1px solid #233049;
+  font-size: 12px; font-weight: 700; color: #dbe5f3;
+  user-select: none;
+  transition: border-color .12s, color .12s;
+}
+.lang-pill:hover { border-color: #7d63ff; color: #fff; }
+.lang-pill-flag { font-size: 13px; line-height: 1; }
+.lang-pill-code { letter-spacing: .04rem; }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 8px;
+  background: #1a2638;
+  border: 1px solid #233049;
+  color: #dbe5f3;
+  cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
+}
+.icon-btn:hover { border-color: #7d63ff; color: #fff; }
+.icon-btn:focus-visible { outline: 2px solid #7d63ff; outline-offset: 2px; }
+.icon-btn-glyph {
+  /* Without flex-shrink: 0, an SVG inside the icon-btn flex container
+     collapses to 0×16 px because the parent (`display: inline-flex`
+     with `flex-shrink: 1` default) shrinks the item past its CSS
+     `width`. The same pattern was losing the gear icon in the
+     settings button. Setting `flex-shrink: 0` keeps the declared
+     16×16 px box. */
+  width: 16px; height: 16px; flex-shrink: 0;
+}
+
+/* ============================================================================
+   Settings drawer (right-edge slide-in)
+   ============================================================================ */
+.drawer-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, .5);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease;
+  z-index: 40;
+}
+.drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
+
+.drawer {
+  position: fixed; top: 0; right: 0;
+  height: 100vh; width: 340px;
+  background: #111b29;
+  border-left: 1px solid #233049;
+  transform: translateX(100%);
+  transition: transform .25s ease;
+  z-index: 41;
+  display: flex; flex-direction: column;
+  box-shadow: -16px 0 40px rgba(0, 0, 0, .4);
+  color: #dbe5f3;
+}
+.drawer.is-open { transform: translateX(0); }
+.drawer-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #233049;
+}
+.drawer-title { margin: 0; font-size: 14px; flex: 1; color: #fff; }
+.drawer-body { padding: 16px; overflow: auto; flex: 1; }
+.drawer-section {
+  margin: 14px 0 8px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+  color: #93a2b8; font-weight: 700;
+}
+.drawer-section:first-child { margin-top: 0; }
+.drawer-radio-group {
+  display: grid; gap: 6px;
+}
+.drawer-radio {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #233049; border-radius: 8px;
+  background: #121a27d9;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.drawer-radio:hover { border-color: #7d63ff; }
+.drawer-radio.is-selected { border-color: #7d63ff; background: rgba(125, 99, 255, .07); }
+.drawer-radio input { accent-color: #7d63ff; margin: 0; flex-shrink: 0; }
+.drawer-radio input[disabled] { cursor: not-allowed; }
+.drawer-radio-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.drawer-radio-label { font-size: 13px; color: #fff; }
+.drawer-radio-hint { font-size: 11px; color: #93a2b8; }
+
+/* The toolbar is the first i18n surface; when it grows past a
+   narrow viewport, the nav links collapse so the lang pill and
+   settings button stay reachable. */
+@media (max-width: 720px) {
+  .top-toolbar-nav { display: none; }
+}
+
+/* ============================================================================
+   Doc popup (centered modal for User Guide / README)
+   ============================================================================ */
+.doc-popup-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, .6);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease;
+  z-index: 60;
+}
+.doc-popup-backdrop.is-open { opacity: 1; pointer-events: auto; }
+
+.doc-popup {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -46%) scale(.98);
+  width: min(960px, 92vw);
+  max-height: 84vh;
+  background: #111b29;
+  border: 1px solid #233049;
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .55);
+  display: flex; flex-direction: column;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s, transform .2s;
+  z-index: 61;
+  color: #dbe5f3;
+  overflow: hidden;
+}
+.doc-popup.is-open {
+  opacity: 1; pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.doc-popup-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #233049;
+  flex-shrink: 0;
+}
+.doc-popup-title {
+  margin: 0; font-size: 15px; font-weight: 600; color: #fff;
+  display: inline-flex; align-items: baseline; gap: 8px;
+  flex-shrink: 0;
+}
+.doc-popup-filename {
+  color: #93a2b8; font-weight: 500; font-size: 11px;
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.doc-popup-search {
+  position: relative; flex: 1; max-width: 360px;
+}
+.doc-popup-search input {
+  width: 100%;
+  padding: 7px 10px 7px 32px;
+  background: #0d1322;
+  border: 1px solid #233049;
+  border-radius: 7px;
+  color: #dbe5f3;
+  font-size: 13px;
+  font: inherit;
+  font-size: 13px;
+}
+.doc-popup-search input:focus {
+  outline: 2px solid #7d63ff;
+  outline-offset: 0;
+  border-color: #7d63ff;
+}
+.doc-popup-search-icon {
+  position: absolute; left: 10px; top: 50%;
+  transform: translateY(-50%);
+  width: 14px; height: 14px;
+  stroke: #93a2b8; stroke-width: 1.5; fill: none;
+}
+
+.doc-popup-counter {
+  font-size: 11px; color: #93a2b8;
+  white-space: nowrap;
+  min-width: 60px;
+  text-align: right;
+}
+
+.doc-popup-nav {
+  width: 28px; height: 28px;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid #233049;
+  border-radius: 6px;
+  color: #dbe5f3;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.doc-popup-nav svg { flex-shrink: 0; }
+.doc-popup-nav:hover:not(:disabled) { border-color: #7d63ff; color: #fff; }
+.doc-popup-nav:disabled {
+  /* Disabled nav buttons (prev/next) had `opacity: .4` on a #233049
+     border, which left them as near-invisible empty squares.
+     Lift the border to a hue the user can actually see and add
+     a subtle background so the glyph still reads. */
+  cursor: not-allowed;
+  border-color: #3a4d6b;
+  background: #182338;
+  color: #6b7c95;
+}
+.doc-popup-nav:focus-visible { outline: 2px solid #7d63ff; outline-offset: 2px; }
+
+.doc-popup-close {
+  width: 32px; height: 32px;
+  flex-shrink: 0;
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid #3a4d6b;
+  border-radius: 7px;
+  color: #dbe5f3;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: border-color .12s, color .12s, background-color .12s;
+}
+.doc-popup-close svg { flex-shrink: 0; }
+.doc-popup-close:hover { border-color: #7d63ff; color: #fff; background: #1a2638; }
+.doc-popup-close:focus-visible { outline: 2px solid #7d63ff; outline-offset: 2px; }
+
+.doc-popup-body {
+  padding: 24px 32px;
+  overflow: auto;
+  flex: 1;
+  color: #e8edf5;
+  font-size: 14px;
+  line-height: 1.65;
+  scroll-behavior: smooth;
+}
+.doc-popup-body h1 {
+  font-size: 1.7rem; margin: .2rem 0 1rem;
+  padding-bottom: .6rem;
+  border-bottom: 1px solid #233049;
+  color: #fff;
+}
+.doc-popup-body h2 {
+  font-size: 1.25rem; margin: 1.6rem 0 .6rem;
+  color: #fff;
+  scroll-margin-top: 80px;
+}
+.doc-popup-body h3 {
+  font-size: 1.05rem; margin: 1.3rem 0 .4rem;
+  color: #c5b8ff;
+  scroll-margin-top: 80px;
+}
+.doc-popup-body p { margin: .6rem 0; }
+.doc-popup-body code {
+  background: #1a1d3a;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #c5b8ff;
+  font-size: .9em;
+}
+.doc-popup-body pre {
+  background: #080d14;
+  border: 1px solid #233049;
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+  font-size: 12.5px;
+  color: #dbe5f3;
+}
+.doc-popup-body pre code { background: transparent; padding: 0; color: inherit; }
+.doc-popup-body ul, .doc-popup-body ol { margin: .6rem 0; padding-left: 1.4rem; }
+.doc-popup-body li { margin: .25rem 0; }
+.doc-popup-body a { color: #7d63ff; text-decoration: none; }
+.doc-popup-body a:hover { text-decoration: underline; }
+.doc-popup-body .doc-svg {
+  /* Wraps every inline / block <svg> embedded in the docs. The
+     container centres the diagram, gives it a dark card look
+     consistent with the rest of the doc chrome, and prevents
+     oversized viewBoxes from stretching the popup body. */
+  display: block;
+  margin: 1rem auto;
+  padding: 1rem;
+  background: #0b1220;
+  border: 1px solid #2c3a52;
+  border-radius: 10px;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.doc-popup-body .doc-svg svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+.doc-popup-body blockquote {
+  margin: .8rem 0; padding: .6rem 1rem;
+  border-left: 3px solid #7d63ff;
+  background: rgba(125, 99, 255, .05);
+  border-radius: 0 6px 6px 0;
+  color: #93a2b8;
+}
+.doc-popup-body mark.doc-search-hit {
+  background: rgba(245, 158, 11, .4);
+  color: #fff;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+.doc-popup-body mark.doc-search-hit--active {
+  background: rgba(245, 158, 11, .8);
+  outline: 1px solid #f59e0b;
+}
+
+.doc-popup-footer {
+  padding: 8px 18px;
+  border-top: 1px solid #233049;
+  font-size: 11px;
+  color: #93a2b8;
+  display: flex; flex-wrap: wrap; gap: 14px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.doc-popup-footer kbd {
+  font-family: ui-monospace, Menlo, monospace;
+  padding: 1px 6px;
+  border: 1px solid #233049;
+  border-radius: 4px;
+  background: #0d1322;
+  color: #dbe5f3;
+  font-size: 10px;
+}
+
+/* ============================================================================
+   User Guide walkthrough (shown in the DocPopup when "userGuide" is open)
+   ============================================================================ */
+.doc-popup-body--walkthrough {
+  padding: 0;
+  background: #0d1322;
+}
+
+.walkthrough {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.walkthrough-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #233049;
+  background: #0d1322;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.walkthrough-tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 12px 18px;
+  color: #93a2b8;
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.walkthrough-tab:hover {
+  background: #1a2638;
+  color: #fff;
+}
+.walkthrough-tab.is-active {
+  color: #fff;
+  border-bottom-color: #7d63ff;
+  background: #121a27d9;
+}
+.walkthrough-tab-num {
+  display: inline-grid;
+  place-items: center;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: #22304a;
+  color: #79e6c8;
+  font-weight: 800;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.walkthrough-tab.is-active .walkthrough-tab-num {
+  background: #7d63ff;
+  color: #fff;
+}
+.walkthrough-tab-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.walkthrough-stage {
+  padding: 22px 28px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.walkthrough-title {
+  margin: 0 0 6px;
+  font-size: 18px;
+  color: #fff;
+  font-weight: 700;
+}
+.walkthrough-intro {
+  margin: 0 0 22px;
+  color: #93a2b8;
+  font-size: 14px;
+  line-height: 1.55;
+  max-width: 78ch;
+}
+
+.walkthrough-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .walkthrough-grid { grid-template-columns: 1fr; }
+}
+
+.walkthrough-illustration {
+  background: #0b1018;
+  border: 1px solid #233049;
+  border-radius: 10px;
+  padding: 8px;
+  overflow: hidden;
+}
+.walk-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+.walkthrough-annotations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.walkthrough-ann {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #111b29;
+  border: 1px solid #233049;
+  border-radius: 8px;
+}
+.walkthrough-ann-n {
+  display: inline-grid;
+  place-items: center;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: #7d63ff;
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.walkthrough-ann-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.walkthrough-ann-body strong {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+.walkthrough-ann-body span {
+  color: #b6c2d4;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.walkthrough-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #233049;
+}
+.walkthrough-nav-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid #233049;
+  border-radius: 8px;
+  padding: 9px 14px;
+  color: #dbe5f3;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 45%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background .15s, border-color .15s;
+}
+.walkthrough-nav-btn:hover:not(:disabled) {
+  background: #1a2638;
+  border-color: #7d63ff;
+}
+.walkthrough-nav-btn:disabled { opacity: .4; cursor: not-allowed; }
+.walkthrough-nav-btn.is-primary {
+  background: #2a2660;
+  border-color: #7d63ff;
+  color: #fff;
+}
+.walkthrough-nav-btn.is-primary:hover:not(:disabled) {
+  background: #3a3580;
+}
+
+/* Reduce the popup body padding when the walkthrough takes over
+   the full canvas. Search box is hidden in the walkthrough mode. */
+.doc-popup-body--walkthrough { padding: 0; }
+
 main { width: min(1060px, calc(100% - 2rem)); margin: 0 auto; padding: 3rem 0 6rem; }
 header { display: flex; align-items: center; gap: 1rem; margin-bottom: 2.5rem; }
 header h1 { margin: 0; font-size: 2.6rem; letter-spacing: -.08rem; }

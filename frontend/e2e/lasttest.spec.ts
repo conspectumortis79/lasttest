@@ -2217,3 +2217,37 @@ test('shows parallel runs in the dashboard and lets the user switch between them
   await expect(firstTab).toHaveAttribute('aria-selected', 'true')
   await expect(firstTab).toHaveClass(/active/)
 })
+
+test('selects the badge of the k6 run that was just started', async ({ page }) => {
+  // Two sequential k6 runs do not fit into the default 30 s budget.
+  test.setTimeout(180_000)
+  // Regression test: starting a second run from the *same* import
+  // (no re-import in between, so the run list accumulates) used to
+  // leave the focus on the first — already finished — run. The new
+  // badge showed up unselected and nothing in the UI signalled that
+  // a fresh k6 load test had started.
+  //
+  // The shared helpers address the UI by its German labels, so the
+  // language is pinned before the app boots (the default is 'en',
+  // see useLanguage.tsx).
+  await page.addInitScript(() => localStorage.setItem('lasttest.language', 'de'))
+  await page.reload()
+
+  await startDemoRun(page, 'GET /products', '1', '2')
+  const firstBadge = page.getByRole('tab').first()
+  await expect(firstBadge).toHaveAttribute('aria-selected', 'true')
+  const firstRunTitle = await firstBadge.getAttribute('title')
+
+  // Wait for the first run to settle, then start the next one
+  // without touching the import — the dashboard now holds two runs.
+  await expect(page.getByRole('tab', { name: /COMPLETED|FAILED/ }).first()).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  // Two badges, and the selected one must be the new run, not the
+  // finished one the user was looking at before.
+  await expect(page.getByRole('tab')).toHaveCount(2)
+  const selected = page.locator('.run-badge[aria-selected="true"]')
+  await expect(selected).toHaveCount(1)
+  await expect(selected).toHaveClass(/active/)
+  expect(await selected.getAttribute('title')).not.toBe(firstRunTitle)
+})
