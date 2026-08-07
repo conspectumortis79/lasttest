@@ -1,29 +1,35 @@
 // Sticky top toolbar shown above the main app body. Contains
 // brand, primary nav (Dashboard is a placeholder, User Guide and
-// README open a markdown popup), a passive language pill and the
-// settings button (which opens the SettingsDrawer). Kept as a
-// separate component so the App.tsx body stays focused on the
-// load-test flow and the toolbar can be reordered or hidden
-// without touching the rest of the app.
+// README open a markdown popup, Wiki opens the bilingual glossary
+// popup), a passive language pill and the settings button (which
+// opens the SettingsDrawer). Kept as a separate component so the
+// App.tsx body stays focused on the load-test flow and the
+// toolbar can be reordered or hidden without touching the rest of
+// the app.
 import { SUPPORTED_LANGUAGES, translate, type SupportedLanguage } from './i18n.ts'
+
+export type ToolbarDocId = 'userGuide' | 'readme' | 'wiki'
 
 type TopToolbarProps = {
   language: SupportedLanguage
   onOpenSettings: () => void
-  onOpenDoc: (doc: 'userGuide' | 'readme') => void
+  onOpenDoc: (doc: ToolbarDocId, initialQuery?: string) => void
 }
 
 type NavEntry = {
   /** i18n key for the visible label. */
-  key: 'toolbar.nav.dashboard' | 'toolbar.nav.userGuide' | 'toolbar.nav.readme'
-  /** When set, the entry opens a markdown popup instead of being a placeholder link. */
-  openDoc?: 'userGuide' | 'readme'
+  key: 'toolbar.nav.dashboard' | 'toolbar.nav.userGuide' | 'toolbar.nav.readme' | 'toolbar.nav.wiki'
+  /** When set, the entry opens a popup instead of being a placeholder link. */
+  openDoc?: ToolbarDocId
+  /** Optional initial query — only honoured by the wiki entry. */
+  initialQuery?: string
 }
 
 const NAV_ITEMS: ReadonlyArray<NavEntry> = [
   { key: 'toolbar.nav.dashboard' },
   { key: 'toolbar.nav.userGuide', openDoc: 'userGuide' },
   { key: 'toolbar.nav.readme', openDoc: 'readme' },
+  { key: 'toolbar.nav.wiki', openDoc: 'wiki' },
 ]
 
 export function TopToolbar({ language, onOpenSettings, onOpenDoc }: TopToolbarProps) {
@@ -43,7 +49,7 @@ export function TopToolbar({ language, onOpenSettings, onOpenDoc }: TopToolbarPr
               key={item.key}
               type="button"
               className="top-toolbar-nav-link"
-              onClick={() => onOpenDoc(item.openDoc!)}
+              onClick={() => onOpenDoc(item.openDoc!, item.initialQuery)}
             >
               {translate(language, item.key)}
             </button>

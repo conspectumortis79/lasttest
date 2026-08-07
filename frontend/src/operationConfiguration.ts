@@ -128,6 +128,49 @@ export function parameterKey(parameter: Pick<ApiParameter, 'location' | 'name'>)
   return `${parameter.location}:${parameter.name}`
 }
 
+/**
+ * Decides whether a parameter should be rendered as a plain text input
+ * or as a select dropdown in the payload pool editor. The OpenAPI
+ * specs in the wild declare two patterns that fit a dropdown better
+ * than a free-text field:
+ *
+ *  - `type: boolean` — the only sane values are "true" and "false".
+ *    A text input invites typos ("True", "yes"); a dropdown removes
+ *    the ambiguity entirely and keeps the wire format stable because
+ *    we still emit the literal string ("true" / "false") that k6 is
+ *    happy to parse.
+ *  - `enum: [...]` (string, integer or number) — the spec restricts
+ *    the value to a fixed list, so a dropdown is the natural UX.
+ *
+ * Anything else (string without enum, integer, number, string with a
+ * `format: uuid|email|date|...`) stays a text input — the validator
+ * is already in charge of the format check.
+ */
+export type ParameterInputKind = 'text' | 'enum' | 'boolean'
+
+export function parameterInputKind(schema: ParameterSchema | undefined): ParameterInputKind {
+  if (schema === undefined) return 'text'
+  if (schema.enum !== undefined && schema.enum.length > 0) return 'enum'
+  if (schema.type === 'boolean') return 'boolean'
+  return 'text'
+}
+
+/**
+ * Returns the list of option values a parameter exposes as `<select>`
+ * options. Empty parameters with no `example` start with the empty
+ * string as the default so the user is forced to make an explicit
+ * choice. For `boolean` we always emit `["true", "false"]` (in that
+ * order) — k6 conventionally treats `true` as the affirmative value.
+ *
+ * The list preserves the order OpenAPI declares enum members in, so
+ * the dropdown mirrors what the spec author wrote.
+ */
+export function parameterSelectOptions(parameter: ApiParameter, kind: ParameterInputKind): string[] {
+  if (kind === 'enum' && parameter.schema?.enum) return parameter.schema.enum
+  if (kind === 'boolean') return ['true', 'false']
+  return []
+}
+
 export function createOperationSettings(operations: Operation[]): Record<string, OperationSettings> {
   return Object.fromEntries(
     operations.map(operation => {

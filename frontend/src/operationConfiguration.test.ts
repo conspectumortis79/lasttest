@@ -6,11 +6,14 @@ import {
   hasMultipleServers,
   isOperationValid,
   migrateOperationSettings,
+  parameterInputKind,
   parameterKey,
+  parameterSelectOptions,
   validateJsonValue,
   validateOperationSettings,
   validateParameterValue,
   validateRequestBody,
+  type ApiParameter,
   type ApiServer,
   type Operation,
   type OperationPayload,
@@ -735,4 +738,68 @@ test('validateOperationSettings allows an empty optional request body', () => {
   const settings: OperationSettings = { payloads: [], parameterValues: {}, requestBodyJson: '', bearerToken: '' }
 
   deepEqual(validateOperationSettings(operation, settings), { parameterErrors: {} })
+})
+
+test('parameterInputKind falls back to text when no schema is given', () => {
+  equal(parameterInputKind(undefined), 'text')
+  equal(parameterInputKind({ type: 'string' }), 'text')
+  equal(parameterInputKind({ type: 'string', format: 'uuid' }), 'text')
+  equal(parameterInputKind({ type: 'integer' }), 'text')
+  equal(parameterInputKind({ type: 'number', format: 'float' }), 'text')
+  // An empty enum is treated as "no enum" — the dropdown would have
+  // nothing to offer.
+  equal(parameterInputKind({ type: 'string', enum: [] }), 'text')
+})
+
+test('parameterInputKind returns enum when the schema declares an enum', () => {
+  // The enum wins over the underlying type: a numeric enum must still
+  // render as a dropdown (with the values the spec author wrote).
+  equal(parameterInputKind({ type: 'string', enum: ['a', 'b'] }), 'enum')
+  equal(parameterInputKind({ type: 'integer', enum: ['1', '2', '3'] }), 'enum')
+  equal(parameterInputKind({ type: 'boolean', enum: ['true'] }), 'enum')
+})
+
+test('parameterInputKind returns boolean for unconstrained boolean schemas', () => {
+  equal(parameterInputKind({ type: 'boolean' }), 'boolean')
+  equal(parameterInputKind({ type: 'boolean', format: 'something' }), 'boolean')
+})
+
+test('parameterSelectOptions returns the enum values in declaration order', () => {
+  const parameter: ApiParameter = {
+    name: 'status',
+    location: 'query',
+    required: false,
+    example: 'pending',
+    schema: { type: 'string', enum: ['pending', 'active', 'archived'] },
+  }
+  deepEqual(parameterSelectOptions(parameter, 'enum'), ['pending', 'active', 'archived'])
+})
+
+test('parameterSelectOptions returns true then false for boolean parameters', () => {
+  const parameter: ApiParameter = {
+    name: 'verbose',
+    location: 'query',
+    required: false,
+    example: true,
+    schema: { type: 'boolean' },
+  }
+  deepEqual(parameterSelectOptions(parameter, 'boolean'), ['true', 'false'])
+  // The helper ignores schema.enum when the kind is 'boolean' to
+  // keep the dropdown deterministic ("true" first, "false" second).
+  const withEnum: ApiParameter = {
+    ...parameter,
+    schema: { type: 'boolean', enum: ['false', 'true'] },
+  }
+  deepEqual(parameterSelectOptions(withEnum, 'enum'), ['false', 'true'])
+})
+
+test('parameterSelectOptions returns an empty list for text-kind parameters', () => {
+  const parameter: ApiParameter = {
+    name: 'id',
+    location: 'path',
+    required: true,
+    example: 7,
+    schema: { type: 'integer' },
+  }
+  deepEqual(parameterSelectOptions(parameter, 'text'), [])
 })
