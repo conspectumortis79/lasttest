@@ -35,6 +35,48 @@ export type NotificationSettings = {
   onFailure: boolean
 }
 
+/**
+ * Browser-level Notification permission, as exposed by the
+ * `Notification` constructor. The `'default'` value is the
+ * initial state when the user has not yet been asked.
+ */
+export type NotificationPermissionState = 'default' | 'granted' | 'denied'
+
+/**
+ * Pure projection of the Settings-drawer state for the
+ * notifications section. Pulled out of the JSX so it can be
+ * unit-tested without a React renderer and so the drawer itself
+ * stays a dumb formatter.
+ *
+ * Rules:
+ *  - Master toggle is disabled when the browser has denied
+ *    permission — blocking the toggle is the only honest signal
+ *    because flipping it would have no effect.
+ *  - Sub-checkboxes are visible only when the master is *on* and
+ *    permission is not denied; the user picks the granularity
+ *    they want to be notified about.
+ *  - The warning banner is shown exactly when the browser has
+ *    denied permission, regardless of the toggle state, so old
+ *    persisted `enabled: true` settings do not silently break.
+ */
+export type NotificationSectionState = {
+  masterDisabled: boolean
+  subCheckboxesVisible: boolean
+  warningVisible: boolean
+}
+
+export function computeNotificationSectionState(
+  settings: NotificationSettings,
+  permission: NotificationPermissionState,
+): NotificationSectionState {
+  const masterDisabled = permission === 'denied'
+  return {
+    masterDisabled,
+    subCheckboxesVisible: settings.enabled && permission !== 'denied',
+    warningVisible: permission === 'denied',
+  }
+}
+
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   enabled: false,
   onSuccess: false,

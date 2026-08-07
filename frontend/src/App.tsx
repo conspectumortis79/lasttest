@@ -10,6 +10,7 @@ import {
   detectTerminalTransitions,
   loadNotificationSettings,
   saveNotificationSettings,
+  type NotificationPermissionState,
   type NotificationSettings,
 } from './runNotifications.ts'
 import './App.css'
@@ -24,7 +25,7 @@ import {
 import { buildRunMenuItems, type MenuItem } from './runMenuItems.ts'
 import { MenuItemIcon } from './runMenuIcons.tsx'
 import { TopToolbar, type ToolbarDocId } from './TopToolbar.tsx'
-import { SettingsDrawer, type NotificationPermissionState } from './SettingsDrawer.tsx'
+import { SettingsDrawer } from './SettingsDrawer.tsx'
 import { DocPopup } from './DocPopup.tsx'
 import { WikiPopup } from './WikiPopup.tsx'
 import { useLanguage, LanguageProvider } from './useLanguage.tsx'

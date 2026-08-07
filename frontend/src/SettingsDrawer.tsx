@@ -7,9 +7,11 @@
 // / denied state the parent reports.
 import { useEffect, useRef } from 'react'
 import { SUPPORTED_LANGUAGES, translate, type SupportedLanguage } from './i18n.ts'
-import type { NotificationSettings } from './runNotifications.ts'
-
-export type NotificationPermissionState = 'default' | 'granted' | 'denied'
+import {
+  computeNotificationSectionState,
+  type NotificationPermissionState,
+  type NotificationSettings,
+} from './runNotifications.ts'
 
 type SettingsDrawerProps = {
   open: boolean
@@ -55,9 +57,10 @@ export function SettingsDrawer({
     return () => document.removeEventListener('keydown', handleKey)
   }, [open, onClose])
 
-  const subCheckboxesDisabled = notificationPermission === 'denied'
-  const masterDisabled = notificationPermission === 'denied'
-  const subCheckboxesVisible = notificationSettings.enabled && !subCheckboxesDisabled
+  // Single source of truth for "what should the UI show?".
+  // The pure projection in `runNotifications.ts` is unit-tested
+  // so the JSX can stay a dumb formatter of the result.
+  const sectionState = computeNotificationSectionState(notificationSettings, notificationPermission)
 
   return <>
     <div
@@ -121,7 +124,7 @@ export function SettingsDrawer({
             <input
               type="checkbox"
               checked={notificationSettings.enabled}
-              disabled={masterDisabled}
+              disabled={sectionState.masterDisabled}
               onChange={event => {
                 if (event.target.checked) {
                   // Hand the user gesture up so App.tsx can call
@@ -139,7 +142,7 @@ export function SettingsDrawer({
               <span className="drawer-checkbox-hint">{translate(language, 'drawer.notifications.enabled.hint')}</span>
             </span>
           </label>
-          {subCheckboxesVisible
+          {sectionState.subCheckboxesVisible
             ? <>
               <label
                 className={`drawer-checkbox drawer-checkbox-sub ${notificationSettings.onSuccess ? 'is-selected' : ''}`}
@@ -173,7 +176,7 @@ export function SettingsDrawer({
               </label>
             </>
             : null}
-          {notificationPermission === 'denied'
+          {sectionState.warningVisible
             ? <p className="drawer-checkbox-warning" role="status">
               {translate(language, 'drawer.notifications.permission.denied')}
             </p>
