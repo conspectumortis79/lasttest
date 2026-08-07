@@ -2,6 +2,7 @@ package de.lasttest.domain
 
 import de.lasttest.api.ApiOperation
 import de.lasttest.api.ApiParameter
+import de.lasttest.api.AuthRequirement
 import de.lasttest.api.ImportedSpecification
 import de.lasttest.api.LoadProfile
 import de.lasttest.api.LoadProfileType
@@ -39,6 +40,7 @@ class DefaultK6ScriptGeneratorTest {
                                 ApiParameter("session", "cookie", false, "abc"),
                             ),
                         requestBodyExample = null,
+                        authRequirements = listOf(AuthRequirement.Bearer("bearerAuth")),
                     ),
                     ApiOperation("deletePet", "DELETE", "/pets/{id}", "", true, listOf(ApiParameter("id", "path", true, 42)), null),
                     ApiOperation(
@@ -51,6 +53,7 @@ class DefaultK6ScriptGeneratorTest {
                         requestBodyExample = mapOf("name" to "Fido"),
                         hasRequestBody = true,
                         requestBodyRequired = true,
+                        authRequirements = listOf(AuthRequirement.Bearer("bearerAuth")),
                     ),
                 ),
         )
@@ -155,6 +158,257 @@ class DefaultK6ScriptGeneratorTest {
         assertTrue(script.contains("\"X-Tenant\":\"customer-a\""))
         assertTrue(script.contains("\"Cookie\":\"session=session%20value\""))
         assertTrue(script.contains("\"Authorization\":\"Bearer secret-token\""))
+    }
+
+    @Test
+    fun `emits Basic Authorization header when operation declares basic auth and credentials are set`() {
+        val basicOperation =
+            ApiOperation(
+                operationId = "getAdminStats",
+                method = "GET",
+                path = "/admin/stats",
+                summary = "",
+                destructive = false,
+                parameters = emptyList(),
+                requestBodyExample = null,
+                authRequirements = listOf(AuthRequirement.Basic("basicAuth")),
+            )
+        val basicSpec = specification.copy(operations = listOf(basicOperation))
+        val configuration =
+            OperationConfiguration(
+                operationId = "getAdminStats",
+                bearerToken = null,
+                basicAuthUsername = "alice",
+                basicAuthPassword = "s3cret",
+            )
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generate(basicSpec, "https://example.test", setOf("getAdminStats"), listOf(configuration), profile)
+
+        // base64("alice:s3cret") = "YWxpY2U6czNjcmV0"
+        assertContains(script, "\"Authorization\":\"Basic YWxpY2U6czNjcmV0\"")
+    }
+
+    @Test
+    fun `omits Authorization header for basic auth operation when both credentials are blank`() {
+        val basicOperation =
+            ApiOperation(
+                operationId = "getAdminStats",
+                method = "GET",
+                path = "/admin/stats",
+                summary = "",
+                destructive = false,
+                parameters = emptyList(),
+                requestBodyExample = null,
+                authRequirements = listOf(AuthRequirement.Basic("basicAuth")),
+            )
+        val basicSpec = specification.copy(operations = listOf(basicOperation))
+        val configuration =
+            OperationConfiguration(
+                operationId = "getAdminStats",
+                bearerToken = null,
+                basicAuthUsername = "",
+                basicAuthPassword = "   ",
+            )
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generate(basicSpec, "https://example.test", setOf("getAdminStats"), listOf(configuration), profile)
+
+        assertTrue(!script.contains("Authorization"))
+    }
+
+    @Test
+    fun `picks Basic when operation declares both Basic and Bearer but only Basic credentials are set`() {
+        val dualOperation =
+            ApiOperation(
+                operationId = "whoAmI",
+                method = "GET",
+                path = "/whoami",
+                summary = "",
+                destructive = false,
+                parameters = emptyList(),
+                requestBodyExample = null,
+                authRequirements =
+                    listOf(
+                        AuthRequirement.Basic("basicAuth"),
+                        AuthRequirement.Bearer("bearerAuth"),
+                    ),
+            )
+        val dualSpec = specification.copy(operations = listOf(dualOperation))
+        val configuration =
+            OperationConfiguration(
+                operationId = "whoAmI",
+                bearerToken = "abc",
+                basicAuthUsername = "alice",
+                basicAuthPassword = "s3cret",
+            )
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generate(dualSpec, "https://example.test", setOf("whoAmI"), listOf(configuration), profile)
+
+        assertContains(script, "\"Authorization\":\"Basic YWxpY2U6czNjcmV0\"")
+        assertTrue(!script.contains("Bearer abc"))
+    }
+
+    @Test
+    fun `omits Authorization header entirely when operation declares no auth`() {
+        // Regression: the legacy behaviour was to always honour a
+        // configured bearerToken. With the new contract, the
+        // operation's `authRequirements` is the source of truth; a
+        // user-provided token on a public operation is silently
+        // ignored so the wire format matches what the spec describes.
+        val publicOperation =
+            ApiOperation(
+                operationId = "publicEndpoint",
+                method = "GET",
+                path = "/public",
+                summary = "",
+                destructive = false,
+                parameters = emptyList(),
+                requestBodyExample = null,
+                // No authRequirements — the spec does not protect this endpoint.
+            )
+        val publicSpec = specification.copy(operations = listOf(publicOperation))
+        val configuration =
+            OperationConfiguration(
+                operationId = "publicEndpoint",
+                bearerToken = "should-be-ignored",
+            )
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generate(publicSpec, "https://example.test", setOf("publicEndpoint"), listOf(configuration), profile)
+
+        assertTrue(!script.contains("Authorization"))
+    }
+
+    @Test
+    fun `emits the X-API-Key header when the operation declares an apiKey requirement`() {
+        val apiKeyOperation =
+            ApiOperation(
+                operationId = "lookupProduct",
+                method = "GET",
+                path = "/lookup",
+                summary = "",
+                destructive = false,
+                parameters = emptyList(),
+                requestBodyExample = null,
+                authRequirements = listOf(AuthRequirement.ApiKey("apiKeyAuth", "X-API-Key")),
+            )
+        val apiKeySpec = specification.copy(operations = listOf(apiKeyOperation))
+        val configuration =
+            OperationConfiguration(
+                operationId = "lookupProduct",
+                apiKey = "sk-test-abc123",
+            )
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generate(apiKeySpec, "https://example.test", setOf("lookupProduct"), listOf(configuration), profile)
+
+        assertContains(script, "\"X-API-Key\":\"sk-test-abc123\"")
+        // No Authorization header — apiKey auth does not use one.
+        assertTrue(!script.contains("Authorization"))
+    }
+
+    @Test
+    fun `apiKey is not emitted when the user has not configured a value`() {
+        // Without a configured key the request would otherwise
+        // arrive at the server without the expected header, which
+        // would 401 even though the user thought "I don't need
+        // credentials here". The omission is the safer behaviour.
+        val apiKeyOperation =
+            ApiOperation(
+                operationId = "lookupProduct",
+                method = "GET",
+                path = "/lookup",
+                summary = "",
+                destructive = false,
+                parameters = emptyList(),
+                requestBodyExample = null,
+                authRequirements = listOf(AuthRequirement.ApiKey("apiKeyAuth", "X-API-Key")),
+            )
+        val apiKeySpec = specification.copy(operations = listOf(apiKeyOperation))
+        val configuration = OperationConfiguration(operationId = "lookupProduct", apiKey = "")
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generate(apiKeySpec, "https://example.test", setOf("lookupProduct"), listOf(configuration), profile)
+
+        assertTrue(!script.contains("X-API-Key"))
+    }
+
+    @Test
+    fun `emits the Bearer Authorization header when the operation declares an OAuth2 requirement`() {
+        // OAuth 2.0 access tokens ride the same Bearer wire format
+        // (RFC 6750). The generator must not care that the spec
+        // calls the scheme `oauth2` — the user-supplied token ends
+        // up in `Authorization: Bearer <token>` either way.
+        val oauth2Operation =
+            ApiOperation(
+                operationId = "getMe",
+                method = "GET",
+                path = "/me",
+                summary = "",
+                destructive = false,
+                parameters = emptyList(),
+                requestBodyExample = null,
+                authRequirements =
+                    listOf(
+                        AuthRequirement.OAuth2(
+                            schemeName = "oauth2",
+                            flows =
+                                listOf(
+                                    AuthRequirement.OAuth2Flow(
+                                        type = "clientCredentials",
+                                        tokenUrl = "https://example.test/oauth/token",
+                                        scopes = listOf("read:products"),
+                                    ),
+                                ),
+                        ),
+                    ),
+            )
+        val oauth2Spec = specification.copy(operations = listOf(oauth2Operation))
+        val configuration =
+            OperationConfiguration(
+                operationId = "getMe",
+                oauth2Token = "demo-oauth2-token-12345",
+            )
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generate(oauth2Spec, "https://example.test", setOf("getMe"), listOf(configuration), profile)
+
+        assertContains(script, "\"Authorization\":\"Bearer demo-oauth2-token-12345\"")
+    }
+
+    @Test
+    fun `OAuth2 token is not emitted when the user has not configured a value`() {
+        // Same hygiene as Basic / Bearer / apiKey: a missing value
+        // means the k6 script would arrive without the expected
+        // header. Omitting the header lets the server produce a
+        // clean 401 instead of confusing the user with a request
+        // that silently lacks the auth it claims to send.
+        val oauth2Operation =
+            ApiOperation(
+                operationId = "getMe",
+                method = "GET",
+                path = "/me",
+                summary = "",
+                destructive = false,
+                parameters = emptyList(),
+                requestBodyExample = null,
+                authRequirements =
+                    listOf(
+                        AuthRequirement.OAuth2(
+                            schemeName = "oauth2",
+                            flows = listOf(AuthRequirement.OAuth2Flow(type = "clientCredentials")),
+                        ),
+                    ),
+            )
+        val oauth2Spec = specification.copy(operations = listOf(oauth2Operation))
+        val configuration = OperationConfiguration(operationId = "getMe", oauth2Token = "")
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generate(oauth2Spec, "https://example.test", setOf("getMe"), listOf(configuration), profile)
+
+        assertTrue(!script.contains("Authorization"))
     }
 
     @Test
@@ -419,6 +673,7 @@ class DefaultK6ScriptGeneratorTest {
                         ApiParameter("array", "query", false, arrayOf(1, 2)),
                     ),
                 requestBodyExample = null,
+                authRequirements = listOf(AuthRequirement.Bearer("bearerAuth")),
             )
         val collectionSpecification = specification.copy(operations = listOf(collectionOperation))
         val prefixed = OperationConfiguration("collections", bearerToken = "Bearer existing")

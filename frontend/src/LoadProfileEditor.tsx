@@ -27,6 +27,7 @@ import {
   defaultLoadProfile,
   loadPreset,
   loadProfileLabel,
+  withStrategy,
   MAX_DURATION_SECONDS,
   MAX_ITERATIONS,
   MAX_PRE_ALLOCATED_VUS,
@@ -94,7 +95,13 @@ export function LoadProfileEditor({ profile, language, onChange, disabled = fals
         onHover={setPresetHovered}
         onPick={entry => {
           setPresetSelected(entry.id)
-          emit(entry.apply())
+          // Carry the user's manually chosen payload strategy over
+          // the preset application. Presets are pure templates
+          // (no payloadStrategy of their own); without this wrap
+          // the strategy would be reset to undefined (i.e. backend
+          // default sequential) every time the user clicks Smoke,
+          // Load, Stress, … — see [withStrategy] for the contract.
+          emit(withStrategy(entry.apply(), profile))
         }}
         helpId={presetHelpId}
       />
@@ -116,7 +123,14 @@ export function LoadProfileEditor({ profile, language, onChange, disabled = fals
               // the previously chosen preset no longer fits — we clear
               // the highlight so it's clear that no preset is active.
               setPresetSelected(undefined)
-              emit(changeProfileType(profile, event.target.value as LoadProfile['type']))
+              // Carry the user's manually chosen payload strategy over
+              // the executor type change. [changeProfileType] builds a
+              // fresh profile of the requested type without a
+              // payloadStrategy; without this wrap the strategy
+              // would be reset to undefined (i.e. backend default
+              // sequential) every time the user switches the executor
+              // dropdown — see [withStrategy] for the contract.
+              emit(withStrategy(changeProfileType(profile, event.target.value as LoadProfile['type']), profile))
             }}
             aria-label={translate(language, 'profile.editor.type')}
           >

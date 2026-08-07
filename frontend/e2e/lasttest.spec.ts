@@ -50,7 +50,8 @@ test('imports a specification from a Swagger UI URL via the URL field', async ({
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
 
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
-  await expect(page.locator('.operation-card')).toHaveCount(6)
+  // 9 cards: 8 product endpoints + the new admin-stats (Basic auth) endpoint.
+  await expect(page.locator('.operation-card')).toHaveCount(9)
   await expect(page.getByText('Geladen aus')).toBeVisible()
   await expect(page.getByText('(über Swagger-UI)')).toBeVisible()
 })
@@ -75,7 +76,8 @@ test('validates imports, load profiles, parameters, bodies, and target URLs', as
   await expect(page.getByRole('alert')).toContainText('keine REST-Operationen')
 
   await importDemo(page)
-  await expect(page.locator('.operation-card')).toHaveCount(6)
+  // 9 cards: 8 product endpoints + the new admin-stats (Basic auth) endpoint.
+  await expect(page.locator('.operation-card')).toHaveCount(9)
   await expect(page.getByLabel('Endpunkt GET /products auswählen')).toBeChecked()
 
   // Initially all endpoints are collapsed. Expand first, then fill in.
@@ -198,7 +200,8 @@ test('preloads the bundled demo specification into the editor on startup', async
 
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
-  await expect(page.locator('.operation-card')).toHaveCount(6)
+  // 9 cards: 8 product endpoints + the new admin-stats (Basic auth) endpoint.
+  await expect(page.locator('.operation-card')).toHaveCount(9)
 })
 
 test('exposes multiple OpenAPI servers as a Base-URL dropdown and allows custom overrides', async ({ page }) => {
@@ -435,7 +438,9 @@ test('runs the selected destructive endpoint with bearer token and downloads the
   await expect(specification).toContainText('Lasttest Demo API')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
-  await expect(page.locator('.operation-card')).toHaveCount(6)
+  // 7 operations in total: 6 product endpoints + 1 admin-stats endpoint
+  // (the admin endpoint is the Basic auth demo).
+  await expect(page.locator('.operation-card')).toHaveCount(9)
 
   // Single-selection: only one operation at a time — we pick searchProducts for the bearer test.
   await expandOperation(page, 'searchProducts')
@@ -462,6 +467,245 @@ test('runs the selected destructive endpoint with bearer token and downloads the
     downloadLink.click(),
   ])
   expect(download.suggestedFilename()).toMatch(/^lasttest-.*\.js$/)
+})
+
+test('runs the Basic-Auth demo endpoint end-to-end and shows the base64 Authorization header in the k6 script', async ({ page }) => {
+  // Uses the bundled demo/openapi-demo.yaml which declares
+  //   components.securitySchemes.basicAuth: { type: http, scheme: basic }
+  // and a single GET /products/admin/stats endpoint that the demo
+  // controller accepts when the Authorization header decodes to
+  // "alice:s3cret". The yellow "Demo-Credentials" banner surfaces
+  // these values to the user right above the pool editor and the
+  // "In Felder übernehmen" button populates the inputs in one click.
+  const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+  await expect(specification).toContainText('Lasttest Demo API')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
+  await expect(page.locator('.operation-card')).toHaveCount(9)
+
+  await expandOperation(page, 'getAdminStats')
+  await page.getByLabel('Endpunkt GET /products/admin/stats auswählen').check()
+
+  // The yellow demo banner must be visible with the live demo
+  // credentials, and the "In Felder übernehmen" button must
+  // populate the username and password inputs in one click.
+  const banner = page.locator('.demo-banner')
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText('alice')
+  await expect(banner).toContainText('s3cret')
+  await banner.getByRole('button', { name: /In Felder übernehmen/ }).click()
+
+  // Sanity-check: the inputs now hold the banner values, so the
+  // user can either click the button or type them by hand.
+  await expect(page.getByLabel('getAdminStats · Payload 1: Basic-Auth Benutzername')).toHaveValue('alice')
+  await expect(page.getByLabel('getAdminStats · Payload 1: Basic-Auth Passwort')).toHaveValue('s3cret')
+
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('1')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
+  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })
+  const popupPromise = page.waitForEvent('popup')
+  await reportLink.click()
+  const report = await popupPromise
+  await report.waitForLoadState('networkidle')
+  await expect(report.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
+
+  // The report should mention the new Basic auth state.
+  await expect(report.getByText('Basic-Auth: konfiguriert', { exact: true })).toBeVisible()
+  await expect(report.getByText('Authentifizierung', { exact: true })).toBeVisible()
+
+  // Open the generated k6 script and verify the base64-encoded
+  // header is present.
+  await report.getByText('Generiertes k6-Testskript', { exact: true }).click()
+  const generatedScript = report.locator('pre')
+  // base64("alice:s3cret") = "YWxpY2U6czNjcmV0"
+  await expect(generatedScript).toContainText('Basic YWxpY2U6czNjcmV0')
+  // And the Bearer header must NOT be there — this is a Basic-only endpoint.
+  await expect(generatedScript).not.toContainText('Bearer ')
+})
+
+test('shows the demo credentials banner for the bearer demo endpoint and populates the field with one click', async ({ page }) => {
+  // Mirrors the Basic-Auth demo test for the searchProducts endpoint:
+  // the yellow demo banner is visible, carries the demo bearer token,
+  // and the "In Felder übernehmen" button copies the token into the
+  // Bearer-Token input.
+  const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+  await expect(specification).toContainText('Lasttest Demo API')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
+
+  await expandOperation(page, 'searchProducts')
+
+  const banner = page.locator('.demo-banner')
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText('demo-bearer-token')
+  await banner.getByRole('button', { name: /In Felder übernehmen/ }).click()
+
+  await expect(page.getByLabel('searchProducts · Payload 1: Bearer-Token')).toHaveValue('demo-bearer-token')
+})
+
+test('does not show the demo credentials banner on non-demo operations', async ({ page }) => {
+  // The yellow banner is hardcoded to the two demo endpoints via
+  // `frontend/src/demoCredentials.ts`; every other operation must
+  // stay exactly as before (production code path is untouched).
+  const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+  await expect(specification).toContainText('Lasttest Demo API')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
+
+  await expandOperation(page, 'listProducts')
+  await expect(page.locator('.demo-banner')).toHaveCount(0)
+
+  await expandOperation(page, 'getProduct')
+  await expect(page.locator('.demo-banner')).toHaveCount(0)
+})
+
+test('shows the demo credentials banner for the Basic-Auth demo endpoint and populates the username and password fields with one click', async ({ page }) => {
+  // Mirrors the Bearer / API-key / OAuth 2.0 tests for getAdminStats:
+  // the yellow demo banner is visible, carries the demo username +
+  // password, and the "In Felder übernehmen" button populates both
+  // inputs in a single click.
+  const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+  await expect(specification).toContainText('Lasttest Demo API')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
+
+  await expandOperation(page, 'getAdminStats')
+
+  const banner = page.locator('.demo-banner')
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText('alice')
+  await expect(banner).toContainText('s3cret')
+  await banner.getByRole('button', { name: /In Felder übernehmen/ }).click()
+
+  await expect(page.getByLabel('getAdminStats · Payload 1: Basic-Auth Benutzername')).toHaveValue('alice')
+  await expect(page.getByLabel('getAdminStats · Payload 1: Basic-Auth Passwort')).toHaveValue('s3cret')
+})
+
+test('shows the demo credentials banner for the OAuth 2.0 demo endpoint and populates the access-token field with one click', async ({ page }) => {
+  // Mirrors the Basic-Auth / Bearer / API-key tests for getMe:
+  // the yellow demo banner is visible, carries the flow + scope
+  // metadata, and the "In Felder übernehmen" button populates
+  // the password-style access-token input.
+  const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+  await expect(specification).toContainText('Lasttest Demo API')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
+
+  await expandOperation(page, 'getMe')
+
+  const banner = page.locator('.demo-banner')
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText('clientCredentials')
+  await expect(banner).toContainText('read:products, write:products')
+  await expect(banner).toContainText('demo-oauth2-token-12345')
+  await banner.getByRole('button', { name: /In Felder übernehmen/ }).click()
+
+  await expect(page.getByLabel('getMe · Payload 1: OAuth 2.0 Access-Token')).toHaveValue('demo-oauth2-token-12345')
+})
+
+test('runs the OAuth 2.0 demo endpoint end-to-end and sends the Bearer Authorization header in the k6 script', async ({ page }) => {
+  // Uses the bundled demo/openapi-demo.yaml which declares
+  //   components.securitySchemes.oauth2:
+  //     { type: oauth2, flows: { clientCredentials: ... } }
+  // and a single GET /products/me endpoint that the demo controller
+  // accepts only with the exact demo access token.
+  const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+  await expect(specification).toContainText('Lasttest Demo API')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
+
+  await expandOperation(page, 'getMe')
+  await page.getByLabel('Endpunkt GET /products/me auswählen').check()
+  await page.getByLabel('getMe · Payload 1: OAuth 2.0 Access-Token').fill('demo-oauth2-token-12345')
+
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('1')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
+  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })
+  const popupPromise = page.waitForEvent('popup')
+  await reportLink.click()
+  const report = await popupPromise
+  await report.waitForLoadState('networkidle')
+  await expect(report.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
+
+  // The report should mention the new OAuth 2.0 state.
+  await expect(report.getByText('OAuth 2.0: konfiguriert', { exact: true })).toBeVisible()
+
+  // Open the generated k6 script and verify the Bearer Authorization
+  // header is set to the demo token — the same wire format as plain
+  // Bearer, which is the point of RFC 6750.
+  await report.getByText('Generiertes k6-Testskript', { exact: true }).click()
+  const generatedScript = report.locator('pre')
+  await expect(generatedScript).toContainText('"Authorization":"Bearer demo-oauth2-token-12345"')
+})
+
+test('shows the demo credentials banner for the API-key demo endpoint and populates the X-API-Key field with one click', async ({ page }) => {
+  // Mirrors the Basic-Auth / Bearer demo tests for lookupProduct:
+  // the yellow demo banner is visible, carries the demo key + the
+  // spec-declared header name, and the "In Felder übernehmen"
+  // button populates the password-style input.
+  const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+  await expect(specification).toContainText('Lasttest Demo API')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
+
+  await expandOperation(page, 'lookupProduct')
+
+  const banner = page.locator('.demo-banner')
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText('X-API-Key')
+  await expect(banner).toContainText('demo-api-key-12345')
+  await banner.getByRole('button', { name: /In Felder übernehmen/ }).click()
+
+  // The pool editor renders a single password-style input labelled
+  // "API-Key" per payload. After the button click the value
+  // should match the demo key.
+  await expect(page.getByLabel('lookupProduct · Payload 1: API-Key')).toHaveValue('demo-api-key-12345')
+})
+
+test('runs the API-key demo endpoint end-to-end and sends the X-API-Key header in the k6 script', async ({ page }) => {
+  // Uses the bundled demo/openapi-demo.yaml which declares
+  //   components.securitySchemes.apiKeyAuth:
+  //     { type: apiKey, in: header, name: X-API-Key }
+  // and a single GET /products/lookup-by-id endpoint that the demo
+  // controller accepts only with the exact demo key.
+  const specification = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+  await expect(specification).toContainText('Lasttest Demo API')
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
+
+  await expandOperation(page, 'lookupProduct')
+  await page.getByLabel('Endpunkt GET /products/lookup-by-id auswählen').check()
+  await page.getByLabel('lookupProduct · Payload 1: API-Key').fill('demo-api-key-12345')
+  await page.getByLabel('lookupProduct · Payload 1: id').fill('1')
+
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('1')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
+  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })
+  const popupPromise = page.waitForEvent('popup')
+  await reportLink.click()
+  const report = await popupPromise
+  await report.waitForLoadState('networkidle')
+  await expect(report.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
+
+  // The report should mention the new API-key state.
+  await expect(report.getByText('API-Key: konfiguriert', { exact: true })).toBeVisible()
+
+  // Open the generated k6 script and verify the X-API-Key header
+  // is set to the demo value.
+  await report.getByText('Generiertes k6-Testskript', { exact: true }).click()
+  const generatedScript = report.locator('pre')
+  await expect(generatedScript).toContainText('"X-API-Key":"demo-api-key-12345"')
+  // No Authorization header — apiKey is in a separate header.
+  await expect(generatedScript).not.toContainText('Authorization')
 })
 
 test('validates parameter values against the OpenAPI schema while the user types', async ({ page }) => {

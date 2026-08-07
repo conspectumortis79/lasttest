@@ -4,6 +4,9 @@ export type ReportPayload = {
   parameterValues: ReportParameterValue[]
   requestBodyJson?: string
   bearerTokenConfigured?: boolean
+  basicAuthConfigured?: boolean
+  apiKeyConfigured?: boolean
+  oauth2TokenConfigured?: boolean
 }
 
 export type ReportPayloadUsage = {
@@ -61,6 +64,27 @@ export type ReportOperation = {
   parameterValues: ReportParameterValue[]
   requestBodyJson?: string
   bearerTokenConfigured: boolean
+  /**
+   * True when at least one payload in the run had a non-blank
+   * Basic auth username or password. The report uses this to
+   * render the "Basic auth: configured / not configured" line.
+   * Older reports (pre-Basic-auth feature) won't carry this
+   * field; the default of `false` keeps the rendering in line
+   * with the historical behaviour.
+   */
+  basicAuthConfigured?: boolean
+  /**
+   * True when at least one payload in the run had a non-blank
+   * API key. The report uses this to render the "API key:
+   * configured / not configured" line.
+   */
+  apiKeyConfigured?: boolean
+  /**
+   * True when at least one payload in the run had a non-blank
+   * OAuth 2.0 access token. The report uses this to render the
+   * "OAuth 2.0: configured / not configured" line.
+   */
+  oauth2TokenConfigured?: boolean
   /**
    * All payloads that were configured for this endpoint at the time
    * the run was started. The report lists every entry so the user

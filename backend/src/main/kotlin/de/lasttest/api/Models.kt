@@ -153,8 +153,25 @@ data class ApiOperation(
     val requestBodySchema: RequestBodySchema? = null,
     val hasRequestBody: Boolean = requestBodyExample != null || requestBodySchema != null,
     val requestBodyRequired: Boolean = false,
-    val bearerAuth: Boolean = false,
-)
+    /**
+     * Discovered authentication requirements for this operation. Empty
+     * means "no auth declared by the spec". Replaces the previous
+     * boolean `bearerAuth` field; the derived [bearerAuth] property
+     * below keeps existing call sites compiling without changes.
+     */
+    val authRequirements: List<AuthRequirement> = emptyList(),
+) {
+    /**
+     * Derived from [authRequirements] for callers that only care about
+     * the Bearer case (UI placeholder, importer regression test, …).
+     * True iff at least one requirement is a [AuthRequirement.Bearer]
+     * or a [AuthRequirement.OAuth2] — both ride the same
+     * `Authorization: Bearer <token>` wire format (RFC 6750) so the
+     * UI must render the credential input for both.
+     */
+    val bearerAuth: Boolean
+        get() = authRequirements.any { it is AuthRequirement.Bearer || it is AuthRequirement.OAuth2 }
+}
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class RequestBodySchema(
@@ -207,6 +224,27 @@ data class OperationConfiguration(
     val requestBodyJson: String? = null,
     /** @deprecated Derived from `payloads[0]` via [primaryPayload] when `payloads` is empty. */
     val bearerToken: String? = null,
+    /**
+     * @deprecated Derived from `payloads[0]` via [primaryPayload] when `payloads` is empty.
+     * Username for HTTP Basic. Used only when the corresponding
+     * [ApiOperation] declares [de.lasttest.api.AuthRequirement.Basic].
+     */
+    val basicAuthUsername: String? = null,
+    /**
+     * @deprecated Derived from `payloads[0]` via [primaryPayload] when `payloads` is empty.
+     * Password for HTTP Basic.
+     */
+    val basicAuthPassword: String? = null,
+    /**
+     * @deprecated Derived from `payloads[0]` via [primaryPayload] when `payloads` is empty.
+     * API key value for header-based apiKey auth.
+     */
+    val apiKey: String? = null,
+    /**
+     * OAuth 2.0 access token. Used only when the corresponding
+     * [ApiOperation] declares [de.lasttest.api.AuthRequirement.OAuth2].
+     */
+    val oauth2Token: String? = null,
 ) {
     /**
      * Returns the first payload from [payloads], or synthesises one from
@@ -221,20 +259,49 @@ data class OperationConfiguration(
                 parameterValues = parameterValues,
                 requestBodyJson = requestBodyJson,
                 bearerToken = bearerToken,
+                basicAuthUsername = basicAuthUsername,
+                basicAuthPassword = basicAuthPassword,
+                apiKey = apiKey,
+                oauth2Token = oauth2Token,
             )
 }
 
 /**
  * One complete request dataset: the parameter overrides, the optional
- * JSON body and the optional bearer token. Multiple
+ * JSON body and the optional auth credentials. Multiple
  * [OperationPayload] entries inside a single
  * [OperationConfiguration.payloads] list represent the different
  * datasets a user wants to cycle or pick at random.
+ *
+ * Auth fields are kept as raw strings — the actual wire encoding
+ * (Bearer prefix, Base64, …) is the [de.lasttest.domain.AuthHeaderEncoder]'s
+ * job, which is called once per request by the k6 generator.
  */
 data class OperationPayload(
     val parameterValues: List<ParameterValue> = emptyList(),
     val requestBodyJson: String? = null,
     val bearerToken: String? = null,
+    /**
+     * Username for HTTP Basic auth. Only used when the operation
+     * declares a Basic [de.lasttest.api.AuthRequirement].
+     */
+    val basicAuthUsername: String? = null,
+    /**
+     * Password for HTTP Basic auth. Only used when the operation
+     * declares a Basic [de.lasttest.api.AuthRequirement].
+     */
+    val basicAuthPassword: String? = null,
+    /**
+     * API key value for an `apiKey in: header` [de.lasttest.api.AuthRequirement].
+     * The k6 generator emits it as a regular request header named
+     * per the `AuthRequirement.ApiKey.headerName`.
+     */
+    val apiKey: String? = null,
+    /**
+     * OAuth 2.0 access token. Used only when the corresponding
+     * [ApiOperation] declares [de.lasttest.api.AuthRequirement.OAuth2].
+     */
+    val oauth2Token: String? = null,
 )
 
 data class CreateTestRunRequest(
@@ -293,6 +360,26 @@ data class TestRunOperationConfiguration(
     val parameterValues: List<ParameterValue> = emptyList(),
     val requestBodyJson: String? = null,
     val bearerTokenConfigured: Boolean = false,
+    /**
+     * True when at least one payload in [payloads] (or the legacy
+     * flat fields) has a non-blank Basic Auth username or password.
+     * The report uses this to render the
+     * "Basic auth: configured / not configured" line.
+     */
+    val basicAuthConfigured: Boolean = false,
+    /**
+     * True when at least one payload in [payloads] (or the legacy
+     * flat fields) has a non-blank API key. The report uses this to
+     * render the "API key: configured / not configured" line.
+     */
+    val apiKeyConfigured: Boolean = false,
+    /**
+     * True when at least one payload in [payloads] (or the legacy
+     * flat fields) has a non-blank OAuth 2.0 access token. The
+     * report uses this to render the "OAuth 2: configured / not
+     * configured" line.
+     */
+    val oauth2TokenConfigured: Boolean = false,
 )
 
 enum class TestRunStatus {

@@ -2,6 +2,7 @@ package de.lasttest.domain
 
 import de.lasttest.api.ApiOperation
 import de.lasttest.api.ApiParameter
+import de.lasttest.api.AuthRequirement
 import de.lasttest.api.CreateTestRunRequest
 import de.lasttest.api.ImportedSpecification
 import de.lasttest.api.LoadProfile
@@ -45,6 +46,7 @@ class LocalK6TestRunServiceTest {
                                 ApiParameter("missing", "query", false, null),
                             ),
                         requestBodyExample = null,
+                        authRequirements = listOf(AuthRequirement.Bearer("bearerAuth")),
                     ),
                     ApiOperation(
                         operationId = "createPet",
@@ -69,13 +71,15 @@ class LocalK6TestRunServiceTest {
                 ),
         )
     private val influxDb = InfluxDbProperties(enabled = false)
+    private val noopImporter =
+        object : SpecificationImporter {
+            override fun import(content: String): ImportedSpecification = specification
+        }
+    private val successfulGenerator = SuccessfulGenerator()
     private val service =
         LocalK6TestRunService(
-            importer =
-                object : SpecificationImporter {
-                    override fun import(content: String): ImportedSpecification = specification
-                },
-            generator = SuccessfulGenerator(),
+            importer = noopImporter,
+            generator = successfulGenerator,
             executor = Executor { },
             k6Command = "k6",
             influxDbProperties = influxDb,
@@ -131,6 +135,140 @@ class LocalK6TestRunServiceTest {
         assertEquals("createPet", operation.operationId)
         assertEquals("{\"name\":\"Fido\"}", operation.requestBodyJson)
         assertFalse(operation.bearerTokenConfigured)
+    }
+
+    @Test
+    fun `marks basic auth as configured when credentials are present`() {
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    operationConfigurations =
+                        listOf(
+                            OperationConfiguration(
+                                operationId = "getPet",
+                                parameterValues = listOf(ParameterValue("id", "path", "42")),
+                                bearerToken = null,
+                                basicAuthUsername = "alice",
+                                basicAuthPassword = "s3cret",
+                            ),
+                        ),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+
+        val operation = assertNotNull(run.configuration).operations.single()
+        assertTrue(operation.basicAuthConfigured)
+        assertFalse(operation.bearerTokenConfigured)
+    }
+
+    @Test
+    fun `does not mark basic auth as configured when both fields are blank`() {
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    operationConfigurations =
+                        listOf(
+                            OperationConfiguration(
+                                operationId = "getPet",
+                                parameterValues = listOf(ParameterValue("id", "path", "42")),
+                                bearerToken = null,
+                                basicAuthUsername = "  ",
+                                basicAuthPassword = "",
+                            ),
+                        ),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+
+        val operation = assertNotNull(run.configuration).operations.single()
+        assertFalse(operation.basicAuthConfigured)
+    }
+
+    @Test
+    fun `marks basic auth as configured from the payload pool entry`() {
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    operationConfigurations =
+                        listOf(
+                            OperationConfiguration(
+                                operationId = "getPet",
+                                parameterValues = listOf(ParameterValue("id", "path", "42")),
+                                payloads =
+                                    listOf(
+                                        OperationPayload(
+                                            parameterValues = listOf(ParameterValue("id", "path", "42")),
+                                            basicAuthUsername = "bob",
+                                            basicAuthPassword = "secret",
+                                        ),
+                                    ),
+                            ),
+                        ),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+
+        val operation = assertNotNull(run.configuration).operations.single()
+        assertTrue(operation.basicAuthConfigured)
+    }
+
+    @Test
+    fun `marks OAuth2 token as configured when a token is present`() {
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    operationConfigurations =
+                        listOf(
+                            OperationConfiguration(
+                                operationId = "getPet",
+                                parameterValues = listOf(ParameterValue("id", "path", "42")),
+                                bearerToken = null,
+                                oauth2Token = "demo-oauth2-token-12345",
+                            ),
+                        ),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+
+        val operation = assertNotNull(run.configuration).operations.single()
+        assertTrue(operation.oauth2TokenConfigured)
+        assertFalse(operation.bearerTokenConfigured)
+    }
+
+    @Test
+    fun `does not mark OAuth2 token as configured when blank`() {
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    operationConfigurations =
+                        listOf(
+                            OperationConfiguration(
+                                operationId = "getPet",
+                                parameterValues = listOf(ParameterValue("id", "path", "42")),
+                                oauth2Token = "   ",
+                            ),
+                        ),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+
+        val operation = assertNotNull(run.configuration).operations.single()
+        assertFalse(operation.oauth2TokenConfigured)
     }
 
     @Test
@@ -630,6 +768,106 @@ class LocalK6TestRunServiceTest {
         } finally {
             if (stub.isAlive) stub.destroyForcibly()
             service.processes.remove(run.id)
+        }
+    }
+
+    @Test
+    fun `graceful cancel runs the escalation lambda that watches the process and exits early when it dies`() {
+        // The escalation lambda inside cancel(id, force = false)
+        // polls the process every 50 ms and exits the moment
+        // `process.isAlive` becomes false. A stub that exits
+        // quickly exercises the early-exit branch without waiting
+        // the full GRACEFUL_STOP_GRACE_MS.
+        val syncExecutor = Executor { it.run() }
+        val runService =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = syncExecutor,
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+            )
+        val run =
+            runService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(runService) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+        runsMap[run.id] = run.copy(status = TestRunStatus.RUNNING, startedAt = "2026-01-01T00:00:01Z")
+        val stub = ProcessBuilder("sleep", "1").start()
+        runService.processes[run.id] = stub
+        try {
+            assertTrue(runService.cancel(run.id, force = false))
+            // `sleep 1` exits on its own after ~1 s. The escalation
+            // lambda sees `!process.isAlive` on its first poll and
+            // returns. The process must be dead by the time we get
+            // here (or very shortly after) — give it a generous
+            // window so the test is not flaky.
+            assertTrue(stub.waitFor(5, java.util.concurrent.TimeUnit.SECONDS))
+        } finally {
+            if (stub.isAlive) stub.destroyForcibly()
+            runService.processes.remove(run.id)
+        }
+    }
+
+    @Test
+    fun `graceful cancel escalation force-kills a process that ignores SIGTERM`() {
+        // The escalation lambda polls every 50 ms and falls through
+        // to `process.destroyForcibly()` in the `finally` block when
+        // the process is still alive at the deadline. We exercise
+        // that path with a stub that traps SIGTERM and ignores it
+        // (a real k6 would do the same when the target server hangs
+        // up the socket and k6 is stuck mid-iteration).
+        val syncExecutor = Executor { it.run() }
+        val runService =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = syncExecutor,
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+            )
+        val run =
+            runService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(runService) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+        runsMap[run.id] = run.copy(status = TestRunStatus.RUNNING, startedAt = "2026-01-01T00:00:01Z")
+        // The shell script traps SIGTERM and ignores it so SIGTERM
+        // does not actually terminate the process. SIGKILL from
+        // destroyForcibly() still works. `sleep 60` is a busy wait
+        // so the script does not return early on its own.
+        val stub =
+            ProcessBuilder("/bin/sh", "-c", "trap '' TERM; sleep 60").start()
+        runService.processes[run.id] = stub
+        try {
+            assertTrue(runService.cancel(run.id, force = false))
+            // The lambda waits up to GRACEFUL_STOP_GRACE_MS (3 s in
+            // production, see LocalK6TestRunService) and then
+            // force-kills. Add a generous buffer so the assertion
+            // is not flaky on slow CI runners.
+            assertTrue(
+                stub.waitFor(8, java.util.concurrent.TimeUnit.SECONDS),
+                "stub that ignores SIGTERM should be force-killed by the escalation lambda",
+            )
+        } finally {
+            if (stub.isAlive) stub.destroyForcibly()
+            runService.processes.remove(run.id)
         }
     }
 

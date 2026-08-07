@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   arrivalRatePreset,
   defaultLoadProfile,
+  withStrategy,
   isPayloadStrategy,
   loadPreset,
   loadProfileLabel,
@@ -425,5 +426,96 @@ test('serialiseLoadProfile omits payloadStrategy when not set', () => {
   equal(serialiseLoadProfile({ type: 'shared-iterations', virtualUsers: 1, iterations: 1 }).payloadStrategy, undefined)
   equal(serialiseLoadProfile({ type: 'ramping-vus', startVUs: 0, stages: [{ target: 0, durationSeconds: 1 }] }).payloadStrategy, undefined)
   equal(serialiseLoadProfile({ type: 'constant-arrival-rate', rate: 1, timeUnitSeconds: 1, durationSeconds: 1, preAllocatedVUs: 1, maxVUs: 1 }).payloadStrategy, undefined)
+})
+
+test('withStrategy copies the payloadStrategy from the previous profile onto a fresh profile', () => {
+  // The user picked `random` on a constant-vus profile, then
+  // switched the executor type to ramping-vus. The strategy
+  // must survive the type change so the user does not have to
+  // re-pick it on every executor swap. Same flow happens when
+  // the user clicks a preset (Smoke, Load, …) — the preset
+  // template is a fresh profile, the strategy must be carried
+  // over by the editor, not by the preset itself.
+  const previous = {
+    type: 'constant-vus' as const,
+    virtualUsers: 10,
+    durationSeconds: 30,
+    payloadStrategy: 'random' as const,
+  }
+  const fresh = loadPreset() // ramping-vus, no payloadStrategy
+
+  const merged = withStrategy(fresh, previous)
+
+  equal(merged.type, 'ramping-vus')
+  equal(merged.payloadStrategy, 'random')
+})
+
+test('withStrategy preserves the field types — every other field on the fresh profile is untouched', () => {
+  // Regression guard: the helper must NOT overwrite the fresh
+  // profile's load-shape fields with the previous profile's
+  // values. Otherwise switching the executor type would
+  // silently leak the previous executor's VU count / stages
+  // / arrival rate into the new profile.
+  const previous = {
+    type: 'constant-vus' as const,
+    virtualUsers: 999,
+    durationSeconds: 999,
+    payloadStrategy: 'random' as const,
+  }
+  const fresh = {
+    type: 'ramping-vus' as const,
+    startVUs: 5,
+    stages: [{ target: 50, durationSeconds: 60 }],
+  }
+
+  const merged = withStrategy(fresh, previous)
+
+  deepEqual(merged, {
+    type: 'ramping-vus',
+    startVUs: 5,
+    stages: [{ target: 50, durationSeconds: 60 }],
+    payloadStrategy: 'random',
+  })
+})
+
+test('withStrategy returns the fresh profile unchanged when the previous one had no payloadStrategy', () => {
+  // Default app state: load profile is the default constant-vus,
+  // payloadStrategy is undefined. Switching to a preset or
+  // another executor must NOT add a payloadStrategy out of
+  // thin air — the user has not picked one yet.
+  const previous = defaultLoadProfile()
+  const fresh = arrivalRatePreset()
+
+  const merged = withStrategy(fresh, previous)
+
+  equal(merged.payloadStrategy, undefined)
+  // The fresh profile is otherwise returned verbatim so the
+  // editor can drop it in without any further mutation.
+  deepEqual(merged, fresh)
+})
+
+test('withStrategy works across every executor type', () => {
+  // The editor's onChange handler must work for every
+  // permutation of `(fresh, previous)` types. We exhaustively
+  // walk the four executor types on each side so a future
+  // addition cannot break the cross-type strategy preservation.
+  const types = ['constant-vus', 'shared-iterations', 'ramping-vus', 'constant-arrival-rate'] as const
+  const previous = { type: types[0], virtualUsers: 1, durationSeconds: 1, payloadStrategy: 'random' as const }
+
+  for (const newType of types) {
+    const fresh: LoadProfile =
+      newType === 'constant-vus'
+        ? { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }
+        : newType === 'shared-iterations'
+          ? { type: 'shared-iterations', virtualUsers: 1, iterations: 1 }
+          : newType === 'ramping-vus'
+            ? { type: 'ramping-vus', startVUs: 0, stages: [{ target: 1, durationSeconds: 1 }] }
+            : { type: 'constant-arrival-rate', rate: 1, timeUnitSeconds: 1, durationSeconds: 1, preAllocatedVUs: 1, maxVUs: 1 }
+
+    const merged = withStrategy(fresh, previous)
+
+    equal(merged.type, newType)
+    equal(merged.payloadStrategy, 'random')
+  }
 })
 

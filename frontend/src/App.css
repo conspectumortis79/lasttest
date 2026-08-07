@@ -827,6 +827,66 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 .pool-table td select.parameter-select option { background: #080d14; color: white; }
 .pool-table td textarea { width: 100%; min-width: 14rem; min-height: 60px; padding: .4rem .5rem; border: 1px solid #33425b; border-radius: 6px; background: #080d14; color: white; font-family: "SFMono-Regular", Consolas, monospace; font-size: .8rem; resize: vertical; white-space: pre-wrap; }
 .pool-table td.col-wide { min-width: 16rem; }
+.pool-table th.col-auth-basic, .pool-table td.col-auth-basic { min-width: 14rem; }
+.pool-table th.col-auth-api-key, .pool-table td.col-auth-api-key { min-width: 14rem; }
+.pool-table th.col-auth-oauth2, .pool-table td.col-auth-oauth2 { min-width: 14rem; }
+.pool-table td .auth-stack { display: flex; flex-direction: column; gap: .25rem; }
+.pool-table td .auth-stack input { width: 100%; }
+
+/* Demo-Credentials-Banner — appears only on the operations in
+   `frontend/src/demoCredentials.ts`. Yellow/amber background so the
+   user cannot miss the demo credentials that the bundled demo
+   backend actually accepts. The "Apply to fields" button calls
+   straight into the same updatePayloadField pipeline the typed
+   credentials use. */
+.demo-banner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 0 0 .75rem;
+  padding: .75rem 1rem;
+  background: #fff8e6;
+  border: 1px solid #f5b945;
+  border-left: 4px solid #f5b945;
+  border-radius: 6px;
+}
+.demo-banner-icon { font-size: 1.1rem; line-height: 1; }
+.demo-banner-text { flex: 1; min-width: 14rem; }
+.demo-banner-label {
+  display: block;
+  font-size: .68rem;
+  font-weight: 800;
+  color: #92400e;
+  text-transform: uppercase;
+  letter-spacing: .06rem;
+  margin-bottom: .15rem;
+}
+.demo-banner-creds {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: .9rem;
+  color: #1f2937;
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.demo-banner-creds strong { color: #1f2937; }
+.demo-banner-sep { color: #92400e; }
+.demo-banner-apply {
+  background: #fde68a;
+  color: #92400e;
+  border: 1px solid #f5b945;
+  border-radius: 6px;
+  padding: .4rem .75rem;
+  font-size: .8rem;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.demo-banner-apply:hover { background: #fcd34d; }
 .pool-table td.col-actions, .pool-table th.col-actions { min-width: 1.5rem; width: 1.5rem; text-align: center; padding: .15rem .25rem; }
 .row-remove { padding: .25rem .55rem; background: #2a1820; border: 1px solid #793b4b; border-radius: 7px; color: #ffae78; font-size: .8rem; font-weight: 700; cursor: pointer; }
 .row-remove:disabled { opacity: .35; cursor: not-allowed; }
@@ -1636,6 +1696,9 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .report-payload-card h4 { margin: 0 0 .5rem; color: #6941c6; font-size: .78rem; font-weight: 800; letter-spacing: .04rem; text-transform: uppercase; }
 .report-payload-card p { margin: .4rem 0 0; }
 .report-payload-card-count { margin-left: .6rem; padding: .1rem .45rem; border-radius: 999px; background: #f4eeff; color: #6941c6; font-size: .68rem; font-weight: 700; letter-spacing: .04rem; text-transform: none; }
+.report-auth-list { margin: .5rem 0 .25rem; }
+.report-auth-list p.report-auth-heading { margin: 0 0 .25rem; color: #6941c6; font-size: .72rem; font-weight: 800; letter-spacing: .04rem; text-transform: uppercase; }
+.report-auth-list ul { margin: 0; padding-left: 1.1rem; color: #1f1147; }
 
 /* Per-payload call distribution (Sequenziell vs. Zufällig im
    ausführlichen Testbericht). The actual numbers come straight from

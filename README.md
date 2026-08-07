@@ -231,10 +231,20 @@ how often each row was actually sent.
 
 The demo specification lives at `demo/openapi-demo.yaml`. It includes GET
 requests with editable query and path parameters, POST requests with a JSON
-body, as well as PUT and DELETE. `POST /products/search` demonstrates
-Bearer authentication; any non-empty demo token is accepted. After the
-import, the UI shows one input box per endpoint for parameters, request
-body, and Bearer token.
+body, as well as PUT and DELETE. Four dedicated demo endpoints exercise
+the four authentication schemes lasttest recognises:
+
+- `GET /products/admin/stats` — HTTP Basic (username `alice`, password `s3cret`)
+- `POST /products/search` — HTTP Bearer (token `demo-bearer-token`)
+- `GET /products/lookup-by-id?id=1` — API Key in custom header (`X-API-Key: demo-api-key-12345`)
+- `GET /products/me` — OAuth 2.0 access token (`Bearer demo-oauth2-token-12345`)
+
+The demo backend is strict — every auth endpoint accepts *only* the exact
+demo credentials and returns `401` for anything else, so a typo in the
+pool-editor input is immediately visible in the k6 report. A yellow
+"Demo-Credentials" banner appears on each of these endpoints in the UI
+with a one-click **Apply to fields** button so the user does not have to
+type the values by hand.
 
 The demo also declares four `servers` entries (local demo, staging,
 integration, production) so that the **Base-URL dropdown** in the load

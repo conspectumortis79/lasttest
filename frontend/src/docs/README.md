@@ -193,10 +193,8 @@ current status so it only offers actions that make sense:
 | **Stop (graceful)** | `QUEUED`, `RUNNING`, `STOPPING` | Sends `SIGTERM`; k6 winds down, the run ends as `STOPPED` |
 | **Force abort** | `QUEUED`, `RUNNING`, `STOPPING` | Sends `SIGKILL`; the run ends immediately as `ABORTED` (metrics may be partial) |
 | **Rerun** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Re-runs the same scenario against the original base URL with a fresh run id |
-| **Remove from view** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Drops the badge from the in-memory dashboard. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs` |
-| **Remove all other failed runs** | Terminal runs, when at least one other `FAILED` badge is present | Bulk-drops every other `FAILED` badge from the dashboard. Disabled (with a reason) when there is nothing to remove. STOPPED and ABORTED runs are intentionally preserved |
-| **Remove from view** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Drops the badge from the in-memory dashboard. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs` |
-| **Remove all other failed runs** | Terminal runs, when at least one other `FAILED` badge is present | Bulk-drops every other `FAILED` badge from the dashboard. Disabled (with a reason) when there is nothing to remove. STOPPED and ABORTED runs are intentionally preserved |
+| **Remove from view** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Drops the badge from the in-memory dashboard. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs`. The remaining badges re-sort by their original `createdAt` so the dashboard stays in newest-first order. |
+| **Remove all other failed runs** | Terminal runs, when at least one other `FAILED` badge is present | Bulk-drops every other `FAILED` badge from the dashboard. Disabled (with a reason) when there is nothing to remove. `STOPPED` and `ABORTED` runs are intentionally preserved |
 
 > 💡 **Worked example — rerun via right-click:** you ran a 30 s
 > `Smoke` profile against the demo and want to confirm the result
@@ -233,10 +231,20 @@ how often each row was actually sent.
 
 The demo specification lives at `demo/openapi-demo.yaml`. It includes GET
 requests with editable query and path parameters, POST requests with a JSON
-body, as well as PUT and DELETE. `POST /products/search` demonstrates
-Bearer authentication; any non-empty demo token is accepted. After the
-import, the UI shows one input box per endpoint for parameters, request
-body, and Bearer token.
+body, as well as PUT and DELETE. Four dedicated demo endpoints exercise
+the four authentication schemes lasttest recognises:
+
+- `GET /products/admin/stats` — HTTP Basic (username `alice`, password `s3cret`)
+- `POST /products/search` — HTTP Bearer (token `demo-bearer-token`)
+- `GET /products/lookup-by-id?id=1` — API Key in custom header (`X-API-Key: demo-api-key-12345`)
+- `GET /products/me` — OAuth 2.0 access token (`Bearer demo-oauth2-token-12345`)
+
+The demo backend is strict — every auth endpoint accepts *only* the exact
+demo credentials and returns `401` for anything else, so a typo in the
+pool-editor input is immediately visible in the k6 report. A yellow
+"Demo-Credentials" banner appears on each of these endpoints in the UI
+with a one-click **Apply to fields** button so the user does not have to
+type the values by hand.
 
 The demo also declares four `servers` entries (local demo, staging,
 integration, production) so that the **Base-URL dropdown** in the load

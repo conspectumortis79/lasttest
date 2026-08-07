@@ -269,8 +269,31 @@ class LocalK6TestRunService(
                         parameterValues = c.parameterValues,
                         requestBodyJson = c.requestBodyJson,
                         bearerToken = c.bearerToken,
+                        basicAuthUsername = c.basicAuthUsername,
+                        basicAuthPassword = c.basicAuthPassword,
+                        apiKey = c.apiKey,
+                        oauth2Token = c.oauth2Token,
                     )
                 }
+        // Auth credentials are considered "configured" the moment
+        // either field on either the primary payload or the legacy
+        // flat configuration carries a non-blank value. A basic-auth
+        // username with an empty password is still a configuration
+        // that the user explicitly entered, so we honour it.
+        val basicAuthConfigured =
+            !primary?.basicAuthUsername.isNullOrBlank() ||
+                !primary?.basicAuthPassword.isNullOrBlank() ||
+                !configuration?.basicAuthUsername.isNullOrBlank() ||
+                !configuration?.basicAuthPassword.isNullOrBlank()
+        val bearerTokenConfigured =
+            !primary?.bearerToken.isNullOrBlank() ||
+                !configuration?.bearerToken.isNullOrBlank()
+        val apiKeyConfigured =
+            !primary?.apiKey.isNullOrBlank() ||
+                !configuration?.apiKey.isNullOrBlank()
+        val oauth2TokenConfigured =
+            !primary?.oauth2Token.isNullOrBlank() ||
+                !configuration?.oauth2Token.isNullOrBlank()
         return TestRunOperationConfiguration(
             operationId = operationId,
             method = method,
@@ -289,7 +312,10 @@ class LocalK6TestRunService(
                     )
                 },
             requestBodyJson = primary?.requestBodyJson ?: reportRequestBody(configuration),
-            bearerTokenConfigured = !primary?.bearerToken.isNullOrBlank() || !configuration?.bearerToken.isNullOrBlank(),
+            bearerTokenConfigured = bearerTokenConfigured,
+            basicAuthConfigured = basicAuthConfigured,
+            apiKeyConfigured = apiKeyConfigured,
+            oauth2TokenConfigured = oauth2TokenConfigured,
         )
     }
 

@@ -63,7 +63,12 @@ paths:
     post:
       operationId: searchProducts
       summary: Produkte per JSON-Body suchen (Bearer-Demo)
-      description: Als Bearer-Token kann für die Demo ein beliebiger nicht-leerer Wert verwendet werden.
+      description: |
+        Verlangt HTTP Bearer Auth. Das `lasttest`-Demo-Backend akzeptiert
+        **nur** den unten genannten Demo-Token und liefert sonst
+        `401 Unauthorized`.
+
+        **Demo-Token (Testzwecke):** `demo-bearer-token`
       security:
         - bearerAuth: []
       requestBody:
@@ -119,12 +124,101 @@ paths:
       responses:
         '204':
           description: Produkt gelöscht
+  /products/admin/stats:
+    get:
+      operationId: getAdminStats
+      summary: Admin-Statistiken (Basic-Auth-Demo)
+      description: |
+        Verlangt HTTP Basic Auth (RFC 7617). Das `lasttest`-Demo-Backend
+        akzeptiert **nur** das unten genannte Demo-Credentials-Paar
+        (case-sensitive) und liefert sonst `401 Unauthorized`.
+
+        **Demo-Credentials (Testzwecke):**
+        - Username: `alice`
+        - Password: `s3cret`
+      security:
+        - basicAuth: []
+      responses:
+        '200':
+          description: Statistik als JSON
+        '401':
+          description: Basic-Auth fehlt oder ist ungültig
+  /products/lookup-by-id:
+    get:
+      operationId: lookupProduct
+      summary: Produkt per ID nachschlagen (API-Key-Demo)
+      description: |
+        Verlangt einen API Key im `X-API-Key`-Header. Das
+        `lasttest`-Demo-Backend akzeptiert **nur** den unten genannten
+        Demo-Key (case-sensitive) und liefert sonst `401 Unauthorized`.
+
+        **Demo-API-Key (Testzwecke):** `demo-api-key-12345`
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+      responses:
+        '200':
+          description: Produkt als JSON
+        '401':
+          description: API-Key fehlt oder ist ungültig
+        '404':
+          description: Produkt mit der angegebenen ID existiert nicht
+  /products/me:
+    get:
+      operationId: getMe
+      summary: Aktuellen Benutzer abrufen (OAuth-2.0-Demo)
+      description: |
+        Verlangt einen OAuth 2.0 Access Token im
+        `Authorization: Bearer <token>`-Header (RFC 6750). Das
+        `lasttest`-Demo-Backend akzeptiert **nur** den unten genannten
+        Demo-Token (case-sensitive) und liefert sonst
+        `401 Unauthorized`.
+
+        **Demo-Access-Token (Testzwecke):** `demo-oauth2-token-12345`
+      security:
+        - oauth2: []
+      responses:
+        '200':
+          description: Benutzerinformationen als JSON (mit den dem Token zugewiesenen Scopes)
+        '401':
+          description: OAuth-2.0-Token fehlt oder ist ungültig
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    basicAuth:
+      type: http
+      scheme: basic
+      description: HTTP Basic Authentication (Username + Passwort)
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API Key Authentication via X-API-Key-Header (Stripe-/GitHub-Stil)
+    oauth2:
+      type: oauth2
+      description: OAuth 2.0 (RFC 6749) — Access Token als Bearer (RFC 6750)
+      flows:
+        clientCredentials:
+          tokenUrl: http://localhost:8286/demo-api/oauth/token
+          scopes:
+            read:products: Produkte lesen
+            write:products: Produkte schreiben
+        authorizationCode:
+          authorizationUrl: http://localhost:8286/demo-api/oauth/authorize
+          tokenUrl: http://localhost:8286/demo-api/oauth/token
+          scopes:
+            read:products: Produkte lesen
+            write:products: Produkte schreiben
   parameters:
     ProductId:
       name: id

@@ -270,18 +270,29 @@ Port 8286 bedient, verwende stattdessen `./docker-start.sh` (oder
 ## 4. Erster Start und die Demo-API
 
 Das Repository enthält eine kleine, aber vollständige Demo-API unter
-`demo/openapi-demo.yaml`. Sie übt die drei Dinge, die lasttest am
+`demo/openapi-demo.yaml`. Sie übt die vier Authentifizierungs-Schemata,
+die lasttest erkennt, plus die Request-Shapes, die lasttest am
 meisten interessieren:
 
 - **GET** mit Query- und Pfadparametern
 - **POST** mit JSON-Body
-- **Bearer-Authentifizierung**, demonstriert durch
+- **HTTP-Basic**-Authentifizierung, demonstriert durch
+  `GET /products/admin/stats`
+- **HTTP-Bearer**-Authentifizierung, demonstriert durch
   `POST /products/search`
+- **API Key** in einem eigenen Header, demonstriert durch
+  `GET /products/lookup-by-id`
+- **OAuth 2.0**-Access-Tokens, demonstriert durch
+  `GET /products/me`
 
 Nach dem Import betreibt lasttest selbst einen winzigen In-Process-
-Server, der die gleichen Pfade unter `/demo-api/*` beantwortet. Damit
-kannst du den kompletten End-to-End-Flow ausführen — Import →
-Konfiguration → Run — ohne externe Abhängigkeit.
+Server, der die gleichen Pfade unter `/demo-api/*` beantwortet. Das
+Demo-Backend ist strikt — jeder Auth-Endpunkt akzeptiert **nur** die
+exakten Demo-Credentials und antwortet sonst `401`, so dass ein
+Tippfehler im Pool-Editor-Eingabefeld sofort im k6-Report sichtbar
+wird, statt unbemerkt durchzurutschen. Damit kannst du den
+kompletten End-to-End-Flow ausführen — Import → Konfiguration →
+Run → 200/401 im Report beobachten — ohne externe Abhängigkeit.
 
 > 💡 Die Demo-API in lasttest ist **kein** echter Persistenz-Layer.
 > Die Daten werden aus den URL-Parametern erzeugt und nach der
@@ -696,21 +707,95 @@ Spec vorbelegt ist. Du kannst ihn frei bearbeiten; der Runner
 validiert das JSON vor dem Test. Wenn der Body optional ist und du
 keinen Body senden willst, leere die Textarea.
 
-### 8.5 Bearer-Token
+### 8.5 Authentifizierung
 
-Das letzte Eingabefeld auf jeder Karte ist ein **Bearer-Token**-Feld.
-Sein Verhalten hängt von der Spec ab:
+`lasttest` erkennt die vier gängigsten Authentifizierungs-Schemata,
+die in einem Swagger 2.0- oder OpenAPI 3-Dokument deklariert werden
+können. Jedes erkannte Schema fügt der Endpunkt-Karte ein dediziertes
+Credential-Eingabefeld hinzu (nur sichtbar, wenn die Operation das
+Schema referenziert), und das gelbe *Demo-Banner* leuchtet auf den
+vier mitgelieferten Demo-Endpunkten auf, sodass der User die
+Demo-Secrets mit einem Klick in die Eingabefelder übernehmen kann.
 
-- Definiert die Spec ein Bearer-Security-Schema, ist das Feld mit
-  `Swagger / OpenAPI Auth` beschriftet und der Placeholder erinnert
-  dich, den Token *ohne* das `Bearer `-Präfix einzugeben.
-- Definiert die Spec keine Auth, ist das Feld trotzdem da (mit der
-  Beschriftung `Optional für diesen Endpunkt`), damit du
-  ad-hoc-Authentifizierung zu einem öffentlichen Endpunkt
-  hinzufügen kannst.
+| Schema | Spec-Deklaration | Wire-Format | Demo-Endpunkt | Demo-Credentials |
+|---|---|---|---|---|
+| **HTTP Basic** (RFC 7617) | `type: http, scheme: basic` | `Authorization: Basic <base64(user:pass)>` | `GET /products/admin/stats` | `alice` / `s3cret` |
+| **HTTP Bearer** (RFC 6750) | `type: http, scheme: bearer` | `Authorization: Bearer <token>` | `POST /products/search` | `demo-bearer-token` |
+| **API Key in eigenem Header** | `type: apiKey, in: header, name: X-…` | `X-…: <key>` | `GET /products/lookup-by-id?id=1` | `X-API-Key: demo-api-key-12345` |
+| **OAuth 2.0** (RFC 6749, RFC 6750) | `type: oauth2, flows: {…}` | `Authorization: Bearer <access_token>` | `GET /products/me` | `Bearer demo-oauth2-token-12345` |
 
-Der Wert wird in jeder Iteration des Lasttests als
-`Authorization: Bearer <token>` gesendet.
+Die Legacy-Schemata `apiKey in: query`, `apiKey in: cookie` und
+`openIdConnect` werden beim Import als *Unsupported* gemeldet (so
+sieht der User, welches Schema erkannt wurde, auch wenn lasttest
+es noch nicht nutzen kann). Sie können jederzeit manuell als
+gewöhnlicher Header-Parameter auf der Endpunkt-Karte hinzugefügt
+werden.
+
+#### 8.5.1 HTTP Basic
+
+Wenn die `security`-Liste der Operation ein Basic-Security-Schema
+referenziert, rendert die Karte zwei Password-Eingabefelder mit den
+Beschriftungen **Benutzername** und **Passwort** unter der
+Spaltenüberschrift `Basic-Auth`. Das k6-Skript sendet
+`Authorization: Basic <base64(Benutzername:Passwort)>`. Whitespace
+rund um die Credentials wird getrimmt; ein leerer Benutzername
+*und* ein leeres Passwort werden als "nicht konfiguriert"
+behandelt, sodass der Generator den `Authorization`-Header
+vollständig weglässt (das Demo-Backend antwortet dann `401`).
+
+#### 8.5.2 HTTP Bearer
+
+Ein dediziertes Password-Eingabefeld mit der Beschriftung **Token**
+wird unter der Spaltenüberschrift `Bearer` gerendert. Das k6-Skript
+sendet `Authorization: Bearer <Token>`. Der User tippt den
+rohen Token ein; das `Bearer `-Präfix fügt der Generator hinzu. Ein
+leerer Token lässt den Header weg.
+
+#### 8.5.3 API Key in einem eigenen Header
+
+Ein einzelnes Password-Eingabefeld wird unter der Spaltenüberschrift
+`API-Key` gerendert. Das k6-Skript sendet den *in der Spec
+deklarierten Header-Namen* mit dem vom User eingegebenen Wert. Für
+die Spec `apiKeyAuth: { type: apiKey, in: header, name: X-API-Key }`
+trägt die generierte Request `X-API-Key: <key>`. Ein apiKey im
+`Authorization`-Header wird stattdessen als plainer Bearer erkannt
+(historische Konvention).
+
+#### 8.5.4 OAuth 2.0
+
+OAuth 2.0-Access-Tokens verwenden dasselbe Bearer-Wire-Format wie
+plain Bearer (RFC 6750). lasttest rendert ein separates
+Password-Eingabefeld unter der Spaltenüberschrift `OAuth 2.0`, so
+dass der User den Access-Token in einem dedizierten Slot tippt;
+das generierte Skript sendet aber weiterhin
+`Authorization: Bearer <access_token>`. Das gelbe Demo-Banner
+zeigt zusätzlich den *Flow-Namen* (z. B. `clientCredentials`) und
+die *Scopes* (z. B. `read:products, write:products`), die im
+`flows`-Objekt des Security-Schemas deklariert sind — so weiß der
+User, welche Scopes sein Token abdeckt.
+
+#### 8.5.5 Konfiguration pro Endpunkt
+
+Ein einzelner Endpunkt kann über die `security`-Liste der Spec
+mehrere Requirements deklarieren. lasttest zeigt jedes Requirement
+in der Reihenfolge an, in der die Spec es deklariert, und rendert
+eine Credential-Spalte pro Typ. Der Pool-Editor behandelt jede
+Eingabe als separate Zelle — ein Endpunkt mit
+`security: [{ basicAuth: [] }, { apiKeyAuth: [] }]` bekommt
+beispielsweise sowohl eine `Basic-Auth`-Spalte (Benutzername +
+Passwort) als auch eine `API-Key`-Spalte. Das Legacy-Einzeltoken-Feld
+(`Optional für diesen Endpunkt`) wird weiterhin angezeigt, wenn
+kein Security-Schema deklariert ist, so dass der User
+ad-hoc-Authentifizierung zu einem öffentlichen Endpunkt hinzufügen
+kann.
+
+Das gelbe *Demo-Credentials*-Banner ist fest mit den vier
+Demo-Endpunkten verknüpft und wird **nur** auf diesen angezeigt. Es
+zeigt die Demo-Credentials in Monospace plus einen
+**In Felder übernehmen**-Button, mit dem der User die Werte mit
+einem Klick in die Eingabefelder kopiert. Das Banner ist der
+schnellste Weg, um zu prüfen, ob die Spec korrekt verdrahtet ist,
+ohne die Demo-Secrets per Hand zu kopieren.
 
 ### 8.6 Payload-Pool — mehrere Datensätze pro Endpunkt
 

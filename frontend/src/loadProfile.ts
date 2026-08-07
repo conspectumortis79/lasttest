@@ -61,6 +61,42 @@ export function defaultLoadProfile(): LoadProfile {
   return { type: 'constant-vus', virtualUsers: 10, durationSeconds: 30 }
 }
 
+/**
+ * Carry the user's chosen [PayloadStrategy] from a previous profile
+ * onto a freshly built one. Used by the editor in two places:
+ *
+ *  - **Preset application.** Presets (Smoke, Load, Stress, …) return
+ *    a fresh `LoadProfile` template without a `payloadStrategy`.
+ *    The editor's preset onClick handler wraps the result through
+ *    this helper so the manually chosen strategy survives clicking
+ *    a preset.
+ *  - **Executor type change.** The editor's `changeProfileType`
+ *    helper (defined inside `LoadProfileEditor.tsx`) builds a new
+ *    profile of the requested executor type while carrying over
+ *    type-specific fields (VUs, iterations, stages, …). Without
+ *    this helper the strategy would be reset to `undefined`
+ *    (i.e. the backend default `sequential`) every time the user
+ *    switches the executor dropdown.
+ *
+ * The helper never invents a strategy: if [previous] did not have
+ * one, the merged profile carries `payloadStrategy: undefined`
+ * exactly like the fresh profile. The user always sees the
+ * strategy they last chose — or, before any choice, no strategy
+ * at all.
+ */
+export function withStrategy<T extends LoadProfile>(fresh: T, previous: LoadProfile): T {
+  // Only carry the strategy over when the previous profile had one.
+  // Spreading `payloadStrategy: undefined` would add an explicit
+  // `undefined` key on the fresh profile, which is observably
+  // different from "no key at all" for `deepEqual` and for any
+  // future code that checks `key in profile`. The wire shape and
+  // the backend behaviour are the same in both cases, but the
+  // in-memory shape matches the user's mental model: "I have not
+  // chosen a strategy yet" == the key is absent.
+  if (previous.payloadStrategy === undefined) return fresh
+  return { ...fresh, payloadStrategy: previous.payloadStrategy }
+}
+
 export function smokePreset(): LoadProfile {
   // 1 VU for 30 s — used as a CI pre-flight gate.
   return { type: 'constant-vus', virtualUsers: 1, durationSeconds: 30 }
