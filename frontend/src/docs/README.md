@@ -78,6 +78,86 @@ backend with all JVM libraries, the built React frontend, and k6. Gradle,
 the Kotlin compiler, and Node.js are only used inside isolated build stages
 and are not required on the host or inside the final image.
 
+## Trusting custom TLS certificates
+
+When the target API uses a TLS certificate that is not signed by a
+public CA — for example a self-signed certificate in a staging
+environment, or a certificate issued by a corporate / internal CA —
+the JVM refuses the TLS handshake and lasttest reports
+`PKIX path building failed: unable to find valid certification path to
+requested target`.
+
+Configure lasttest with an additional TrustStore that contains the
+missing certificate(s) or CA chain. The Java system TrustStore is
+still used, so public CAs keep working — only the additional
+certificates are layered on top.
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `LASTTEST_TRUSTSTORE_PATH` | yes | Absolute path to a file containing the certificate(s). Supported formats: `PKCS12` (`.p12`, `.pfx`), `JKS` (`.jks`), or PEM (`.pem`, `.crt`, `.cer` — one or more `CERTIFICATE` blocks). |
+| `LASTTEST_TRUSTSTORE_PASSWORD` | only for PKCS12 / JKS | Password for the TrustStore. Empty string is allowed for PEM files. |
+
+The bundled `docker-compose.yml` already wires both variables for the
+backend and mounts the host path `certs/custom-ca.pem` into the
+container read-only at `/etc/lasttest/custom-ca.pem`. Drop your
+company's root CA at that path (PEM format, possibly with multiple
+`-----BEGIN CERTIFICATE-----` blocks) and restart:
+
+```bash
+docker compose restart lasttest
+```
+
+The backend logs show one of these lines on startup:
+
+```text
+Lade zusätzlichen TrustStore aus /etc/lasttest/custom-ca.pem (Variable LASTTEST_TRUSTSTORE_PATH) …
+TrustStore /etc/lasttest/custom-ca.pem erfolgreich geladen.
+```
+
+If the load fails, the backend logs a warning and falls back to the
+JVM defaults — the TLS error resurfaces at the next request.
+
+Generate a PEM file from a target host with OpenSSL:
+
+```bash
+openssl s_client -showcerts -connect api.example.com:443 </dev/null 2>/dev/null \
+  | openssl x509 -outform PEM > staging-ca.pem
+```
+
+Or build a PKCS12 TrustStore from a downloaded certificate:
+
+```bash
+keytool -importcert -alias staging -file staging-ca.pem \
+  -keystore staging.p12 -storetype PKCS12 -storepass changeit -noprompt
+```
+
+> **k6 runs as a separate process and uses Go's TLS stack.** It does
+> **not** read the Java TrustStore, so the spec import may succeed
+> while the load test then fails with `x509: certificate signed by
+> unknown authority`. k6 reads its CA bundle from the standard Go
+> variable `SSL_CERT_FILE` — point it at the same PEM inside the
+> container. Note that `SSL_CERT_FILE` **replaces** the system bundle
+> (it does not layer), so only use it when every target your tests
+> hit is signed by the same custom CA, or concatenate multiple CA
+> certificates into one PEM. For a directory of PEM files, use
+> `SSL_CERT_DIR` instead.
+
+Local development (`./gradlew bootRun` + `npm run dev`) uses the same
+variables — export them in the shell that launches the backend and
+the host `k6` binary:
+
+```bash
+export LASTTEST_TRUSTSTORE_PATH=$PWD/certs/custom-ca.pem
+export LASTTEST_TRUSTSTORE_PASSWORD=
+export SSL_CERT_FILE=$PWD/certs/custom-ca.pem
+```
+
+Restart is required: the TrustStore is loaded once at backend startup
+and `SSL_CERT_FILE` is read once per `k6` process. For the full
+end-to-end walkthrough (including limitations around mTLS, multi-CA
+PEMs, and `direnv`-based dev workflows) see the **User Guide**
+section *Trusting custom TLS certificates*.
+
 ## UI language
 
 The lasttest frontend is **fully bilingual**. A pill in the top toolbar
