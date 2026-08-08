@@ -164,13 +164,19 @@ data class ApiOperation(
     /**
      * Derived from [authRequirements] for callers that only care about
      * the Bearer case (UI placeholder, importer regression test, …).
-     * True iff at least one requirement is a [AuthRequirement.Bearer]
-     * or a [AuthRequirement.OAuth2] — both ride the same
-     * `Authorization: Bearer <token>` wire format (RFC 6750) so the
-     * UI must render the credential input for both.
+     * True iff at least one requirement is a [AuthRequirement.Bearer],
+     * a [AuthRequirement.OAuth2], or a [AuthRequirement.OpenIdConnect]
+     * — all three ride the same `Authorization: Bearer <token>` wire
+     * format (RFC 6750) so the UI must render the credential input
+     * for each of them.
      */
     val bearerAuth: Boolean
-        get() = authRequirements.any { it is AuthRequirement.Bearer || it is AuthRequirement.OAuth2 }
+        get() =
+            authRequirements.any {
+                it is AuthRequirement.Bearer ||
+                    it is AuthRequirement.OAuth2 ||
+                    it is AuthRequirement.OpenIdConnect
+            }
 }
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -245,6 +251,16 @@ data class OperationConfiguration(
      * [ApiOperation] declares [de.lasttest.api.AuthRequirement.OAuth2].
      */
     val oauth2Token: String? = null,
+    /**
+     * @deprecated Derived from `payloads[0]` via [primaryPayload] when `payloads` is empty.
+     * OpenID Connect ID token. Used only when the corresponding
+     * [ApiOperation] declares [de.lasttest.api.AuthRequirement.OpenIdConnect].
+     * The wire format is identical to [bearerToken] / [oauth2Token]
+     * (`Authorization: Bearer <id_token>` per RFC 6750); the field
+     * is split out so the UI can render a dedicated OIDC input and
+     * the banner can show the discovery URL and scopes.
+     */
+    val oidcIdToken: String? = null,
 ) {
     /**
      * Returns the first payload from [payloads], or synthesises one from
@@ -263,6 +279,7 @@ data class OperationConfiguration(
                 basicAuthPassword = basicAuthPassword,
                 apiKey = apiKey,
                 oauth2Token = oauth2Token,
+                oidcIdToken = oidcIdToken,
             )
 }
 
@@ -302,6 +319,16 @@ data class OperationPayload(
      * [ApiOperation] declares [de.lasttest.api.AuthRequirement.OAuth2].
      */
     val oauth2Token: String? = null,
+    /**
+     * OpenID Connect ID token. Used only when the corresponding
+     * [ApiOperation] declares
+     * [de.lasttest.api.AuthRequirement.OpenIdConnect]. The wire
+     * format is identical to [bearerToken] / [oauth2Token]
+     * (`Authorization: Bearer <id_token>` per RFC 6750); the field
+     * is split out so the UI can render a dedicated OIDC input and
+     * the banner can show the discovery URL and scopes.
+     */
+    val oidcIdToken: String? = null,
 )
 
 data class CreateTestRunRequest(
@@ -380,6 +407,15 @@ data class TestRunOperationConfiguration(
      * configured" line.
      */
     val oauth2TokenConfigured: Boolean = false,
+    /**
+     * True when at least one payload in [payloads] (or the legacy
+     * flat fields) has a non-blank OpenID Connect ID token. The
+     * report uses this to render the "OIDC: configured / not
+     * configured" line. Same wire format as OAuth 2.0 / Bearer;
+     * the field is split out so the report can show the
+     * discovery URL alongside the token line.
+     */
+    val oidcIdTokenConfigured: Boolean = false,
 )
 
 enum class TestRunStatus {

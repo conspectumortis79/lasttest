@@ -183,6 +183,7 @@ class SwaggerSpecificationImporter : SpecificationImporter {
                     is AuthRequirement.Bearer -> "Bearer:${requirement.schemeName}"
                     is AuthRequirement.ApiKey -> "ApiKey:${requirement.schemeName}:${requirement.headerName}"
                     is AuthRequirement.OAuth2 -> "OAuth2:${requirement.schemeName}"
+                    is AuthRequirement.OpenIdConnect -> "OpenIdConnect:${requirement.schemeName}:${requirement.openIdConnectUrl}"
                     is AuthRequirement.Unsupported -> "Unsupported:${requirement.schemeName}"
                 }
             }

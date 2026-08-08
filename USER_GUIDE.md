@@ -267,16 +267,33 @@ instead.
 ## 4. First run and the demo API
 
 The repository ships a small but complete demo API at
-`demo/openapi-demo.yaml`. It exercises the four authentication
+`demo/openapi-demo.yaml`. It exercises the five authentication
 schemes lasttest recognises plus the request shapes it cares about
 most:
 
 - **GET** with query and path parameters
 - **POST** with a JSON body
 - **HTTP Basic** authentication, demonstrated by `GET /products/admin/stats`
+  (demo credentials `alice` / `s3cret`)
 - **HTTP Bearer** authentication, demonstrated by `POST /products/search`
+  (demo token `demo-bearer-token`)
 - **API Key** in a custom header, demonstrated by `GET /products/lookup-by-id`
+  (demo header `X-API-Key: demo-api-key-12345`)
 - **OAuth 2.0** access tokens, demonstrated by `GET /products/me`
+  (demo token `Bearer demo-oauth2-token-12345`)
+- **OpenID Connect** (OIDC) ID tokens, demonstrated by
+  `GET /products/my-profile` (demo token
+  `Bearer demo-oidc-id-token-12345`)
+
+> 💡 OIDC shares its wire format with Bearer and OAuth 2.0
+> (`Authorization: Bearer <token>` per RFC 6750) — the difference
+> lives one layer up: an OIDC ID token is issued by an
+> OpenID-Connect identity provider via a discovery document at
+> `openIdConnectUrl`, while an OAuth 2.0 access token comes from
+> an OAuth 2.0 authorization server. lasttest renders a separate
+> *OIDC* credential input on the endpoint card so the two flows
+> can be reasoned about independently, even though the generated
+> k6 script emits the same header in both cases.
 
 After the import, lasttest itself runs a tiny in-process server that
 answers the same paths under `/demo-api/*`. The demo backend is
@@ -650,11 +667,11 @@ textarea.
 
 ### 8.5 Authentication
 
-`lasttest` recognises the four most common authentication schemes
+`lasttest` recognises the five most common authentication schemes
 declared in a Swagger 2.0 or OpenAPI 3 document. Each recognised
 scheme adds a dedicated credential input to the endpoint card
 (visible only when the operation references that scheme), and the
-yellow *demo banner* lights up on the four bundled demo endpoints so
+yellow *demo banner* lights up on the five bundled demo endpoints so
 the user can copy the demo secrets into the input with one click.
 
 | Scheme | Spec declaration | Wire format | Demo endpoint | Demo credentials |
@@ -663,12 +680,14 @@ the user can copy the demo secrets into the input with one click.
 | **HTTP Bearer** (RFC 6750) | `type: http, scheme: bearer` | `Authorization: Bearer <token>` | `POST /products/search` | `demo-bearer-token` |
 | **API Key in custom header** | `type: apiKey, in: header, name: X-…` | `X-…: <key>` | `GET /products/lookup-by-id?id=1` | `X-API-Key: demo-api-key-12345` |
 | **OAuth 2.0** (RFC 6749, RFC 6750) | `type: oauth2, flows: {…}` | `Authorization: Bearer <access_token>` | `GET /products/me` | `Bearer demo-oauth2-token-12345` |
+| **OpenID Connect** (OIDC, on top of OAuth 2.0) | `type: openIdConnect, openIdConnectUrl: <discovery-url>` | `Authorization: Bearer <id_token>` | `GET /products/my-profile` | `Bearer demo-oidc-id-token-12345` |
 
-The legacy `apiKey in: query`, `apiKey in: cookie` and `openIdConnect`
-schemes are reported in the import as *unsupported* (so the user sees
-which scheme was detected, even if lasttest does not yet know how to
-use it). They can always be added manually as a regular header
-parameter on the operation card.
+The legacy `apiKey in: query` and `apiKey in: cookie` schemes are
+reported in the import as *unsupported* (so the user sees which
+scheme was detected, even if lasttest does not yet know how to use
+them). They can always be added manually as a regular query or
+header parameter on the operation card. (OpenID Connect *is*
+supported — see [§8.5.5](#855-openid-connect-oidc) below.)
 
 #### 8.5.1 HTTP Basic
 
@@ -711,7 +730,39 @@ the *scopes* (e.g. `read:products, write:products`) declared in the
 securityScheme's `flows` object, so the user knows which scopes
 their token is allowed to exercise.
 
-#### 8.5.5 Per-endpoint configuration
+#### 8.5.5 OpenID Connect (OIDC)
+
+OpenID Connect is an identity layer on top of OAuth 2.0: the wire
+format is identical (an `Authorization: Bearer <token>` header per
+RFC 6750), but the token is an *ID token* issued by an OpenID
+Connect provider, not a generic OAuth 2.0 access token. The spec
+declares it with `type: openIdConnect` plus a single
+`openIdConnectUrl` pointing at the provider's discovery document
+(e.g. `/.well-known/openid-configuration`). The `flows` block is
+optional and only used by the UI to surface the *flow name* and
+*scopes* on the demo banner — it does not change the generated
+header.
+
+lasttest renders a dedicated password-style input under the column
+header **OIDC** so the user can think about ID tokens and OAuth 2.0
+access tokens independently, even though both end up in the same
+`Authorization: Bearer …` line in the k6 script. The demo
+backend pins the OIDC endpoint to the token
+`demo-oidc-id-token-12345` and returns `401` for everything else,
+so a typo is visible immediately in the report. Endpoints that
+declare OIDC and OAuth 2.0 next to each other (which is uncommon
+but legal) get *two* credential columns — the generator picks up
+both and emits the corresponding headers in declaration order.
+
+> 💡 Why a separate input if the header is the same? In practice
+> the tokens come from different places (an OIDC provider's
+> `/token` endpoint vs. an OAuth 2.0 authorization server), they
+> have different lifetimes, and they grant different scopes. Mixing
+> them up at the call site is a common bug — keeping the two
+> inputs visually separate on the endpoint card makes that mistake
+> obvious before the test run.
+
+#### 8.5.6 Per-endpoint configuration
 
 A single endpoint can declare more than one requirement via the
 spec's `security` list. lasttest surfaces every requirement in the
@@ -724,7 +775,7 @@ password) and an `API key` column. The legacy single-token field
 scheme is declared, so the user can add ad-hoc authentication to a
 public endpoint.
 
-The yellow *Demo-Credentials* banner is hardcoded to the four demo
+The yellow *Demo-Credentials* banner is hardcoded to the five demo
 endpoints and is **only** shown on those. It surfaces the demo
 credentials in monospace plus a one-click **In Felder übernehmen**
 button that copies the values into the input fields. The banner is

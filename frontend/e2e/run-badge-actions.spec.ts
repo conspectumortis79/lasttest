@@ -191,18 +191,19 @@ test('remove icon is permanently visible for a completed badge and drops the bad
   await page.getByLabel('Dauer (Sekunden)').fill('3')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
+  let runId = ''
   try {
     const badge = page.locator('.run-badge').first()
     await expect(badge).toBeVisible({ timeout: 10_000 })
     await expect(badge).toContainText('COMPLETED', { timeout: 30_000 })
 
-    const id = await runIdFromBadge(page)
+    runId = await runIdFromBadge(page)
     // The remove button is always visible on terminal badges
     // (mockup variant A). We assert that without any hover it
     // is already in the DOM and addressable — the user
     // should not have to discover the action by mousing
     // around.
-    const remove = page.locator(`[data-testid="run-badge-remove-${id}"]`)
+    const remove = page.locator(`[data-testid="run-badge-remove-${runId}"]`)
     await expect(remove).toBeVisible()
     await expect(remove).toHaveAttribute('aria-label', 'Aus Ansicht entfernen')
 
@@ -210,13 +211,15 @@ test('remove icon is permanently visible for a completed badge and drops the bad
     // Same assertion as the right-click "Aus Ansicht
     // entfernen" test — the inline X must use the same code
     // path so the dashboard updates the same way.
-    await expect(page.locator(`.run-badge[title^="${id}"]`)).toHaveCount(0)
+    await expect(page.locator(`.run-badge[title^="${runId}"]`)).toHaveCount(0)
   } finally {
     // Cleanup: the run may be terminal already, but
-    // force-aborting it is a safe no-op and matches the
-    // contract used by context-menu.spec.ts.
-    const id = await page.locator('.run-badge').first().getAttribute('title').catch(() => '')
-    if (id) await forceAbortRun(id.split(' · ')[0] ?? '')
+    // force-aborting it is a safe no-op. We use the
+    // captured run id rather than re-querying the UI: the
+    // action under test may have removed the badge from
+    // the dashboard already, in which case `getAttribute`
+    // would hang waiting for a non-existent element.
+    if (runId) await forceAbortRun(runId)
   }
 })
 
@@ -233,10 +236,11 @@ test('remove icon is keyboard-activatable via Enter and Space', async ({ page })
   await page.getByLabel('Dauer (Sekunden)').fill('3')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
+  let runId = ''
   try {
     const badge = page.locator('.run-badge').first()
     await expect(badge).toContainText('COMPLETED', { timeout: 30_000 })
-    const id = await runIdFromBadge(page)
+    runId = await runIdFromBadge(page)
 
     // Tab through the page until the remove button is
     // focused. The exact number of tabs depends on the page
@@ -250,16 +254,15 @@ test('remove icon is keyboard-activatable via Enter and Space', async ({ page })
     let foundFocus = false
     for (let i = 0; i < 30; i++) {
       const focused = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? '')
-      if (focused === `run-badge-remove-${id}`) { foundFocus = true; break }
+      if (focused === `run-badge-remove-${runId}`) { foundFocus = true; break }
       await page.keyboard.press('Tab')
     }
     expect(foundFocus).toBe(true)
 
     await page.keyboard.press('Enter')
-    await expect(page.locator(`.run-badge[title^="${id}"]`)).toHaveCount(0)
+    await expect(page.locator(`.run-badge[title^="${runId}"]`)).toHaveCount(0)
   } finally {
-    const id = await page.locator('.run-badge').first().getAttribute('title').catch(() => '')
-    if (id) await forceAbortRun(id.split(' · ')[0] ?? '')
+    if (runId) await forceAbortRun(runId)
   }
 })
 

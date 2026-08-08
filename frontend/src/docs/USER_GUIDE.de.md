@@ -15,6 +15,8 @@
    - 3.2 [Docker mit InfluxDB + Grafana (Zeitreihen)](#32-docker-mit-influxdb--grafana-zeitreihen)
    - 3.3 [Lokales Entwicklungs-Setup](#33-lokales-entwicklungs-setup)
 4. [Erster Start und die Demo-API](#4-erster-start-und-die-demo-api)
+   - 4.1 [Demo laden](#demo-laden)
+   - 4.2 [Demo an- und ausschalten](#demo-an-und-ausschalten)
 5. [Der Haupt-Workflow auf einen Blick](#5-der-haupt-workflow-auf-einen-blick)
 6. [Obere Toolbar, Einstellungen und Sprache](#6-obere-toolbar-einstellungen-und-sprache)
    - 6.1 [Aufbau der Toolbar](#61-aufbau-der-toolbar)
@@ -284,6 +286,8 @@ meisten interessieren:
   `GET /products/lookup-by-id`
 - **OAuth 2.0**-Access-Tokens, demonstriert durch
   `GET /products/me`
+- **OpenID Connect (OIDC)**-ID-Tokens, demonstriert durch
+  `GET /products/my-profile`
 
 Nach dem Import betreibt lasttest selbst einen winzigen In-Process-
 Server, der die gleichen Pfade unter `/demo-api/*` beantwortet. Das
@@ -312,6 +316,66 @@ Du solltest eine Karte mit sechs Operationen sehen (zwei read-only
 GETs und vier schreibende Writes). Die erste read-only-Operation ist
 als sicherer Startpunkt vorausgewählt — jede andere Operation, auch
 die verbleibende read-only, muss explizit angehakt werden.
+
+### Demo an- und ausschalten
+
+Die Demo ist Opt-in. Die Einstellungs-Schublade (obere Toolbar → **⚙
+Zahnrad**) bietet einen **Demo-API**-Hauptschalter in einem eigenen
+Abschnitt an. Der Schalter ist der einzige Weg, die Demo an- oder
+auszuschalten — es gibt keine Auto-Erkennung, keinen versteckten
+Default, keine URL-Magie. Der gebündelte `/demo-api/*`-Server, der
+`/?demo-traffic`-Dashboard-Link in der oberen Toolbar, die
+`/demo-swagger-ui`-Seite und die gebündelte `openapi-demo.yaml`
+hängen alle an diesem einen Schalter.
+
+Der Schalter ist eine **prozessweite** Einstellung (nicht pro
+Benutzer) und wird in `localStorage` unter `lasttest.demo.enabled`
+gespeichert, so dass die Wahl einen Reload und einen neuen Tab
+überlebt.
+
+**Was beim Umschalten passiert — in beide Richtungen:**
+
+| Richtung | Effekt |
+| --- | --- |
+| **Aus → An** (aktivieren) | Die gebündelte `openapi-demo.yaml` wird von `/api/demo-specification` geladen und in die Swagger-Textarea geschrieben. Der `Demo-API`-Link erscheint in der oberen Toolbar (mit "Aktiv"-Pille, solange der Schalter an bleibt). `/demo-api/*` und `/demo-swagger-ui` antworten wieder. |
+| **An → Aus** (deaktivieren) | Die Swagger-Textarea wird auf das leere Sample zurückgesetzt. Der `Demo-API`-Link verschwindet aus der Toolbar. `/demo-api/*` und `/demo-swagger-ui` antworten wieder mit 404. |
+
+**Beide Richtungen lösen einen kompletten Dashboard-Reset aus —
+genau wie ein Reload der Seite.** Was auch immer der Benutzer vor
+dem Umschalten auf dem Bildschirm hatte, gehört zur vorherigen
+Session, also ist das Umschalten ein harter Schnitt:
+
+- Jeder laufende k6-Run wird mit dem gleichen sanften `SIGTERM`
+  abgebrochen, den auch der Inline-Stop-Button sendet, so dass die
+  k6-Prozesse verschwinden, bevor der Rest des States gelöscht
+  wird. Der Cancel-Request ist best-effort: Wenn das Backend den
+  Run bereits abgeschlossen hat, ist der Call ein No-op.
+- Die Runs-Map wird geleert — keine Badges, keine Detail-Karte,
+  kein Run-Menü-State.
+- Die importierte Spec wird vergessen — die Operations-Karte
+  (Schritt 2) verschwindet, die `selected` / `collapsed` /
+  `operationSettings`-Sets werden verworfen.
+- Das Lastprofil wird auf den Default zurückgesetzt
+  (`constant-vus`, 10 VUs für 30 s). Preset-Auswahl,
+  Exekutor-Wechsel oder Feldjustierungen werden zurückgenommen.
+- Die Fehler- und Run-Action-Banner werden geleert.
+- Das Rechtsklick-Kontextmenü an einem Run-Badge, falls es offen
+  war, wird geschlossen.
+
+> 💡 **Warum der Reset symmetrisch ist.** Die Demo umzuschalten
+> bedeutet: "Ich will eine saubere Session gegen das
+> Demo-Backend". Egal, ob der Benutzer in die Demo wechselt
+> (aus → an) oder aus ihr heraus (an → aus), die vorherigen
+> Inhalte des Dashboards sind veraltet: importierte Endpunkte
+> waren für das vorherige Backend ausgewählt, das Lastprofil
+> war auf das vorherige Ziel abgestimmt, und ein laufender Run
+> trifft den falschen Server. Das Dashboard in beide Richtungen
+> zurückzusetzen ist der einzige Weg, die zwei mentalen Modelle
+> — "Ich teste die Demo" und "Ich teste meine eigene API" —
+> strikt getrennt zu halten. Wer seine Konfiguration behalten
+> will, beendet den aktuellen Test, kopiert die Einstellungen
+> händisch heraus und schaltet dann erst um.
+
 
 ---
 
@@ -383,10 +447,12 @@ von `DocPopup.tsx`. Beide leben in `frontend/src/`.
 Ein Klick auf das Zahnrad öffnet eine Slide-in-Schublade von der
 rechten Viewport-Kante. Die Schublade ist modal: Sie fängt den Fokus
 ein, solange sie offen ist, und schließt auf `Esc`, auf Backdrop-Klick
-und auf den Close-Button. Die aktuelle Implementierung exponiert
-einen einzigen Abschnitt — **Sprache** — damit die Schublade nicht
-leer ist. Neue Abschnitte (Theme, Telemetrie-Opt-out usw.) können
-hinzugefügt werden, ohne den i18n-Kern anzufassen.
+und auf den Close-Button. Die Schublade bietet drei Abschnitte —
+**Sprache**, **Benachrichtigungen** und **Demo-API** — damit jeder
+benutzerorientierte Schalter an einer Stelle lebt. Der
+Sprache-Abschnitt ist der einzige, der die Lokalisierungs-Chrome
+beeinflusst; die anderen beiden sind in eigenen Unterabschnitten
+beschrieben.
 
 **Sprache wechseln, Schritt für Schritt:**
 
@@ -405,6 +471,19 @@ hinzugefügt werden, ohne den i18n-Kern anzufassen.
    Besuch von lasttest in einem neuen Tab behält die gewählte Sprache.
 5. Schließe die Schublade mit `Esc`, dem Close-Button oder einem
    Klick auf den abgedunkelten Backdrop.
+
+> 💡 **Demo-API umschalten.** Der dritte Abschnitt der Schublade
+> trägt den **Demo-API**-Hauptschalter. An aktiviert den
+> gebündelten `/demo-api/*`-Server und den
+> `/?demo-traffic`-Dashboard-Link; aus deaktiviert beides. **Beide
+> Richtungen wischen das Dashboard** — jeder laufende k6-Test
+> wird abgebrochen (das gleiche sanfte `SIGTERM`, das der
+> Inline-Stop-Button sendet), die importierte Spec wird vergessen
+> und das Lastprofil wird auf den Default zurückgesetzt. Das
+> vollständige Verhalten ist in
+> [Abschnitt 4.2](#demo-an-und-ausschalten) dokumentiert. Die
+> Auswahl wird in `localStorage` unter `lasttest.demo.enabled`
+> gespeichert.
 
 > 💡 **Beispiel — Sprachumstellung auf Deutsch für eine Demo-Session:**
 > Du startest lasttest in Englisch, weil das README dich hierher
@@ -723,9 +802,10 @@ Demo-Secrets mit einem Klick in die Eingabefelder übernehmen kann.
 | **HTTP Bearer** (RFC 6750) | `type: http, scheme: bearer` | `Authorization: Bearer <token>` | `POST /products/search` | `demo-bearer-token` |
 | **API Key in eigenem Header** | `type: apiKey, in: header, name: X-…` | `X-…: <key>` | `GET /products/lookup-by-id?id=1` | `X-API-Key: demo-api-key-12345` |
 | **OAuth 2.0** (RFC 6749, RFC 6750) | `type: oauth2, flows: {…}` | `Authorization: Bearer <access_token>` | `GET /products/me` | `Bearer demo-oauth2-token-12345` |
+| **OpenID Connect** (OIDC, Identitäts-Schicht über OAuth 2.0) | `type: openIdConnect, openIdConnectUrl: <Discovery-URL>` | `Authorization: Bearer <id_token>` | `GET /products/my-profile` | `Bearer demo-oidc-id-token-12345` |
 
 Die Legacy-Schemata `apiKey in: query`, `apiKey in: cookie` und
-`openIdConnect` werden beim Import als *Unsupported* gemeldet (so
+mutual-TLS werden beim Import als *Unsupported* gemeldet (so
 sieht der User, welches Schema erkannt wurde, auch wenn lasttest
 es noch nicht nutzen kann). Sie können jederzeit manuell als
 gewöhnlicher Header-Parameter auf der Endpunkt-Karte hinzugefügt
@@ -774,7 +854,31 @@ die *Scopes* (z. B. `read:products, write:products`), die im
 `flows`-Objekt des Security-Schemas deklariert sind — so weiß der
 User, welche Scopes sein Token abdeckt.
 
-#### 8.5.5 Konfiguration pro Endpunkt
+#### 8.5.5 OpenID Connect (OIDC)
+
+OpenID Connect ist die Identitäts-Schicht über OAuth 2.0. Die Spec
+deklariert sie als `type: openIdConnect, openIdConnectUrl: <URL>`,
+wobei die URL auf das Discovery-Dokument des OP zeigt (den
+`.well-known/openid-configuration`-Endpunkt). Aus Sicht des
+k6-Generators fährt ein OIDC-ID-Token exakt denselben
+`Authorization: Bearer <id_token>`-Header (RFC 6750) wie Bearer
+und OAuth 2.0 — der `openIdConnect`-Subtype ist separat, weil das
+Banner die Discovery-URL und die typischen OIDC-Scopes
+(`openid`, `profile`, `email`, …) anzeigt, so dass der User auf
+einen Blick sieht, dass das Token von einem OIDC-Provider kommt
+und nicht von einem plain OAuth 2.0-Authorization-Server.
+
+lasttest rendert ein separates Password-Eingabefeld unter der
+Spaltenüberschrift `OIDC`, so dass der User das ID-Token in
+einem dedizierten Slot tippt; das generierte k6-Skript sendet
+aber weiterhin `Authorization: Bearer <id_token>`. Das gelbe
+Demo-Banner zeigt zusätzlich die **Discovery-URL**, die auf dem
+Security-Schema deklariert ist, und die **Scopes** (`openid,
+profile, email` für die gebündelte Demo) — so kann der User
+verifizieren, dass das ID-Token für die richtige Audience
+ausgestellt wurde.
+
+#### 8.5.6 Konfiguration pro Endpunkt
 
 Ein einzelner Endpunkt kann über die `security`-Liste der Spec
 mehrere Requirements deklarieren. lasttest zeigt jedes Requirement

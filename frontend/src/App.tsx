@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAutoSizeTextarea } from './useAutoSizeTextarea.ts'
 import {
+  cancellableRunIds,
   isCancellable,
   isInFlight,
   isTerminalRun,
@@ -18,9 +19,13 @@ import {
 } from './runNotifications.ts'
 import './App.css'
 import { TestRunReportPage } from './TestRunReport.tsx'
+import { DemoTrafficPage } from './DemoTrafficPage.tsx'
+import { DemoStatusProvider, useDemoStatus } from './useDemoStatus.tsx'
 import {
   buildMetricRow,
   copyTextToClipboard,
+  k6ScriptDownloadName,
+  k6ScriptUrl,
   parseK6Summary,
   runElapsedSeconds,
   summarizeFailure,
@@ -53,6 +58,7 @@ import {
   hasBearerAuth,
   hasMultipleServers,
   hasOAuth2Auth,
+  hasOpenIdConnectAuth,
   isOperationValid,
   parameterInputKind,
   parameterKey,
@@ -67,7 +73,6 @@ import {
 } from './operationConfiguration.ts'
 import { type FetchedSpecification, validateSpecificationUrl } from './specificationSource.ts'
 import { DemoCredentialsBanner } from './DemoCredentialsBanner.tsx'
-import { fetchWithRetry } from './retryFetch.ts'
 
 type ImportResponse = ImportedSpecification & { message?: string }
 
@@ -157,15 +162,31 @@ function formatMmSs(totalSeconds: number | undefined): string {
 }
 
 function App() {
-  const reportRunId = new URLSearchParams(window.location.search).get('report')
+  const params = new URLSearchParams(window.location.search)
+  const reportRunId = params.get('report')
+  // The demo-traffic page is mounted either with an optional
+  // `?demo-traffic=<runId>` (filtered to a single run) or with
+  // `?demo-traffic` (global stream). The flag-presence check is
+  // the cheap test; the actual filter value is forwarded as-is.
+  const demoTrafficParam = params.has('demo-traffic') ? params.get('demo-traffic') ?? undefined : undefined
   return (
     <LanguageProvider>
-      {reportRunId ? <TestRunReportPage runId={reportRunId} /> : <LoadTestApp />}
+      <DemoStatusProvider>
+        {reportRunId
+          ? <TestRunReportPage runId={reportRunId} />
+          : demoTrafficParam !== undefined
+            ? <DemoTrafficPage runId={demoTrafficParam} />
+            : <LoadTestApp />}
+      </DemoStatusProvider>
     </LanguageProvider>
   )
 }
 
 function LoadTestApp() {
+  // Subscribe to the demo-API status. The hook is the single
+  // source of truth for "is the demo on?", and the auto-load
+  // effect below uses it to keep the textarea in sync.
+  const demoStatus = useDemoStatus()
   // i18n chrome (toolbar + settings drawer). The hook lives here
   // — not in a deeper component — so the toolbar and drawer share
   // the same language state and stay in sync.
@@ -271,32 +292,118 @@ function LoadTestApp() {
   // actions in the global error banner, since the menu itself has
   // no place to render a message.
   const [runActionError, setRunActionError] = useState('')
+  // Tracks the previous `demoStatus.status.enabled` value so the
+  // demo-off effect below can distinguish a real user-initiated
+  // disable from the initial `false` mount. The ref is the
+  // standard React pattern for "what was the value last time the
+  // effect ran?": mutating it inside the effect (instead of
+  // adding a state) avoids an extra re-render on every flip.
+  const previousDemoEnabledRef = useRef<boolean | undefined>(undefined)
+  // Refs that mirror the latest `runs` map. The demo-disable
+  // effect below reads the cancellable-run ids and issues
+  // cancels — the effect must not re-run every time a run is
+  // added or removed, so the effect's dependency array
+  // intentionally only watches the demo status. The ref is
+  // the standard "read latest value without subscribing"
+  // pattern (same idea as the `runIdRef` in
+  // `DemoTrafficPage`).
+  const runsRef = useRef<Record<string, TestRun>>(runs)
+  runsRef.current = runs
 
+  // The demo toggle is the single source of truth for "is the
+  // demo spec supposed to be loaded?". When the user flips the
+  // switch on in Settings, we (re)load the bundled demo spec so
+  // they can hit Start without any extra click. When the user
+  // flips the switch off, we drop whatever the textarea holds
+  // back to the embedded sample — the spec the user typed or
+  // pasted in is preserved in the sense that the Settings
+  // switch is the only path that resets it, but the textarea
+  // itself no longer claims to point at the demo.
+  //
+  // Both branches are intentionally unconditional: the user's
+  // mental model of "demo is on" includes "the demo spec is in
+  // the textarea" and vice versa, so the two stay locked.
+  // The effect also handles the initial mount: when
+  // `loaded` flips to `true` and `enabled` is `false`, the
+  // textarea stays on the embedded sample (the initial state).
+  // When `enabled` is `true`, the demo spec is fetched —
+  // either from a localStorage-driven start or a fresh user
+  // click. The previous "load on every mount" effect was
+  // removed because it bypassed the toggle entirely and
+  // fetched the demo spec even when the user had the demo
+  // turned off.
   useEffect(() => {
-    let cancelled = false
-
-    async function loadDemo() {
-      // Retry with backoff so that a backend still starting up does
-      // not produce ECONNREFUSED entries in the Vite proxy log. On
-      // persistent failure (e.g. backend responds with 5xx), the
-      // embedded sample in the textarea remains.
-      try {
-        const response = await fetchWithRetry(
-          '/api/demo-specification',
-          undefined,
-          { maxAttempts: 10, delayMs: 500, shouldRetry: response => !response.ok },
-        )
-        if (!response.ok) return
-        const content = await response.text()
-        if (!cancelled && content.trim() !== '') setSpecification(content)
-      } catch {
-        // Fallback to the embedded sample if the backend is not reachable.
+    if (!demoStatus.status.loaded) return
+    const wasEnabled = previousDemoEnabledRef.current
+    previousDemoEnabledRef.current = demoStatus.status.enabled
+    // True when the user just toggled the switch (in either
+    // direction). The initial mount leaves `wasEnabled`
+    // undefined, and a same-value flip (`false → false` after
+    // the backend re-syncs the stored choice, for example)
+    // must NOT trigger a reset — only an explicit user
+    // gesture is allowed to wipe the dashboard. Both
+    // directions share the same reset path: enabling the
+    // demo loads a fresh spec, but any imported spec, edited
+    // payload or running test the user already had on screen
+    // belongs to the previous demo-off (or non-demo)
+    // session, so we tear it down symmetrically.
+    const isUserToggle = wasEnabled !== undefined && wasEnabled !== demoStatus.status.enabled
+    if (demoStatus.status.enabled) {
+      let cancelled = false
+      async function loadDemoOnEnable(): Promise<void> {
+        try {
+          const response = await fetch('/api/demo-specification')
+          if (!response.ok) return
+          const content = await response.text()
+          if (!cancelled && content.trim() !== '') setSpecification(content)
+        } catch {
+          // Network failure: leave the textarea as-is. The user
+          // can retry by toggling the switch off and on again.
+        }
       }
+      loadDemoOnEnable()
+    } else {
+      // Demo is off — clear the spec so the textarea shows the
+      // empty sample and a subsequent import is not overridden
+      // by a stale demo document.
+      setSpecification(sample)
     }
-
-    loadDemo()
-    return () => { cancelled = true }
-  }, [])
+    if (isUserToggle) {
+      // Full reset on user-initiated toggle (both directions).
+      // The initial mount (wasEnabled === undefined) and the
+      // `false → false` no-op path are filtered out by
+      // `isUserToggle` above, so the first paint and the
+      // backend-re-sync path keep their state intact. Only an
+      // explicit user gesture is allowed to wipe the dashboard.
+      //
+      // Stop every in-flight load test first so the k6
+      // processes go away while the rest of the state is
+      // wiped. The cancel request is fired through a silent
+      // helper that does NOT touch the in-memory `runs` map —
+      // the synchronous `setRuns({})` below would otherwise
+      // race with the response handler in `cancelRun` and let
+      // the cancelled run re-appear on the dashboard a few
+      // hundred milliseconds later. The pure helper
+      // [cancellableRunIds] is unit-tested so the membership
+      // rule is observable in isolation.
+      for (const runId of cancellableRunIds(runsRef.current)) {
+        void cancelRunSilent(runId)
+      }
+      setRuns({})
+      setActiveRunId(undefined)
+      setImported(undefined)
+      setSelected(new Set())
+      setCollapsed(new Set())
+      setOperationSettings({})
+      setBaseUrl('')
+      setLoadProfile(defaultLoadProfile())
+      setSpecificationUrl('')
+      setLastFetched(undefined)
+      setError('')
+      setRunActionError('')
+      setRunMenu(null)
+    }
+  }, [demoStatus.status.enabled, demoStatus.status.loaded])
 
   useEffect(() => {
     if (!runMenu) return
@@ -490,7 +597,7 @@ function LoadTestApp() {
   function updatePayloadField(
     operationId: string,
     payloadIndex: number,
-    field: 'parameterValues' | 'requestBodyJson' | 'bearerToken' | 'basicAuthUsername' | 'basicAuthPassword' | 'apiKey' | 'oauth2Token',
+    field: 'parameterValues' | 'requestBodyJson' | 'bearerToken' | 'basicAuthUsername' | 'basicAuthPassword' | 'apiKey' | 'oauth2Token' | 'oidcIdToken',
     patch: Record<string, string> | string,
   ) {
     updateSettings(operationId, settings => {
@@ -517,6 +624,9 @@ function LoadTestApp() {
         if (field === 'oauth2Token' && typeof patch === 'string') {
           return { ...payload, oauth2Token: patch }
         }
+        if (field === 'oidcIdToken' && typeof patch === 'string') {
+          return { ...payload, oidcIdToken: patch }
+        }
         return payload
       })
       const primary = next[0] ?? settings.payloads[0]
@@ -530,6 +640,7 @@ function LoadTestApp() {
         basicAuthPassword: primary.basicAuthPassword,
         apiKey: primary.apiKey,
         oauth2Token: primary.oauth2Token,
+        oidcIdToken: primary.oidcIdToken,
       }
     })
   }
@@ -545,6 +656,7 @@ function LoadTestApp() {
         basicAuthPassword: seed.basicAuthPassword,
         apiKey: seed.apiKey,
         oauth2Token: seed.oauth2Token,
+        oidcIdToken: seed.oidcIdToken,
       }
       return { ...settings, payloads: [...settings.payloads, clone] }
     })
@@ -568,6 +680,7 @@ function LoadTestApp() {
         basicAuthPassword: primary.basicAuthPassword,
         apiKey: primary.apiKey,
         oauth2Token: primary.oauth2Token,
+        oidcIdToken: primary.oidcIdToken,
       }
     })
   }
@@ -618,6 +731,9 @@ function LoadTestApp() {
         return
       case 'export-metrics':
         await downloadSummary(run)
+        return
+      case 'download-script':
+        await downloadScript(run)
         return
       case 'stop':
         await cancelRun(run.id, false)
@@ -687,6 +803,25 @@ function LoadTestApp() {
     URL.revokeObjectURL(url)
   }
 
+  /**
+   * Downloads the generated k6 script for a finished run by
+   * delegating to the browser's native download behaviour: a
+   * transient anchor with the `download` attribute and the
+   * server-side content-disposition filename. The same URL
+   * powers the in-report download link, so the two affordances
+   * stay in sync and pick up any future server-side filename
+   * change automatically.
+   */
+  async function downloadScript(run: TestRun) {
+    const anchor = document.createElement('a')
+    anchor.href = k6ScriptUrl(run.id)
+    anchor.download = k6ScriptDownloadName(run.id)
+    anchor.rel = 'noopener'
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+  }
+
   async function cancelRun(runId: string, force: boolean) {
     try {
       const response = await fetch(`/api/test-runs/${encodeURIComponent(runId)}/cancel?force=${force}`, { method: 'POST' })
@@ -702,6 +837,28 @@ function LoadTestApp() {
       }
     } catch (cause) {
       setRunActionError(cause instanceof Error ? cause.message : translate(language, 'error.cancelFailedNoStatus'))
+    }
+  }
+
+  /**
+   * Sends a graceful cancel to the backend for the given run
+   * without touching the in-memory `runs` map. Used by the
+   * "demo off" reset path: the caller is about to wipe the
+   * map with a synchronous `setRuns({})`, and any
+   * `setRuns(current => ({ ...current, ... }))` issued by the
+   * cancel response would re-add the cancelled run on the
+   * next render and undo the reset. The error path is
+   * intentionally silent: the dashboard is being torn down
+   * anyway, so a "cancel failed" banner would be noise.
+   */
+  async function cancelRunSilent(runId: string): Promise<void> {
+    try {
+      await fetch(`/api/test-runs/${encodeURIComponent(runId)}/cancel?force=false`, { method: 'POST' })
+    } catch {
+      // Best-effort: the k6 process might already be gone, the
+      // network might be flaky, or the backend might have
+      // already settled the run. None of these block the reset
+      // — the in-memory state is wiped synchronously below.
     }
   }
 
@@ -1247,7 +1404,7 @@ type OperationEditorProps = {
   language: SupportedLanguage
   onToggle: () => void
   onToggleExpand: () => void
-  onPayloadField: (payloadIndex: number, field: 'parameterValues' | 'requestBodyJson' | 'bearerToken' | 'basicAuthUsername' | 'basicAuthPassword' | 'apiKey' | 'oauth2Token', patch: Record<string, string> | string) => void
+  onPayloadField: (payloadIndex: number, field: 'parameterValues' | 'requestBodyJson' | 'bearerToken' | 'basicAuthUsername' | 'basicAuthPassword' | 'apiKey' | 'oauth2Token' | 'oidcIdToken', patch: Record<string, string> | string) => void
   onAddPayload: () => void
   onRemovePayload: (payloadIndex: number) => void
 }
@@ -1300,6 +1457,7 @@ function OperationEditor({
   const showBearerAuth = hasBearerAuth(operation) || (!showBasicAuth && operation.bearerAuth)
   const showApiKey = hasApiKeyAuth(operation)
   const showOAuth2 = hasOAuth2Auth(operation)
+  const showOidc = hasOpenIdConnectAuth(operation)
 
   return <article className={`operation-card ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''}`}>
     <label className="operation-heading">
@@ -1339,6 +1497,7 @@ function OperationEditor({
         onApplyBearer={token => onPayloadField(0, 'bearerToken', token)}
         onApplyApiKey={key => onPayloadField(0, 'apiKey', key)}
         onApplyOAuth2={token => onPayloadField(0, 'oauth2Token', token)}
+        onApplyOidc={(idToken: string) => onPayloadField(0, 'oidcIdToken', idToken)}
       />
       <p className="pool-hint">
         {translate(language, 'ops.pool.hint')}
@@ -1365,6 +1524,7 @@ function OperationEditor({
               {showBasicAuth && <th className="col-auth-basic">{translate(language, 'ops.auth.basic.header')}</th>}
               {showApiKey && <th className="col-auth-api-key">{translate(language, 'ops.auth.apiKey.header')}</th>}
               {showOAuth2 && <th className="col-auth-oauth2">{translate(language, 'ops.auth.oauth2.header')}</th>}
+              {showOidc && <th className="col-auth-oidc">{translate(language, 'ops.auth.oidc.header')}</th>}
               {showBearerAuth && <th>{translate(language, 'ops.auth.bearer.header')}</th>}
               <th className="col-actions" aria-label={translate(language, 'profile.stages.action') as string}></th>
             </tr>
@@ -1477,6 +1637,18 @@ function OperationEditor({
                         placeholder={translate(language, 'ops.auth.oauth2.placeholder')}
                         value={payload.oauth2Token}
                         onChange={event => onPayloadField(payloadIndex, 'oauth2Token', event.target.value)}
+                      />
+                    </td>
+                  )}
+                  {showOidc && (
+                    <td className="col-auth-oidc">
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        aria-label={translate(language, 'ops.auth.oidc.cellAria', { operationId: operation.operationId, n: payloadIndex + 1 })}
+                        placeholder={translate(language, 'ops.auth.oidc.placeholder')}
+                        value={payload.oidcIdToken}
+                        onChange={event => onPayloadField(payloadIndex, 'oidcIdToken', event.target.value)}
                       />
                     </td>
                   )}

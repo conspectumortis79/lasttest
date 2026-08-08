@@ -7,6 +7,7 @@
 // toolbar can be reordered or hidden without touching the rest of
 // the app.
 import { SUPPORTED_LANGUAGES, translate, type SupportedLanguage } from './i18n.ts'
+import { useDemoStatus } from './useDemoStatus.tsx'
 
 export type ToolbarDocId = 'userGuide' | 'readme' | 'wiki'
 
@@ -18,11 +19,20 @@ type TopToolbarProps = {
 
 type NavEntry = {
   /** i18n key for the visible label. */
-  key: 'toolbar.nav.dashboard' | 'toolbar.nav.userGuide' | 'toolbar.nav.readme' | 'toolbar.nav.wiki'
+  key: 'toolbar.nav.dashboard' | 'toolbar.nav.demoTraffic' | 'toolbar.nav.userGuide' | 'toolbar.nav.readme' | 'toolbar.nav.wiki'
   /** When set, the entry opens a popup instead of being a placeholder link. */
   openDoc?: ToolbarDocId
   /** Optional initial query — only honoured by the wiki entry. */
   initialQuery?: string
+  /**
+   * When set, the entry renders as a real `<a>` that navigates to
+   * the given URL. `hrefTarget` controls the browsing context
+   * (default `_self`). Used for the Demo-API link that opens the
+   * traffic dashboard in a new tab so the user can keep the
+   * lasttest UI open in the current tab.
+   */
+  href?: string
+  hrefTarget?: '_self' | '_blank'
 }
 
 const NAV_ITEMS: ReadonlyArray<NavEntry> = [
@@ -30,12 +40,23 @@ const NAV_ITEMS: ReadonlyArray<NavEntry> = [
   { key: 'toolbar.nav.userGuide', openDoc: 'userGuide' },
   { key: 'toolbar.nav.readme', openDoc: 'readme' },
   { key: 'toolbar.nav.wiki', openDoc: 'wiki' },
+  // The Demo-API entry sits at the END of the toolbar so it
+  // reads as a "power user" feature, gated behind the Settings
+  // switch. Placing it at the right edge also keeps it close
+  // to the language pill, which is where the user looks when
+  // they want to switch the app into a "demo is running" mode.
+  { key: 'toolbar.nav.demoTraffic', href: '/?demo-traffic', hrefTarget: '_blank' },
 ]
 
 export function TopToolbar({ language, onOpenSettings, onOpenDoc }: TopToolbarProps) {
   const active = SUPPORTED_LANGUAGES.find(entry => entry.code === language) ?? SUPPORTED_LANGUAGES[0]!
   const langLabel = active.code.toUpperCase()
   const ariaTemplate = translate(language, 'lang.pill.aria')
+  // The Demo-API link only appears when the user has enabled
+  // the demo in Settings. The state is read from
+  // `useDemoStatus()` so a flip in the drawer updates the
+  // toolbar in the same tick.
+  const { status } = useDemoStatus()
 
   return <header className="top-toolbar" role="banner">
     <div className="top-toolbar-brand">
@@ -43,9 +64,16 @@ export function TopToolbar({ language, onOpenSettings, onOpenDoc }: TopToolbarPr
       <span className="top-toolbar-name">{translate(language, 'toolbar.brand')}</span>
     </div>
     <nav className="top-toolbar-nav" aria-label="Primary">
-      {NAV_ITEMS.map((item, index) =>
-        item.openDoc
-          ? <button
+      {NAV_ITEMS.map((item, index) => {
+        if (item.key === 'toolbar.nav.demoTraffic' && !status.enabled) {
+          // The demo is opt-in; hide the link entirely when
+          // off so the toolbar reflects "demo is not running"
+          // at a glance.
+          return null
+        }
+        if (item.openDoc) {
+          return (
+            <button
               key={item.key}
               type="button"
               className="top-toolbar-nav-link"
@@ -53,16 +81,49 @@ export function TopToolbar({ language, onOpenSettings, onOpenDoc }: TopToolbarPr
             >
               {translate(language, item.key)}
             </button>
-          : <a
+          )
+        }
+        if (item.href) {
+          // The "Demo-API" entry carries an additional "active"
+          // pill when the demo is running, so the user can see
+          // at a glance that the in-process controller is
+          // listening for traffic — even when the link itself
+          // is not hovered.
+          const showActiveBadge = item.key === 'toolbar.nav.demoTraffic' && status.enabled
+          return (
+            <a
               key={item.key}
-              className={`top-toolbar-nav-link ${index === 0 ? 'is-active' : ''}`}
-              href="#"
-              aria-current={index === 0 ? 'page' : undefined}
-              onClick={event => event.preventDefault()}
+              className="top-toolbar-nav-link"
+              href={item.href}
+              target={item.hrefTarget ?? '_self'}
+              rel={item.hrefTarget === '_blank' ? 'noopener noreferrer' : undefined}
             >
               {translate(language, item.key)}
+              {showActiveBadge && (
+                <span
+                  className="top-toolbar-demo-active"
+                  aria-label={translate(language, 'toolbar.nav.demoActive.aria')}
+                  title={translate(language, 'toolbar.nav.demoActive.tooltip')}
+                >
+                  <span className="top-toolbar-demo-active-dot" aria-hidden="true" />
+                  {translate(language, 'toolbar.nav.demoActive')}
+                </span>
+              )}
             </a>
-      )}
+          )
+        }
+        return (
+          <a
+            key={item.key}
+            className={`top-toolbar-nav-link ${index === 0 ? 'is-active' : ''}`}
+            href="#"
+            aria-current={index === 0 ? 'page' : undefined}
+            onClick={event => event.preventDefault()}
+          >
+            {translate(language, item.key)}
+          </a>
+        )
+      })}
     </nav>
     <span className="top-toolbar-spacer" aria-hidden="true"></span>
     <span

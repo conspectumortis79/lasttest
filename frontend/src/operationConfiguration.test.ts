@@ -8,6 +8,7 @@ import {
   hasBearerAuth,
   hasMultipleServers,
   hasOAuth2Auth,
+  hasOpenIdConnectAuth,
   isOperationValid,
   migrateOperationSettings,
   parameterInputKind,
@@ -85,6 +86,7 @@ test('builds endpoint-specific parameter, body, and bearer overrides', () => {
         basicAuthPassword: undefined,
         apiKey: undefined,
         oauth2Token: undefined,
+        oidcIdToken: undefined,
       },
     ],
     parameterValues: [
@@ -97,6 +99,7 @@ test('builds endpoint-specific parameter, body, and bearer overrides', () => {
     basicAuthPassword: undefined,
     apiKey: undefined,
     oauth2Token: undefined,
+    oidcIdToken: undefined,
   })
   equal(configurations[1].requestBodyJson, '{"name":"Luna"}')
   equal(configurations[1].payloads.length, 1)
@@ -544,7 +547,7 @@ test('validateOperationSettings returns no errors when the operation has no sche
   }
 
   deepEqual(validateOperationSettings(operation, undefined), { parameterErrors: {} })
-  deepEqual(validateOperationSettings(operation, { payloads: [], parameterValues: {}, requestBodyJson: '', bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '' }), { parameterErrors: {} })
+  deepEqual(validateOperationSettings(operation, { payloads: [], parameterValues: {}, requestBodyJson: '', bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '' }), { parameterErrors: {} })
 })
 
 test('validateOperationSettings treats missing parameter values as empty strings and skips valid results', () => {
@@ -562,7 +565,7 @@ test('validateOperationSettings treats missing parameter values as empty strings
     requestBodyRequired: false,
     bearerAuth: false,
   }
-  const settings: OperationSettings = { payloads: [], parameterValues: {}, requestBodyJson: '', bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '' }
+  const settings: OperationSettings = { payloads: [], parameterValues: {}, requestBodyJson: '', bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '' }
 
   deepEqual(validateOperationSettings(operation, settings), { parameterErrors: {} })
 })
@@ -581,7 +584,7 @@ test('validateOperationSettings flags an empty required request body as an error
     requestBodyRequired: true,
     bearerAuth: false,
   }
-  const settings: OperationSettings = { payloads: [], parameterValues: {}, requestBodyJson: '   ', bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '' }
+  const settings: OperationSettings = { payloads: [], parameterValues: {}, requestBodyJson: '   ', bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '' }
 
   deepEqual(validateOperationSettings(operation, settings), {
     parameterErrors: {},
@@ -647,12 +650,12 @@ test('createOperationSettings seeds payloads[0] and the legacy fields with the s
 
 test('migrateOperationSettings is a no-op when payloads is already populated', () => {
   const settings: OperationSettings = {
-    payloads: [{ parameterValues: { 'path:id': '42' }, requestBodyJson: '{"x":1}', bearerToken: 't', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '' }],
+    payloads: [{ parameterValues: { 'path:id': '42' }, requestBodyJson: '{"x":1}', bearerToken: 't', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '' }],
     parameterValues: { 'legacy:key': 'legacy-value' },
     requestBodyJson: 'legacy-body',
     bearerToken: 'legacy-token',
     basicAuthUsername: '',
-    basicAuthPassword: '', apiKey: '', oauth2Token: '',
+    basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '',
   }
 
   const migrated = migrateOperationSettings(settings)
@@ -672,7 +675,7 @@ test('migrateOperationSettings synthesises a single payload from legacy fields w
     requestBodyJson: '{"name":"Luna"}',
     bearerToken: 'secret',
     basicAuthUsername: '',
-    basicAuthPassword: '', apiKey: '', oauth2Token: '',
+    basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '',
   }
 
   const migrated = migrateOperationSettings(settings)
@@ -698,7 +701,7 @@ test('migrateOperationSettings copies basic auth fields from the legacy layout',
     basicAuthUsername: 'alice',
     basicAuthPassword: 's3cret',
     apiKey: '',
-    oauth2Token: '',
+    oauth2Token: '', oidcIdToken: '',
   }
 
   const migrated = migrateOperationSettings(settings)
@@ -718,7 +721,7 @@ test('migrateOperationSettings is idempotent when called twice', () => {
     payloads: [],
     parameterValues: { 'path:id': '7' },
     requestBodyJson: '',
-    bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '',
+    bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '',
   }
 
   const once = migrateOperationSettings(settings)
@@ -758,7 +761,7 @@ test('migrateOperationSettings clones the legacy parameterValues to decouple mut
     payloads: [],
     parameterValues: legacy,
     requestBodyJson: '',
-    bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '',
+    bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '',
   }
 
   const migrated = migrateOperationSettings(settings)
@@ -776,7 +779,7 @@ test('buildOperationConfigurations migrates legacy settings before reading the a
     payloads: [],
     parameterValues: { 'path:id': '99' },
     requestBodyJson: '',
-    bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '',
+    bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '',
   }
   const configurations = buildOperationConfigurations([getOperation], new Set(['getPet']), { getPet: legacySettings })
 
@@ -912,12 +915,63 @@ test('hasOAuth2Auth returns true only when an oauth2 authRequirement is declared
   equal(hasOAuth2Auth(legacyNoField), false)
 })
 
+test('hasOpenIdConnectAuth returns true only when an openIdConnect authRequirement is declared', () => {
+  // The OIDC discriminator on the wire is `openIdConnect` (camel
+  // case to match the rest of the API). The predicate has to match
+  // exactly that kind so a spec that only declares OAuth 2.0 or
+  // plain Bearer does not accidentally light up the OIDC input.
+  const oidcOnly: Operation = {
+    ...getOperation,
+    authRequirements: [
+      {
+        kind: 'openIdConnect',
+        schemeName: 'oidcAuth',
+        openIdConnectUrl: 'https://example.test/.well-known/openid-configuration',
+        scopes: ['openid', 'profile'],
+      },
+    ],
+  }
+  const oauth2Only: Operation = {
+    ...getOperation,
+    authRequirements: [
+      {
+        kind: 'oauth2',
+        schemeName: 'oauth2',
+        flows: [{ type: 'clientCredentials', tokenUrl: 'https://x', scopes: [] }],
+      },
+    ],
+  }
+  const bearerOnly: Operation = {
+    ...getOperation,
+    authRequirements: [{ kind: 'bearer', schemeName: 'bearerAuth' }],
+  }
+  const dual: Operation = {
+    ...getOperation,
+    authRequirements: [
+      {
+        kind: 'openIdConnect',
+        schemeName: 'oidcAuth',
+        openIdConnectUrl: 'https://example.test/.well-known/openid-configuration',
+        scopes: ['openid'],
+      },
+      { kind: 'bearer', schemeName: 'bearerAuth' },
+    ],
+  }
+  const legacyNoField: Operation = { ...getOperation }
+
+  equal(hasOpenIdConnectAuth(oidcOnly), true)
+  equal(hasOpenIdConnectAuth(oauth2Only), false)
+  equal(hasOpenIdConnectAuth(bearerOnly), false)
+  equal(hasOpenIdConnectAuth(dual), true)
+  equal(hasOpenIdConnectAuth(legacyNoField), false)
+})
+
 test('buildOperationConfigurations still rejects an empty required payload field after migration', () => {
   const legacySettings: OperationSettings = {
     payloads: [],
     parameterValues: {},
     requestBodyJson: '',
-    bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '',
+    bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '',
   }
 
   throws(
@@ -931,7 +985,7 @@ test('buildOperationConfigurations still rejects a malformed JSON body after mig
     payloads: [],
     parameterValues: {},
     requestBodyJson: '{invalid}',
-    bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '',
+    bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '',
   }
 
   throws(
@@ -950,7 +1004,7 @@ test('OperationPayload is a plain value object carrying per-request data', () =>
     requestBodyJson: '{"name":"Luna"}',
     bearerToken: 'secret',
     basicAuthUsername: 'alice',
-    basicAuthPassword: 's3cret', apiKey: '', oauth2Token: '',
+    basicAuthPassword: 's3cret', apiKey: '', oauth2Token: '', oidcIdToken: '',
   }
 
   equal(payload.parameterValues['path:id'], '42')
@@ -1001,6 +1055,7 @@ function addPayload(settings: OperationSettings, _operationId: string): void {
     basicAuthPassword: seed.basicAuthPassword,
     apiKey: seed.apiKey,
     oauth2Token: seed.oauth2Token,
+    oidcIdToken: seed.oidcIdToken,
   })
 }
 
@@ -1018,7 +1073,7 @@ test('validateOperationSettings allows an empty optional request body', () => {
     requestBodyRequired: false,
     bearerAuth: false,
   }
-  const settings: OperationSettings = { payloads: [], parameterValues: {}, requestBodyJson: '', bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '' }
+  const settings: OperationSettings = { payloads: [], parameterValues: {}, requestBodyJson: '', bearerToken: '', basicAuthUsername: '', basicAuthPassword: '', apiKey: '', oauth2Token: '', oidcIdToken: '' }
 
   deepEqual(validateOperationSettings(operation, settings), { parameterErrors: {} })
 })

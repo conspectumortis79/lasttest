@@ -1,5 +1,7 @@
 package de.lasttest.demo
 
+import de.lasttest.demo.DefaultDemoControllerToggle
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -15,8 +17,21 @@ import kotlin.test.assertNotNull
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class DemoProductControllerTest(
     @Autowired private val client: RestTemplate,
+    @Autowired private val demoControllerToggle: DefaultDemoControllerToggle,
     @LocalServerPort private val port: Int,
 ) {
+    @BeforeEach
+    fun enableDemo() {
+        // The bundled toggle defaults to "off" so the demo is
+        // opt-in. The product-controller tests exercise the
+        // happy path of every endpoint, so the toggle has to be
+        // flipped on before each test. We could also reach for a
+        // @TestConfiguration that pre-enables the toggle, but
+        // the explicit `@BeforeEach` is easier to read in the
+        // diff and the cost is one line per test.
+        demoControllerToggle.enable()
+    }
+
     @Test
     fun `supports product lifecycle`() {
         val created = client.postForEntity(url("/products"), ProductRequest("Test Product", "software", 12.5), Product::class.java)
@@ -120,7 +135,7 @@ class DemoProductControllerTest(
 
     @Test
     fun `search rejects an empty bearer token without HTTP header normalization`() {
-        val response = DemoProductController().search("Bearer ", ProductSearchRequest())
+        val response = DemoProductController(DefaultDemoControllerToggle().apply { enable() }).search("Bearer ", ProductSearchRequest())
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
     }
@@ -371,6 +386,57 @@ class DemoProductControllerTest(
         assertNotNull(body["issuedAt"])
     }
 
+    @Test
+    fun `my-profile returns 200 with the exact demo OIDC ID token`() {
+        val response = myProfile(authorization = "Bearer demo-oidc-id-token-12345")
+        assertEquals(HttpStatus.OK, response.statusCode)
+        val body = assertNotNull(response.body)
+        // The shape mirrors the /userinfo endpoint a real OIDC
+        // resource server would return: user id, scopes, client id,
+        // discovery URL (so the user can verify the issuer
+        // matches the spec's `openIdConnectUrl`), token issuance
+        // time. A real impl would call the userinfo endpoint or
+        // decode the ID token's claims.
+        assertEquals("demo-oidc-user", body["userId"])
+        assertEquals("lasttest-demo-oidc-client", body["clientId"])
+        assertEquals(
+            "http://localhost:8286/demo-api/.well-known/openid-configuration",
+            body["discoveryUrl"],
+        )
+        assertNotNull(body["scopes"])
+        assertNotNull(body["issuedAt"])
+    }
+
+    @Test
+    fun `my-profile returns 401 with no Authorization header`() {
+        assertEquals(HttpStatus.UNAUTHORIZED, statusOfMyProfile(authorization = null))
+    }
+
+    @Test
+    fun `my-profile returns 401 with the OAuth2 demo token because the OIDC endpoint requires a different ID token`() {
+        // The OAuth 2.0 and OIDC demo tokens are different on
+        // purpose so a smoke test can tell the two endpoints
+        // apart on the wire. Using the wrong token (even though
+        // it carries the same `Bearer ` prefix) must produce a
+        // 401 — otherwise the demo would silently accept any
+        // token-shaped string and a typo in the OIDC input would
+        // not be visible in the k6 report.
+        assertEquals(
+            HttpStatus.UNAUTHORIZED,
+            statusOfMyProfile(authorization = "Bearer demo-oauth2-token-12345"),
+        )
+    }
+
+    @Test
+    fun `my-profile returns 401 with a blank OIDC ID token`() {
+        // A token that is only whitespace must be treated as "not
+        // set" so an accidental space + backspace in the UI input
+        // does not silently leak a malformed Authorization header
+        // into the k6 script.
+        assertEquals(HttpStatus.UNAUTHORIZED, statusOfMyProfile(authorization = "Bearer  "))
+        assertEquals(HttpStatus.UNAUTHORIZED, statusOfMyProfile(authorization = "Bearer"))
+    }
+
     private fun statusOfAdminStats(authorization: String?): HttpStatus =
         try {
             val headers = HttpHeaders()
@@ -452,6 +518,33 @@ class DemoProductControllerTest(
         @Suppress("UNCHECKED_CAST")
         return client.exchange(
             url("/products/me"),
+            HttpMethod.GET,
+            HttpEntity<Any>(headers),
+            Map::class.java,
+        ) as org.springframework.http.ResponseEntity<Map<String, Any>>
+    }
+
+    private fun statusOfMyProfile(authorization: String?): HttpStatus =
+        try {
+            val headers = HttpHeaders()
+            authorization?.let { headers["Authorization"] = it }
+            client
+                .exchange(
+                    url("/products/my-profile"),
+                    HttpMethod.GET,
+                    HttpEntity<Any>(headers),
+                    Map::class.java,
+                ).statusCode as HttpStatus
+        } catch (exception: org.springframework.web.client.HttpClientErrorException) {
+            exception.statusCode as HttpStatus
+        }
+
+    private fun myProfile(authorization: String): org.springframework.http.ResponseEntity<Map<String, Any>> {
+        val headers = HttpHeaders()
+        headers["Authorization"] = authorization
+        @Suppress("UNCHECKED_CAST")
+        return client.exchange(
+            url("/products/my-profile"),
             HttpMethod.GET,
             HttpEntity<Any>(headers),
             Map::class.java,

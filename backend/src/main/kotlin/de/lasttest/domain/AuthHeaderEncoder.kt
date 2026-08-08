@@ -58,6 +58,12 @@ internal object AuthHeaderEncoder {
             // dedicated input in the UI so the banner copy and the
             // payload field stay separate from plain Bearer.
             is AuthRequirement.OAuth2 -> encodeBearer(credentials.oauth2Token)
+            // OpenID Connect ID tokens ride the same Bearer wire
+            // format (RFC 6750) as OAuth 2.0 access tokens and
+            // plain Bearer credentials. The UI types the ID token
+            // into a dedicated field so the banner can show the
+            // discovery URL alongside.
+            is AuthRequirement.OpenIdConnect -> encodeBearer(credentials.oidcIdToken)
             is AuthRequirement.Unsupported -> null
         }
 
@@ -130,5 +136,6 @@ internal object AuthHeaderEncoder {
         val basicPassword: String? = null,
         val apiKey: String? = null,
         val oauth2Token: String? = null,
+        val oidcIdToken: String? = null,
     )
 }

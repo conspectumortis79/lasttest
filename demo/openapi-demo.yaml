@@ -189,6 +189,28 @@ paths:
           description: Benutzerinformationen als JSON (mit den dem Token zugewiesenen Scopes)
         '401':
           description: OAuth-2.0-Token fehlt oder ist ungültig
+  /products/my-profile:
+    get:
+      operationId: getMyProfile
+      summary: Benutzerprofil abrufen (OpenID-Connect-Demo)
+      description: |
+        Verlangt einen OpenID Connect (OIDC) ID Token im
+        `Authorization: Bearer <id_token>`-Header (RFC 6750). Das
+        `lasttest`-Demo-Backend akzeptiert **nur** den unten genannten
+        Demo-ID-Token (case-sensitive) und liefert sonst
+        `401 Unauthorized`. OIDC ist eine Identitäts-Schicht über
+        OAuth 2.0 — das Wire-Format ist identisch zu Bearer / OAuth
+        2.0, aber der Token stammt typischerweise vom OIDC-Provider
+        über einen Authorization-Code- oder Implicit-Flow.
+
+        **Demo-ID-Token (Testzwecke):** `demo-oidc-id-token-12345`
+      security:
+        - oidcAuth: []
+      responses:
+        '200':
+          description: Benutzerinformationen als JSON (mit den OIDC-Scopes)
+        '401':
+          description: OIDC-ID-Token fehlt oder ist ungültig
 components:
   securitySchemes:
     bearerAuth:
@@ -219,6 +241,18 @@ components:
           scopes:
             read:products: Produkte lesen
             write:products: Produkte schreiben
+    oidcAuth:
+      type: openIdConnect
+      description: OpenID Connect (OIDC) — ID Token als Bearer (RFC 6750). OIDC ist eine Identitäts-Schicht über OAuth 2.0 mit zusätzlichem ID-Token, UserInfo- und Discovery-Endpoint.
+      openIdConnectUrl: http://localhost:8286/demo-api/.well-known/openid-configuration
+      flows:
+        authorizationCode:
+          authorizationUrl: http://localhost:8286/demo-api/oauth/authorize
+          tokenUrl: http://localhost:8286/demo-api/oauth/token
+          scopes:
+            openid: Anmeldung via OIDC
+            profile: Benutzerprofil lesen
+            email: E-Mail-Adresse lesen
   parameters:
     ProductId:
       name: id

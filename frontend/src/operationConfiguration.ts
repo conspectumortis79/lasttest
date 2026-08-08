@@ -80,6 +80,7 @@ type AuthRequirement =
   | { kind: 'bearer', schemeName: string }
   | { kind: 'apiKey', schemeName: string, headerName: string }
   | { kind: 'oauth2', schemeName: string, flows: OAuth2Flow[] }
+  | { kind: 'openIdConnect', schemeName: string, openIdConnectUrl: string, scopes: string[] }
   | { kind: 'unsupported', schemeName: string, reason: string }
 
 /** True if the operation declares at least one Basic requirement. */
@@ -107,6 +108,18 @@ export function hasOAuth2Auth(operation: Operation): boolean {
   return operation.authRequirements?.some(req => req.kind === 'oauth2') ?? false
 }
 
+/**
+ * True if the operation declares at least one OpenID Connect
+ * requirement. The wire format is identical to Bearer and OAuth 2.0
+ * (RFC 6750: `Authorization: Bearer <id_token>`) so the dedicated UI
+ * cell mirrors the OAuth 2.0 one but with OIDC copy and the
+ * discovery URL / scopes in the banner. Splitting the predicate out
+ * keeps the JSX in `App.tsx` a dumb switch on these helpers.
+ */
+export function hasOpenIdConnectAuth(operation: Operation): boolean {
+  return operation.authRequirements?.some(req => req.kind === 'openIdConnect') ?? false
+}
+
 export type ApiServer = {
   url: string
   description: string | null
@@ -129,9 +142,9 @@ export type OperationSettings = {
    * Pool of complete request datasets. At least one payload is required.
    * This is the new source of truth — the legacy `parameterValues`,
    * `requestBodyJson`, `bearerToken`, `basicAuthUsername`,
-   * `basicAuthPassword`, `apiKey` and `oauth2Token` fields below
-   * are derived from `payloads[0]` once the settings have been
-   * migrated.
+   * `basicAuthPassword`, `apiKey`, `oauth2Token` and `oidcIdToken`
+   * fields below are derived from `payloads[0]` once the settings
+   * have been migrated.
    */
   payloads: OperationPayload[]
   /**
@@ -152,6 +165,14 @@ export type OperationSettings = {
   apiKey: string
   /** @deprecated Derived from `payloads[0]`. See `parameterValues`. */
   oauth2Token: string
+  /**
+   * @deprecated Derived from `payloads[0]`. See `parameterValues`.
+   * OpenID Connect ID token. Sent as `Authorization: Bearer <id_token>`
+   * on the wire (RFC 6750). The dedicated UI cell mirrors the OAuth
+   * 2.0 one but with OIDC copy and the discovery URL / scopes in
+   * the banner.
+   */
+  oidcIdToken: string
 }
 
 /**
@@ -186,6 +207,14 @@ export type OperationPayload = {
    * can show the flow / scope metadata.
    */
   oauth2Token: string
+  /**
+   * OpenID Connect ID token for an `openIdConnect` requirement.
+   * The wire format is identical to [bearerToken] and
+   * [oauth2Token] (RFC 6750: `Authorization: Bearer <id_token>`);
+   * the field is split out so the UI can render a dedicated OIDC
+   * input and the banner can show the discovery URL and scopes.
+   */
+  oidcIdToken: string
 }
 
 type OperationConfiguration = {
@@ -205,6 +234,7 @@ type OperationConfiguration = {
     basicAuthPassword?: string
     apiKey?: string
     oauth2Token?: string
+    oidcIdToken?: string
   }>
   /** @deprecated Derived from `payloads[0]`. */
   parameterValues: Array<{ name: string, location: string, value: string }>
@@ -220,6 +250,8 @@ type OperationConfiguration = {
   apiKey?: string
   /** @deprecated Derived from `payloads[0]`. */
   oauth2Token?: string
+  /** @deprecated Derived from `payloads[0]`. */
+  oidcIdToken?: string
 }
 
 export function parameterKey(parameter: Pick<ApiParameter, 'location' | 'name'>): string {
@@ -281,6 +313,7 @@ export function createOperationSettings(operations: Operation[]): Record<string,
       const seedBasicAuthPassword = ''
       const seedApiKey = ''
       const seedOauth2Token = ''
+      const seedOidcIdToken = ''
       // The pool is the single source of truth: `buildOperationConfigurations`
       // and `validateOperationSettings` both read from `payloads[0]`. The
       // legacy flat fields are seeded with the same values for
@@ -294,6 +327,7 @@ export function createOperationSettings(operations: Operation[]): Record<string,
         basicAuthPassword: seedBasicAuthPassword,
         apiKey: seedApiKey,
         oauth2Token: seedOauth2Token,
+        oidcIdToken: seedOidcIdToken,
       }
       const settings: OperationSettings = {
         payloads: [seed],
@@ -304,6 +338,7 @@ export function createOperationSettings(operations: Operation[]): Record<string,
         basicAuthPassword: seedBasicAuthPassword,
         apiKey: seedApiKey,
         oauth2Token: seedOauth2Token,
+        oidcIdToken: seedOidcIdToken,
       }
       return [operation.operationId, settings]
     }),
@@ -337,6 +372,9 @@ export function migrateOperationSettings(settings: OperationSettings): Operation
     // And for the oauth2Token field added when OAuth 2.0
     // support shipped.
     oauth2Token: settings.oauth2Token ?? '',
+    // And for the oidcIdToken field added when OpenID Connect
+    // support shipped.
+    oidcIdToken: settings.oidcIdToken ?? '',
   }
   return {
     payloads: [seed],
@@ -347,6 +385,7 @@ export function migrateOperationSettings(settings: OperationSettings): Operation
     basicAuthPassword: settings.basicAuthPassword ?? '',
     apiKey: settings.apiKey ?? '',
     oauth2Token: settings.oauth2Token ?? '',
+    oidcIdToken: settings.oidcIdToken ?? '',
   }
 }
 
@@ -400,6 +439,8 @@ export function buildOperationConfigurations(
         basicAuthPassword: payload.basicAuthPassword.trim() || undefined,
         apiKey: payload.apiKey.trim() || undefined,
         oauth2Token: payload.oauth2Token.trim() || undefined,
+        // Same hygiene for the OIDC ID token.
+        oidcIdToken: payload.oidcIdToken.trim() || undefined,
       }
     }
 
@@ -420,6 +461,7 @@ export function buildOperationConfigurations(
       basicAuthPassword: payloads[0].basicAuthPassword,
       apiKey: payloads[0].apiKey,
       oauth2Token: payloads[0].oauth2Token,
+      oidcIdToken: payloads[0].oidcIdToken,
     }
   })
 }

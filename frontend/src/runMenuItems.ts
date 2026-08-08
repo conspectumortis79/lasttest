@@ -41,6 +41,7 @@ export type MenuItemAction =
   | 'copy-report-link'
   | 'open-report'
   | 'export-metrics'
+  | 'download-script'
   | 'stop'
   | 'force-abort'
   | 'rerun'
@@ -84,6 +85,11 @@ export function buildRunMenuItems(
     },
     { id: 'copy-report-link', label: translate(lang, 'menu.copyReportLink'), action: 'copy-report-link' },
     { id: 'open-report', label: translate(lang, 'menu.openReport'), action: 'open-report' },
+    {
+      id: 'download-script',
+      label: translate(lang, 'menu.downloadScript'),
+      action: 'download-script',
+    },
     {
       id: 'export-metrics',
       label: translate(lang, 'menu.exportMetrics'),

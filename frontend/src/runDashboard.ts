@@ -102,6 +102,33 @@ export function isCancellable(status: string): boolean {
 }
 
 /**
+ * Returns the ids of every run that is currently cancellable
+ * (RUNNING or STOPPING). Used when the user disables the
+ * bundled demo API to stop every in-flight load test in one
+ * pass — the same affordance the inline Stop button on each
+ * badge provides, but applied to all badges at once.
+ *
+ * Pure: the input map is never mutated, the output is a fresh
+ * array on every call. The function never depends on
+ * [isInFlight] because a QUEUED run is still in the dashboard
+ * (so the live ticker keeps running) but the k6 process has
+ * not been spawned yet — sending a cancel request to the
+ * backend would have no effect. [isCancellable] is the right
+ * predicate for "a stop request will actually do something".
+ *
+ * Terminal runs are intentionally excluded: the user cannot
+ * stop a run that has already settled, and the dashboard
+ * would not need to issue the request anyway.
+ */
+export function cancellableRunIds(runs: Record<string, TestRun>): string[] {
+  const ids: string[] = []
+  for (const [id, run] of Object.entries(runs)) {
+    if (isCancellable(run.status)) ids.push(id)
+  }
+  return ids
+}
+
+/**
  * True once the run has settled in a terminal state and no more
  * transitions are expected. Polling on the frontend uses the
  * negation of this predicate to stop refreshing runs that have

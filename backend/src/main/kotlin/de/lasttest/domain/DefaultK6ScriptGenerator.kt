@@ -11,13 +11,23 @@ import de.lasttest.api.OperationConfiguration
 import de.lasttest.api.OperationPayload
 import de.lasttest.api.ParameterValue
 import de.lasttest.api.PayloadStrategy
+import de.lasttest.demo.DemoRequestLogInterceptor
 import org.springframework.stereotype.Service
 import java.net.URLEncoder
 
 interface K6ScriptGenerator {
-    fun generate(
+    /**
+     * Renders a k6 script for the given run. The [runId] is
+     * injected as the `X-Lasttest-Run-Id` request header on every
+     * call so the demo-API request log can correlate incoming
+     * requests with the run that drove them. An empty [runId] skips
+     * the header — that is the path taken by the unit tests that
+     * do not care about the demo correlation.
+     */
+    fun generateForRun(
         specification: ImportedSpecification,
         baseUrl: String,
+        runId: String,
         operationIds: Set<String>,
         operationConfigurations: List<OperationConfiguration>,
         loadProfile: LoadProfile,
@@ -28,9 +38,10 @@ interface K6ScriptGenerator {
 class DefaultK6ScriptGenerator : K6ScriptGenerator {
     private val objectMapper = ObjectMapper()
 
-    override fun generate(
+    override fun generateForRun(
         specification: ImportedSpecification,
         baseUrl: String,
+        runId: String,
         operationIds: Set<String>,
         operationConfigurations: List<OperationConfiguration>,
         loadProfile: LoadProfile,
@@ -52,7 +63,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
             configurations.mapValues { (_, configuration) -> effectivePayloads(configuration).size }
         val calls =
             selected.joinToString("\n") { operation ->
-                requestCode(operation, configurations[operation.operationId], strategy)
+                requestCode(operation, configurations[operation.operationId], strategy, runId)
             }
         val poolSelectors = collectPoolSelectors(selected, configurations, strategy)
         // Per-operation status-code Counters. k6's --summary-export does
@@ -247,6 +258,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         operation: ApiOperation,
         configuration: OperationConfiguration?,
         strategy: PayloadStrategy,
+        runId: String,
     ): String {
         val payloads = effectivePayloads(configuration)
         // [effectivePayloads] is total: it returns at least one
@@ -265,7 +277,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         // behaviour for the legacy single-dataset layout is preserved
         // bit-for-bit so the existing test suite keeps matching.
         if (payloads.size == 1) {
-            return singlePayloadRequestBlock(operation, payloads.single(), safe)
+            return singlePayloadRequestBlock(operation, payloads.single(), safe, runId)
         }
         // Multi-payload path: inline if/else chain inside the
         // `default function()` body. The pool selector (counter
@@ -280,12 +292,12 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         // was actually picked during the run. The report reads these
         // counters and shows a per-payload call count next to the
         // configured payloads.
-        val firstBlock = singlePayloadRequestBlock(operation, payloads[0], safe).trim()
+        val firstBlock = singlePayloadRequestBlock(operation, payloads[0], safe, runId).trim()
         val firstBranch =
             "  if (__lt_idx_$safe === 0) { lt_payload_0_$safe.add(1); $firstBlock }"
         val subsequentBranches =
             payloads.drop(1).mapIndexed { index, payload ->
-                val block = singlePayloadRequestBlock(operation, payload, safe).trim()
+                val block = singlePayloadRequestBlock(operation, payload, safe, runId).trim()
                 "  else if (__lt_idx_$safe === ${index + 1}) { lt_payload_${index + 1}_$safe.add(1); $block }"
             }
         return "  const __lt_idx_$safe = __lt_next_$safe();\n$firstBranch\n" + subsequentBranches.joinToString("\n")
@@ -363,6 +375,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         operation: ApiOperation,
         payload: OperationPayload,
         safe: String,
+        runId: String,
     ): String {
         val parameterValues = resolveParametersForPayload(operation, payload)
         var path = operation.path
@@ -376,7 +389,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         val url = path + if (query.isEmpty()) "" else "?$query"
         val requestBody = resolveRequestBodyForPayload(operation, payload)
         require(requestBody != null || !operation.requestBodyRequired) { "Der Pflicht-Request-Body für '${operation.operationId}' darf nicht leer sein." }
-        val headers = requestHeadersForPayload(operation, parameterValues, payload, requestBody != null)
+        val headers = requestHeadersForPayload(operation, parameterValues, payload, requestBody != null, runId)
         val requestOptions =
             linkedMapOf<String, Any>(
                 "tags" to
@@ -445,12 +458,25 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         parameterValues: List<ResolvedParameter>,
         payload: OperationPayload,
         hasRequestBody: Boolean,
+        runId: String,
     ): Map<String, String> {
         val headers = linkedMapOf<String, String>()
         parameterValues.filter { it.parameter.location == "header" }.forEach { headers[it.parameter.name] = it.value }
         val cookies = parameterValues.filter { it.parameter.location == "cookie" }.joinToString("; ") { "${it.parameter.name}=${encode(it.value)}" }
         if (cookies.isNotEmpty()) {
             headers["Cookie"] = cookies
+        }
+        // The run id is the correlation key for the demo-API
+        // request log: every k6 request carries it in the
+        // X-Lasttest-Run-Id header so the dashboard can show "this
+        // request was driven by run X". The header is only added
+        // when the caller actually knows the id — the unit tests
+        // for the script generator pass "" to keep the output
+        // free of the new header. Skipping it on "" is what keeps
+        // every pre-existing assertion in [DefaultK6ScriptGeneratorTest]
+        // (which does not know about the demo correlation) valid.
+        if (runId.isNotEmpty()) {
+            headers[DemoRequestLogInterceptor.RUN_ID_HEADER] = runId
         }
         // All auth schemes live in one place — [AuthHeaderEncoder].
         // It picks the first requirement that has usable credentials
@@ -464,6 +490,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                     basicUsername = payload.basicAuthUsername,
                     basicPassword = payload.basicAuthPassword,
                     oauth2Token = payload.oauth2Token,
+                    oidcIdToken = payload.oidcIdToken,
                 ),
             )
         if (authValue != null) {

@@ -52,10 +52,15 @@ jacoco {
 
 val coverageIncludes =
     listOf(
+        "de/lasttest/api/DemoTrafficController.class",
         "de/lasttest/api/LastTestController.class",
+        "de/lasttest/config/DemoWebConfiguration.class",
+        "de/lasttest/demo/DefaultDemoControllerToggle.class",
         "de/lasttest/demo/DemoProductController.class",
+        "de/lasttest/demo/DemoRequestLogInterceptor.class",
         "de/lasttest/demo/DemoSpecificationProvider.class",
         "de/lasttest/demo/DemoSwaggerUiController.class",
+        "de/lasttest/demo/RingBufferDemoRequestLog.class",
         "de/lasttest/domain/DefaultK6ScriptGenerator.class",
         "de/lasttest/domain/HttpRemoteSpecificationFetcher.class",
         "de/lasttest/domain/InfluxDbTimeSeriesReader.class",

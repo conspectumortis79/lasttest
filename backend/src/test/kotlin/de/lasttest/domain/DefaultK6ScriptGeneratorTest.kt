@@ -61,7 +61,7 @@ class DefaultK6ScriptGeneratorTest {
     @Test
     fun `generates iterations and omits duration when useIterations is true`() {
         val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = 250, iterations = 250)
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
 
         assertTrue(script.contains("vus: 250"))
         assertTrue(script.contains("iterations: 250"))
@@ -72,7 +72,7 @@ class DefaultK6ScriptGeneratorTest {
     @Test
     fun `defaults useIterations to false and keeps the duration block`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 2, durationSeconds = 15)
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
 
         assertTrue(script.contains("duration: '15s'"))
         assertTrue(!script.contains("iterations:"))
@@ -82,8 +82,8 @@ class DefaultK6ScriptGeneratorTest {
     fun `wraps load options in a k6 v2 scenario block with the right executor`() {
         val constantVUs = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 2, durationSeconds = 15)
         val sharedIterations = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = 250, iterations = 250)
-        val durationScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), constantVUs)
-        val iterationsScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), sharedIterations)
+        val durationScript = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), constantVUs)
+        val iterationsScript = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), sharedIterations)
 
         // k6 v1+ requires scenarios; the top-level vus/duration shortcuts
         // were removed in v2 alongside gracefulStop. Make sure we emit the
@@ -107,7 +107,7 @@ class DefaultK6ScriptGeneratorTest {
     @Test
     fun `generates selected operation with tags and thresholds`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 2, durationSeconds = 15)
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
 
         assertTrue(script.contains("vus: 2"))
         assertTrue(script.contains("duration: '15s'"))
@@ -120,7 +120,7 @@ class DefaultK6ScriptGeneratorTest {
     @Test
     fun `accepts thirty thousand virtual users`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 30000, durationSeconds = 10)
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
 
         assertTrue(script.contains("vus: 30000"))
     }
@@ -130,7 +130,7 @@ class DefaultK6ScriptGeneratorTest {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 30001, durationSeconds = 10)
         val exception =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
 
         assertTrue(exception.message!!.contains("zwischen 1 und 30000"))
@@ -152,7 +152,7 @@ class DefaultK6ScriptGeneratorTest {
             )
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
         assertTrue(script.contains("/pets/7?expand=full%20details"))
         assertTrue(script.contains("\"X-Tenant\":\"customer-a\""))
@@ -183,7 +183,7 @@ class DefaultK6ScriptGeneratorTest {
             )
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(basicSpec, "https://example.test", setOf("getAdminStats"), listOf(configuration), profile)
+        val script = generator.generateForRun(basicSpec, "https://example.test", "", setOf("getAdminStats"), listOf(configuration), profile)
 
         // base64("alice:s3cret") = "YWxpY2U6czNjcmV0"
         assertContains(script, "\"Authorization\":\"Basic YWxpY2U6czNjcmV0\"")
@@ -212,7 +212,7 @@ class DefaultK6ScriptGeneratorTest {
             )
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(basicSpec, "https://example.test", setOf("getAdminStats"), listOf(configuration), profile)
+        val script = generator.generateForRun(basicSpec, "https://example.test", "", setOf("getAdminStats"), listOf(configuration), profile)
 
         assertTrue(!script.contains("Authorization"))
     }
@@ -244,7 +244,7 @@ class DefaultK6ScriptGeneratorTest {
             )
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(dualSpec, "https://example.test", setOf("whoAmI"), listOf(configuration), profile)
+        val script = generator.generateForRun(dualSpec, "https://example.test", "", setOf("whoAmI"), listOf(configuration), profile)
 
         assertContains(script, "\"Authorization\":\"Basic YWxpY2U6czNjcmV0\"")
         assertTrue(!script.contains("Bearer abc"))
@@ -276,7 +276,7 @@ class DefaultK6ScriptGeneratorTest {
             )
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(publicSpec, "https://example.test", setOf("publicEndpoint"), listOf(configuration), profile)
+        val script = generator.generateForRun(publicSpec, "https://example.test", "", setOf("publicEndpoint"), listOf(configuration), profile)
 
         assertTrue(!script.contains("Authorization"))
     }
@@ -302,7 +302,7 @@ class DefaultK6ScriptGeneratorTest {
             )
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(apiKeySpec, "https://example.test", setOf("lookupProduct"), listOf(configuration), profile)
+        val script = generator.generateForRun(apiKeySpec, "https://example.test", "", setOf("lookupProduct"), listOf(configuration), profile)
 
         assertContains(script, "\"X-API-Key\":\"sk-test-abc123\"")
         // No Authorization header — apiKey auth does not use one.
@@ -330,7 +330,7 @@ class DefaultK6ScriptGeneratorTest {
         val configuration = OperationConfiguration(operationId = "lookupProduct", apiKey = "")
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(apiKeySpec, "https://example.test", setOf("lookupProduct"), listOf(configuration), profile)
+        val script = generator.generateForRun(apiKeySpec, "https://example.test", "", setOf("lookupProduct"), listOf(configuration), profile)
 
         assertTrue(!script.contains("X-API-Key"))
     }
@@ -373,7 +373,7 @@ class DefaultK6ScriptGeneratorTest {
             )
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(oauth2Spec, "https://example.test", setOf("getMe"), listOf(configuration), profile)
+        val script = generator.generateForRun(oauth2Spec, "https://example.test", "", setOf("getMe"), listOf(configuration), profile)
 
         assertContains(script, "\"Authorization\":\"Bearer demo-oauth2-token-12345\"")
     }
@@ -406,7 +406,7 @@ class DefaultK6ScriptGeneratorTest {
         val configuration = OperationConfiguration(operationId = "getMe", oauth2Token = "")
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(oauth2Spec, "https://example.test", setOf("getMe"), listOf(configuration), profile)
+        val script = generator.generateForRun(oauth2Spec, "https://example.test", "", setOf("getMe"), listOf(configuration), profile)
 
         assertTrue(!script.contains("Authorization"))
     }
@@ -416,7 +416,7 @@ class DefaultK6ScriptGeneratorTest {
         val configuration = OperationConfiguration(operationId = "createPet", requestBodyJson = """{"name":"Luna"}""")
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(specification, "https://example.test", setOf("createPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("createPet"), listOf(configuration), profile)
 
         assertTrue(script.contains("JSON.stringify({\"name\":\"Luna\"})"))
         assertTrue(script.contains("\"Content-Type\":\"application/json\""))
@@ -431,7 +431,7 @@ class DefaultK6ScriptGeneratorTest {
             )
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
         assertTrue(!script.contains("expand="))
     }
@@ -442,14 +442,14 @@ class DefaultK6ScriptGeneratorTest {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("createPet"), listOf(configuration), profile)
+            generator.generateForRun(specification, "https://example.test", "", setOf("createPet"), listOf(configuration), profile)
         }
     }
 
     @Test
     fun `supports http targets empty selections delete calls and documented request bodies`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 3600)
-        val script = generator.generate(specification, "http://example.test", emptySet(), emptyList(), profile)
+        val script = generator.generateForRun(specification, "http://example.test", "", emptySet(), emptyList(), profile)
 
         assertContains(script, "vus: 1")
         assertContains(script, "duration: '3600s'")
@@ -463,9 +463,9 @@ class DefaultK6ScriptGeneratorTest {
         val tooShortDuration = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 0)
         val tooLongDuration = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 3601)
 
-        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), tooFewVUs) }
-        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), tooShortDuration) }
-        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), tooLongDuration) }
+        assertFailsWith<IllegalArgumentException> { generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), tooFewVUs) }
+        assertFailsWith<IllegalArgumentException> { generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), tooShortDuration) }
+        assertFailsWith<IllegalArgumentException> { generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), tooLongDuration) }
     }
 
     // --- New load profile tests (ramping-vus, constant-arrival-rate) ---
@@ -484,7 +484,7 @@ class DefaultK6ScriptGeneratorTest {
                         LoadStage(target = 0, durationSeconds = 30),
                     ),
             )
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
 
         assertTrue(script.contains("executor: 'ramping-vus'"))
         assertTrue(script.contains("startVUs: 0"))
@@ -503,7 +503,7 @@ class DefaultK6ScriptGeneratorTest {
     fun `rejects ramping-vus with empty stages`() {
         val profile = LoadProfile(type = LoadProfileType.RAMPING_VUS, stages = emptyList())
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+            generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
         }
     }
 
@@ -518,7 +518,7 @@ class DefaultK6ScriptGeneratorTest {
                 preAllocatedVUs = 10,
                 maxVUs = 100,
             )
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
 
         assertTrue(script.contains("executor: 'constant-arrival-rate'"))
         assertTrue(script.contains("rate: 50"))
@@ -540,7 +540,7 @@ class DefaultK6ScriptGeneratorTest {
                 maxVUs = 50,
             )
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+            generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
         }
     }
 
@@ -557,7 +557,7 @@ class DefaultK6ScriptGeneratorTest {
             )
         val exception =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(exception.message!!.contains("Zeiteinheit"))
     }
@@ -566,7 +566,7 @@ class DefaultK6ScriptGeneratorTest {
     fun `rejects constant-vus missing required fields`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS)
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+            generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
         }
     }
 
@@ -574,27 +574,30 @@ class DefaultK6ScriptGeneratorTest {
     fun `rejects duplicate and unknown operation configurations`() {
         val configuration = OperationConfiguration("getPet")
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(
+            generator.generateForRun(
                 specification,
                 "https://example.test",
+                "",
                 setOf("getPet"),
                 listOf(configuration, configuration),
                 LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10),
             )
         }
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(
+            generator.generateForRun(
                 specification,
                 "https://example.test",
+                "",
                 setOf("getPet"),
                 listOf(OperationConfiguration("deletePet")),
                 LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10),
             )
         }
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(
+            generator.generateForRun(
                 specification,
                 "https://example.test",
+                "",
                 setOf("getPet"),
                 listOf(OperationConfiguration("missing")),
                 LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10),
@@ -612,21 +615,23 @@ class DefaultK6ScriptGeneratorTest {
         // pointed at the legacy constructor so the validation logic it
         // exercises remains the same shape.
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("getPet"), listOf(OperationConfiguration("getPet", parameterValues = listOf(id, id))), profile)
+            generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(OperationConfiguration("getPet", parameterValues = listOf(id, id))), profile)
         }
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(
+            generator.generateForRun(
                 specification,
                 "https://example.test",
+                "",
                 setOf("getPet"),
                 listOf(OperationConfiguration("getPet", parameterValues = listOf(ParameterValue("unknown", "query", "x")))),
                 profile,
             )
         }
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(
+            generator.generateForRun(
                 specification,
                 "https://example.test",
+                "",
                 setOf("getPet"),
                 listOf(OperationConfiguration("getPet", parameterValues = listOf(ParameterValue("id", "PATH", " ")))),
                 profile,
@@ -640,7 +645,7 @@ class DefaultK6ScriptGeneratorTest {
         val missingExampleSpecification = specification.copy(operations = listOf(operation))
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(missingExampleSpecification, "https://example.test", emptySet(), emptyList(), profile)
+        val script = generator.generateForRun(missingExampleSpecification, "https://example.test", "", emptySet(), emptyList(), profile)
 
         assertContains(script, "value=test")
     }
@@ -652,7 +657,7 @@ class DefaultK6ScriptGeneratorTest {
         val configuration = OperationConfiguration("jsonList", requestBodyJson = "{\"nothing\":null,\"items\":[1,true]}")
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(jsonSpecification, "https://example.test", emptySet(), listOf(configuration), profile)
+        val script = generator.generateForRun(jsonSpecification, "https://example.test", "", emptySet(), listOf(configuration), profile)
 
         assertContains(script, "JSON.stringify({\"nothing\":null,\"items\":[1,true]})")
     }
@@ -680,8 +685,8 @@ class DefaultK6ScriptGeneratorTest {
         val blank = OperationConfiguration("collections", bearerToken = " ")
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val prefixedScript = generator.generate(collectionSpecification, "https://example.test", emptySet(), listOf(prefixed), profile)
-        val blankScript = generator.generate(collectionSpecification, "https://example.test", emptySet(), listOf(blank), profile)
+        val prefixedScript = generator.generateForRun(collectionSpecification, "https://example.test", "", emptySet(), listOf(prefixed), profile)
+        val blankScript = generator.generateForRun(collectionSpecification, "https://example.test", "", emptySet(), listOf(blank), profile)
 
         assertContains(prefixedScript, "\"Authorization\":\"Bearer existing\"")
         assertTrue(!blankScript.contains("Authorization"))
@@ -706,7 +711,7 @@ class DefaultK6ScriptGeneratorTest {
         val bodySpecification = specification.copy(operations = listOf(bodyOperation))
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(bodySpecification, "https://example.test", emptySet(), emptyList(), profile)
+        val script = generator.generateForRun(bodySpecification, "https://example.test", "", emptySet(), emptyList(), profile)
 
         assertContains(script, "JSON.stringify([1,true,\"line\\nvalue\"])")
         assertContains(script, "\\b\\f\\n\\r\\t\\u0001")
@@ -720,7 +725,7 @@ class DefaultK6ScriptGeneratorTest {
         val configuration = OperationConfiguration("optionalBody", requestBodyJson = "")
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(optionalSpecification, "https://example.test", emptySet(), listOf(configuration), profile)
+        val script = generator.generateForRun(optionalSpecification, "https://example.test", "", emptySet(), listOf(configuration), profile)
 
         assertContains(script, "null")
         assertTrue(!script.contains("Content-Type"))
@@ -730,29 +735,29 @@ class DefaultK6ScriptGeneratorTest {
     fun `rejects empty and null required request bodies`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("createPet"), listOf(OperationConfiguration("createPet", requestBodyJson = "")), profile)
+            generator.generateForRun(specification, "https://example.test", "", setOf("createPet"), listOf(OperationConfiguration("createPet", requestBodyJson = "")), profile)
         }
         assertFailsWith<IllegalArgumentException> {
-            generator.generate(specification, "https://example.test", setOf("createPet"), listOf(OperationConfiguration("createPet", requestBodyJson = "null")), profile)
+            generator.generateForRun(specification, "https://example.test", "", setOf("createPet"), listOf(OperationConfiguration("createPet", requestBodyJson = "null")), profile)
         }
     }
 
     @Test
     fun `rejects invalid target URL`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
-        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "file:///etc/passwd", emptySet(), emptyList(), profile) }
+        assertFailsWith<IllegalArgumentException> { generator.generateForRun(specification, "file:///etc/passwd", "", emptySet(), emptyList(), profile) }
     }
 
     @Test
     fun `rejects empty selection`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
-        assertFailsWith<IllegalArgumentException> { generator.generate(specification, "https://example.test", setOf("missing"), emptyList(), profile) }
+        assertFailsWith<IllegalArgumentException> { generator.generateForRun(specification, "https://example.test", "", setOf("missing"), emptyList(), profile) }
     }
 
     @Test
     fun `declares one counter per tracked status code plus err and other per selected operation`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
-        val script = generator.generate(specification, "https://example.test", setOf("getPet", "createPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet", "createPet"), emptyList(), profile)
 
         // 19 tracked codes + err + other = 21 Counter declarations per operation.
         val trackedCodes =
@@ -789,7 +794,7 @@ class DefaultK6ScriptGeneratorTest {
     @Test
     fun `uses a switch statement to dispatch the response status to the right counter`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
 
         // The status dispatch must be a switch so the generated code
         // stays linear in the number of codes and so the k6 engine can
@@ -810,7 +815,7 @@ class DefaultK6ScriptGeneratorTest {
         val weirdSpecification = specification.copy(operations = listOf(weirdOperation))
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(weirdSpecification, "https://example.test", setOf("get-pet:v2"), emptyList(), profile)
+        val script = generator.generateForRun(weirdSpecification, "https://example.test", "", setOf("get-pet:v2"), emptyList(), profile)
 
         // Hyphens and colons must be replaced with underscores so the
         // metric name stays a valid JavaScript identifier.
@@ -831,7 +836,7 @@ class DefaultK6ScriptGeneratorTest {
         val leadingDigitSpecification = specification.copy(operations = listOf(leadingDigitOperation))
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(leadingDigitSpecification, "https://example.test", setOf("1Pet"), emptyList(), profile)
+        val script = generator.generateForRun(leadingDigitSpecification, "https://example.test", "", setOf("1Pet"), emptyList(), profile)
 
         assertContains(script, "new Counter('lt_status_200__1Pet')")
         assertContains(script, "new Counter('lt_status_429__1Pet')")
@@ -852,7 +857,7 @@ class DefaultK6ScriptGeneratorTest {
         val emptyIdSpecification = specification.copy(operations = listOf(emptyIdOperation))
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(emptyIdSpecification, "https://example.test", setOf(""), emptyList(), profile)
+        val script = generator.generateForRun(emptyIdSpecification, "https://example.test", "", setOf(""), emptyList(), profile)
 
         assertContains(script, "new Counter('lt_status_200__')")
         assertContains(script, "lt_status_err__.add(1)")
@@ -862,7 +867,7 @@ class DefaultK6ScriptGeneratorTest {
     @Test
     fun `omits status counters for unselected operations`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
 
         // `createPet` and `deletePet` are not in the selected set, so
         // their counters must not be generated.
@@ -1220,7 +1225,7 @@ class DefaultK6ScriptGeneratorTest {
                 payloadStrategy = PayloadStrategy.SEQUENTIAL,
             )
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
         // Pool selector lives at the top of the script.
         assertContains(script, "let __lt_idx_getPet = 0;")
@@ -1257,7 +1262,7 @@ class DefaultK6ScriptGeneratorTest {
                 payloadStrategy = PayloadStrategy.RANDOM,
             )
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
         // No increment in random mode — the function returns a fresh
         // index on every call.
@@ -1278,7 +1283,7 @@ class DefaultK6ScriptGeneratorTest {
             )
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
         // Default strategy is sequential.
         assertContains(script, "__lt_idx_getPet++")
@@ -1299,7 +1304,7 @@ class DefaultK6ScriptGeneratorTest {
                 payloadStrategy = PayloadStrategy.SEQUENTIAL,
             )
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
         // Pool selector only exists when there is more than one payload.
         assertTrue(!script.contains("__lt_next_getPet"))
@@ -1317,7 +1322,7 @@ class DefaultK6ScriptGeneratorTest {
         val configuration = OperationConfiguration(operationId = "getPet", parameterValues = listOf(ParameterValue("id", "path", "99")))
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
         assertContains(script, "/pets/99")
         assertTrue(!script.contains("__lt_next_getPet"))
@@ -1350,7 +1355,7 @@ class DefaultK6ScriptGeneratorTest {
                 payloadStrategy = PayloadStrategy.SEQUENTIAL,
             )
 
-        val script = generator.generate(specification, "https://example.test", setOf("createPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("createPet"), listOf(configuration), profile)
 
         // Both bodies appear in the dispatch chain.
         assertContains(script, """JSON.stringify({"name":"Luna"})""")
@@ -1387,7 +1392,7 @@ class DefaultK6ScriptGeneratorTest {
                 payloadStrategy = PayloadStrategy.SEQUENTIAL,
             )
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
         // Extract the body of `default function () { ... }` and check
         // that the per-iteration dispatch does NOT redeclare the
@@ -1426,7 +1431,7 @@ class DefaultK6ScriptGeneratorTest {
                 payloadStrategy = PayloadStrategy.RANDOM,
             )
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
         // Random mode emits a single function declaration above the
         // default function — no `let` at all because there is no
@@ -1461,7 +1466,7 @@ class DefaultK6ScriptGeneratorTest {
                 payloadStrategy = PayloadStrategy.SEQUENTIAL,
             )
 
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), listOf(configuration), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
         // One Counter declaration per payload index at the top of the
         // generated script. The same Counter names are referenced from
@@ -1480,7 +1485,76 @@ class DefaultK6ScriptGeneratorTest {
         // the request count is identical and would only add noise.
         val singleProfile =
             LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
-        val singleScript = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), singleProfile)
+        val singleScript = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), singleProfile)
         assertTrue(!singleScript.contains("lt_payload_0_getPet"))
+    }
+
+    // ---- Demo-API request log correlation (X-Lasttest-Run-Id) ----
+
+    @Test
+    fun `emits the X-Lasttest-Run-Id header when generateForRun is called with a non-empty runId`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generateForRun(specification, "https://example.test", "run-42", setOf("getPet"), emptyList(), profile)
+
+        // The header value is the runId verbatim so the interceptor
+        // can recover it without any encoding tricks.
+        assertContains(script, "\"X-Lasttest-Run-Id\":\"run-42\"")
+    }
+
+    @Test
+    fun `omits the X-Lasttest-Run-Id header when runId is empty`() {
+        // The default code path (tests that do not care about the
+        // demo correlation, and any synthetic caller) sends an
+        // empty runId. The header must not appear so the existing
+        // assertions on the legacy script shape keep holding.
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
+
+        assertTrue(!script.contains("X-Lasttest-Run-Id"))
+    }
+
+    @Test
+    fun `emits the X-Lasttest-Run-Id header for every selected operation`() {
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
+
+        // Two operations are selected — every single request block
+        // must carry the header so the demo log can group every
+        // request under the same runId.
+        val script = generator.generateForRun(specification, "https://example.test", "abc-123", setOf("getPet", "createPet"), emptyList(), profile)
+
+        val matches = Regex("\"X-Lasttest-Run-Id\":\"abc-123\"").findAll(script).count()
+        assertEquals(2, matches, "one header per selected operation")
+    }
+
+    @Test
+    fun `emits the X-Lasttest-Run-Id header for every branch of a multi-payload pool`() {
+        // The multi-payload dispatch emits one HTTP request per
+        // payload. The header must be on every branch so a run
+        // with a random strategy still produces a uniform
+        // correlation in the log.
+        val configuration =
+            OperationConfiguration(
+                operationId = "getPet",
+                payloads =
+                    listOf(
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42"))),
+                        OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "17"))),
+                    ),
+            )
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 10,
+                payloadStrategy = PayloadStrategy.SEQUENTIAL,
+            )
+
+        val script = generator.generateForRun(specification, "https://example.test", "run-x", setOf("getPet"), listOf(configuration), profile)
+
+        // Two payloads → two request blocks → two header occurrences.
+        val matches = Regex("\"X-Lasttest-Run-Id\":\"run-x\"").findAll(script).count()
+        assertEquals(2, matches, "every payload branch must carry the run id")
     }
 }

@@ -1,10 +1,13 @@
 // Slide-in settings drawer that opens from the right edge of the
-// viewport. Body exposes the language picker and a notifications
+// viewport. Body exposes the language picker, a notifications
 // section that drives the browser's per-run completion
-// notifications. The actual Notification-Permission flow lives
-// in App.tsx (it touches the global `Notification` API); the
-// drawer just hands the user gesture up and renders the granted
-// / denied state the parent reports.
+// notifications, and a master switch for the bundled demo API.
+// The actual Notification-Permission flow lives in App.tsx (it
+// touches the global `Notification` API); the drawer just hands
+// the user gesture up and renders the granted / denied state the
+// parent reports. The demo-API switch talks directly to the
+// `useDemoStatus()` hook because the toggle is a backend-owned
+// state, not a piece of UI the parent needs to mirror.
 import { useEffect, useRef } from 'react'
 import { SUPPORTED_LANGUAGES, translate, type SupportedLanguage } from './i18n.ts'
 import {
@@ -12,6 +15,7 @@ import {
   type NotificationPermissionState,
   type NotificationSettings,
 } from './runNotifications.ts'
+import { useDemoStatus } from './useDemoStatus.tsx'
 
 type SettingsDrawerProps = {
   open: boolean
@@ -148,7 +152,36 @@ export function SettingsDrawer({
             </p>
             : null}
         </div>
+
+        <h3 className="drawer-section">{translate(language, 'drawer.section.demo')}</h3>
+        <div className="drawer-checkbox-group" role="group" aria-label={translate(language, 'drawer.section.demo')}>
+          <DemoApiSwitch language={language} />
+        </div>
       </div>
     </aside>
   </>
+}
+
+/**
+ * The "Demo API" master switch. Sits in the Settings drawer next
+ * to the language and notifications controls. Flipping the switch
+ * is the only way to enable the demo; there is no auto-detection.
+ * A small "active" pill next to the switch mirrors the same
+ * "demo is running" indicator that the TopToolbar shows, so the
+ * user sees consistent feedback no matter where they look.
+ */
+function DemoApiSwitch({ language }: { language: SupportedLanguage }): React.ReactElement {
+  const { status, setEnabled } = useDemoStatus()
+  return <label className={`drawer-checkbox ${status.enabled ? 'is-selected' : ''}`}>
+    <input
+      type="checkbox"
+      checked={status.enabled}
+      onChange={event => { void setEnabled(event.target.checked) }}
+      data-testid="settings-demo-api-switch"
+    />
+    <span className="drawer-checkbox-text">
+      <span className="drawer-checkbox-label">{translate(language, 'drawer.demo.enabled')}</span>
+      <span className="drawer-checkbox-hint">{translate(language, 'drawer.demo.enabled.hint')}</span>
+    </span>
+  </label>
 }

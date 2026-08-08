@@ -35,7 +35,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = null, durationSeconds = 10)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("virtualUsers"))
     }
@@ -45,7 +45,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 10, durationSeconds = null)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("durationSeconds"))
     }
@@ -55,7 +55,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 0, durationSeconds = 10)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Virtual Users"))
     }
@@ -65,7 +65,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 30_001, durationSeconds = 10)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Virtual Users"))
     }
@@ -75,7 +75,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 10, durationSeconds = 3601)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Dauer"))
     }
@@ -87,7 +87,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = null, iterations = 100)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("virtualUsers"))
     }
@@ -97,7 +97,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = 10, iterations = null)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("iterations"))
     }
@@ -107,7 +107,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = 10, iterations = 1_000_001)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Iterationen"))
     }
@@ -119,7 +119,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.RAMPING_VUS, startVUs = 0, stages = null)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("stages"))
     }
@@ -129,7 +129,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.RAMPING_VUS, startVUs = 0, stages = emptyList())
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("mindestens eine Stage"))
     }
@@ -139,7 +139,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
         val profile = LoadProfile(type = LoadProfileType.RAMPING_VUS, startVUs = 30_001, stages = listOf(LoadStage(10, 30)))
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Start-VUs"))
     }
@@ -154,7 +154,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Ziel-VUs"))
     }
@@ -169,7 +169,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Ziel-VUs"))
     }
@@ -184,7 +184,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Dauer"))
     }
@@ -199,7 +199,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Dauer"))
     }
@@ -219,7 +219,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("rate"))
     }
@@ -237,7 +237,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("timeUnit"))
     }
@@ -255,7 +255,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("durationSeconds"))
     }
@@ -273,7 +273,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("preAllocatedVUs"))
     }
@@ -291,7 +291,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("maxVUs"))
     }
@@ -309,7 +309,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Rate"))
     }
@@ -327,7 +327,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Rate"))
     }
@@ -345,7 +345,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Zeiteinheit"))
     }
@@ -363,7 +363,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("Zeiteinheit"))
     }
@@ -381,7 +381,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("preAllocatedVUs"))
     }
@@ -399,7 +399,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("preAllocatedVUs"))
     }
@@ -417,7 +417,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
             )
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+                generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
             }
         assertTrue(ex.message!!.contains("maxVUs"))
     }
@@ -427,7 +427,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
     @Test
     fun `renderScenario constant-vus with all fields set produces valid output`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 50, durationSeconds = 120)
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
         assertTrue(script.contains("executor: 'constant-vus'"))
         assertTrue(script.contains("vus: 50"))
         assertTrue(script.contains("duration: '120s'"))
@@ -436,7 +436,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
     @Test
     fun `renderScenario shared-iterations with all fields set produces valid output`() {
         val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = 10, iterations = 200)
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
         assertTrue(script.contains("executor: 'shared-iterations'"))
         assertTrue(script.contains("vus: 10"))
         assertTrue(script.contains("iterations: 200"))
@@ -455,7 +455,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
                         LoadStage(target = 0, durationSeconds = 30),
                     ),
             )
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
         assertTrue(script.contains("executor: 'ramping-vus'"))
         assertTrue(script.contains("startVUs: 5"))
         assertTrue(script.contains("{ target: 10, duration: '30s' }"))
@@ -471,7 +471,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
                 startVUs = null,
                 stages = listOf(LoadStage(target = 10, durationSeconds = 30)),
             )
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
         assertTrue(script.contains("startVUs: 0"))
     }
 
@@ -486,7 +486,7 @@ class DefaultK6ScriptGeneratorCoverageTest {
                 preAllocatedVUs = 5,
                 maxVUs = 50,
             )
-        val script = generator.generate(specification, "https://example.test", setOf("getPet"), emptyList(), profile)
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
         assertTrue(script.contains("executor: 'constant-arrival-rate'"))
         assertTrue(script.contains("rate: 100"))
         assertTrue(script.contains("timeUnit: '1s'"))

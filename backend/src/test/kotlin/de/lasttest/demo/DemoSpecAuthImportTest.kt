@@ -75,7 +75,27 @@ class DemoSpecAuthImportTest {
         assertTrue(oauth2.bearerAuth)
 
         // --- Total operation count for sanity --------------------------
-        // 6 product endpoints + 3 auth-demo endpoints = 9.
-        assertEquals(9, spec.operations.size)
+        // 6 product endpoints + 4 auth-demo endpoints = 10.
+        //  - searchProducts (Bearer)
+        //  - getAdminStats (Basic)
+        //  - lookupProduct (API Key)
+        //  - getMe (OAuth 2.0)
+        //  - getMyProfile (OIDC)
+        assertEquals(10, spec.operations.size)
+
+        // --- getMyProfile / OpenID Connect ----------------------------
+        val oidc = schemes.first { it.operationId == "getMyProfile" }
+        assertEquals(1, oidc.authRequirements.size)
+        val oidcReq = oidc.authRequirements.single()
+        assertTrue(oidcReq is AuthRequirement.OpenIdConnect)
+        assertEquals("oidcAuth", oidcReq.schemeName)
+        assertEquals(
+            "http://localhost:8286/demo-api/.well-known/openid-configuration",
+            oidcReq.openIdConnectUrl,
+        )
+        // OIDC ID token rides the same wire format as Bearer /
+        // OAuth 2.0 (RFC 6750), so the derived `bearerAuth`
+        // flag must flip on for the legacy UI path.
+        assertTrue(oidc.bearerAuth)
     }
 }

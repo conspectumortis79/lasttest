@@ -9,13 +9,17 @@
 //   and every "prev" press jumped to the last hit — the user
 //   could never reach the matches in the middle.
 //
-// The fix tracks the active hit in component state. These tests
-// prove the cycling works by clicking the next button several
-// times and asserting that the *currently active* highlight
-// moves to a different paragraph each time. We measure the
-// paragraph location via the in-view text content of the active
-// `<mark>` (which is unique per match) rather than the absolute
-// pixel position so the test stays robust to scroll height.
+// The fix tracks the active hit in a ref that the prev/next
+// handlers read on every click, so the *currently active*
+// highlight walks through every match in document order. These
+// tests prove the cycling works by clicking the next button
+// several times and asserting that the active highlight's index
+// within the highlighted list moves forward (and back) to every
+// position. We use the DOM index rather than the mark's
+// `textContent` because a single-word query like "k6" produces
+// hits whose `textContent` is identical for every match — the
+// index is the only unique per-hit identifier the test can
+// observe.
 
 import { expect, test, type Page } from '@playwright/test'
 
@@ -30,27 +34,24 @@ async function openUserGuide(page: Page) {
 }
 
 /**
- * Reads the text content of the currently active `<mark>` — the
- * one that carries the `doc-search-hit--active` pulse class.
- * Returns `null` when no mark is active (e.g. before the first
- * auto-scroll has settled).
+ * Returns the zero-based index of the currently active `<mark>`
+ * within the document order of every highlight. Returns `-1`
+ * when no mark is active (e.g. before the first auto-scroll
+ * has settled).
  */
-async function activeHitText(page: Page): Promise<string | null> {
+async function activeHitIndex(page: Page): Promise<number> {
   return page.evaluate(() => {
-    const active = document.querySelector('mark.doc-search-hit--active')
-    return active?.textContent ?? null
+    const all = Array.from(document.querySelectorAll('mark.doc-search-hit'))
+    return all.findIndex(mark => mark.classList.contains('doc-search-hit--active'))
   })
 }
 
 /**
- * Returns the text contents of every highlight in document order.
- * Used to assert that the active hit truly walks through the
- * list rather than oscillating between two values.
+ * Returns the count of highlighted matches. Used to size the
+ * walk-through loop in the tests below.
  */
-async function allHitTexts(page: Page): Promise<string[]> {
-  return page.evaluate(() =>
-    Array.from(document.querySelectorAll('mark.doc-search-hit')).map(mark => mark.textContent ?? ''),
-  )
+async function hitCount(page: Page): Promise<number> {
+  return page.evaluate(() => document.querySelectorAll('mark.doc-search-hit').length)
 }
 
 test.beforeEach(async ({ page }) => {
@@ -59,7 +60,7 @@ test.beforeEach(async ({ page }) => {
 
 test('README search next button walks through every hit', async ({ page }) => {
   await openReadme(page)
-  const searchInput = page.locator('.doc-popup input[type="search"]')
+  const searchInput = page.locator('.doc-popup.is-open input[type="search"]')
   await expect(searchInput).toBeVisible()
 
   // "k6" appears throughout the README in many sections, so the
@@ -68,14 +69,14 @@ test('README search next button walks through every hit', async ({ page }) => {
   await searchInput.fill('k6')
   await page.waitForFunction(() => document.querySelectorAll('mark.doc-search-hit').length >= 3, undefined, { timeout: 5_000 })
 
-  const hitTexts = await allHitTexts(page)
-  expect(hitTexts.length).toBeGreaterThanOrEqual(3)
+  const total = await hitCount(page)
+  expect(total).toBeGreaterThanOrEqual(3)
 
-  const visited: string[] = []
-  for (let step = 0; step < hitTexts.length + 1; step += 1) {
-    const active = await activeHitText(page)
-    expect(active, `expected an active highlight at step ${step}`).not.toBeNull()
-    if (active !== null) visited.push(active)
+  const visited: number[] = []
+  for (let step = 0; step < total + 1; step += 1) {
+    const active = await activeHitIndex(page)
+    expect(active, `expected an active highlight at step ${step}`).toBeGreaterThanOrEqual(0)
+    visited.push(active)
     // Click "next". We use the aria-label rather than relying on
     // the visible text — both buttons carry a chevron icon, only
     // the aria label disambiguates them.
@@ -85,46 +86,47 @@ test('README search next button walks through every hit', async ({ page }) => {
     await page.waitForTimeout(50)
   }
 
-  // Removing consecutive duplicates (the previous active mark
-  // can linger for a frame after the click) must still cover
-  // every unique hit. If the bug were present, `visited` would
-  // only contain the first hit's text over and over.
+  // The set of visited indices must cover every position in
+  // [0, total). If the bug were present, `visited` would only
+  // contain 0 and the test would fail with `unique.length < total`.
   const unique = Array.from(new Set(visited))
-  expect(unique.length).toBe(hitTexts.length)
-  expect(unique).toEqual(expect.arrayContaining(hitTexts))
+  expect(unique.length).toBe(total)
+  expect(unique.sort((a, b) => a - b)).toEqual(Array.from({ length: total }, (_, i) => i))
 })
 
 test('README search prev button walks backwards through every hit', async ({ page }) => {
   await openReadme(page)
-  const searchInput = page.locator('.doc-popup input[type="search"]')
+  const searchInput = page.locator('.doc-popup.is-open input[type="search"]')
   await expect(searchInput).toBeVisible()
 
   await searchInput.fill('k6')
   await page.waitForFunction(() => document.querySelectorAll('mark.doc-search-hit').length >= 3, undefined, { timeout: 5_000 })
 
-  const hitTexts = await allHitTexts(page)
-  expect(hitTexts.length).toBeGreaterThanOrEqual(3)
+  const total = await hitCount(page)
+  expect(total).toBeGreaterThanOrEqual(3)
 
   // The auto-scroll already parked the active hit on hit 0, so
   // pressing prev once must take us to the last hit, then
-  // walk backwards through the list.
-  const visited: string[] = []
-  for (let step = 0; step < hitTexts.length + 1; step += 1) {
-    const active = await activeHitText(page)
-    expect(active, `expected an active highlight at step ${step}`).not.toBeNull()
-    if (active !== null) visited.push(active)
+  // walk backwards through the list. `total + 1` iterations
+  // guarantees we land on every position at least once and
+  // also catch a stuck "prev from 0" regression.
+  const visited: number[] = []
+  for (let step = 0; step < total + 1; step += 1) {
+    const active = await activeHitIndex(page)
+    expect(active, `expected an active highlight at step ${step}`).toBeGreaterThanOrEqual(0)
+    visited.push(active)
     await page.getByRole('button', { name: 'Previous match' }).click()
     await page.waitForTimeout(50)
   }
 
   const unique = Array.from(new Set(visited))
-  expect(unique.length).toBe(hitTexts.length)
-  expect(unique).toEqual(expect.arrayContaining(hitTexts))
+  expect(unique.length).toBe(total)
+  expect(unique.sort((a, b) => a - b)).toEqual(Array.from({ length: total }, (_, i) => i))
 })
 
 test('User Guide walkthrough next button walks through every hit', async ({ page }) => {
   await openUserGuide(page)
-  const searchInput = page.locator('.doc-popup input[type="search"]')
+  const searchInput = page.locator('.doc-popup.is-open input[type="search"]')
   await expect(searchInput).toBeVisible()
 
   // "step" is present in every walkthrough step title, so the
@@ -135,44 +137,44 @@ test('User Guide walkthrough next button walks through every hit', async ({ page
   await searchInput.fill('step')
   await page.waitForFunction(() => document.querySelectorAll('mark.doc-search-hit').length >= 4, undefined, { timeout: 5_000 })
 
-  const hitTexts = await allHitTexts(page)
-  expect(hitTexts.length).toBeGreaterThanOrEqual(4)
+  const total = await hitCount(page)
+  expect(total).toBeGreaterThanOrEqual(4)
 
-  const visited: string[] = []
-  for (let step = 0; step < hitTexts.length + 1; step += 1) {
-    const active = await activeHitText(page)
-    expect(active, `expected an active highlight at step ${step}`).not.toBeNull()
-    if (active !== null) visited.push(active)
+  const visited: number[] = []
+  for (let step = 0; step < total + 1; step += 1) {
+    const active = await activeHitIndex(page)
+    expect(active, `expected an active highlight at step ${step}`).toBeGreaterThanOrEqual(0)
+    visited.push(active)
     await page.getByRole('button', { name: 'Next match' }).click()
     await page.waitForTimeout(100)
   }
 
   const unique = Array.from(new Set(visited))
-  expect(unique.length).toBe(hitTexts.length)
-  expect(unique).toEqual(expect.arrayContaining(hitTexts))
+  expect(unique.length).toBe(total)
+  expect(unique.sort((a, b) => a - b)).toEqual(Array.from({ length: total }, (_, i) => i))
 })
 
 test('Enter key advances through hits the same way the next button does', async ({ page }) => {
   await openReadme(page)
-  const searchInput = page.locator('.doc-popup input[type="search"]')
+  const searchInput = page.locator('.doc-popup.is-open input[type="search"]')
   await searchInput.fill('k6')
   await page.waitForFunction(() => document.querySelectorAll('mark.doc-search-hit').length >= 3, undefined, { timeout: 5_000 })
 
-  const hitTexts = await allHitTexts(page)
-  expect(hitTexts.length).toBeGreaterThanOrEqual(3)
+  const total = await hitCount(page)
+  expect(total).toBeGreaterThanOrEqual(3)
 
-  const visited: string[] = []
-  for (let step = 0; step < hitTexts.length + 1; step += 1) {
-    const active = await activeHitText(page)
-    expect(active, `expected an active highlight at step ${step}`).not.toBeNull()
-    if (active !== null) visited.push(active)
-    // Shift+Enter walks backwards, plain Enter walks forwards —
-    // both must visit every hit.
+  const visited: number[] = []
+  for (let step = 0; step < total + 1; step += 1) {
+    const active = await activeHitIndex(page)
+    expect(active, `expected an active highlight at step ${step}`).toBeGreaterThanOrEqual(0)
+    visited.push(active)
+    // Plain Enter walks forwards (the Shift variant is exercised
+    // by the prev-button test above) and must visit every hit.
     await searchInput.press('Enter')
     await page.waitForTimeout(50)
   }
 
   const unique = Array.from(new Set(visited))
-  expect(unique.length).toBe(hitTexts.length)
-  expect(unique).toEqual(expect.arrayContaining(hitTexts))
+  expect(unique.length).toBe(total)
+  expect(unique.sort((a, b) => a - b)).toEqual(Array.from({ length: total }, (_, i) => i))
 })

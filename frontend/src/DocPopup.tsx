@@ -105,6 +105,16 @@ function scrollToMatch(
   activeStep: WalkthroughStepId,
   setFocusStep: (step: WalkthroughStepId) => void,
 ) {
+  // Exactly one mark must carry the active pulse at a time —
+  // otherwise the e2e suite (and any reader that picks the
+  // highlighted match via `document.querySelector`) will always
+  // see the *first* highlighted hit, because the DOM iteration
+  // order stops at the first match. Strip the class from every
+  // sibling first, then apply it to the newly focused hit.
+  const body = match.closest<HTMLElement>('.doc-popup-body')
+  body?.querySelectorAll(`mark.${ACTIVE_CLASS}`).forEach(node => {
+    node.classList.remove(ACTIVE_CLASS)
+  })
   match.classList.add(ACTIVE_CLASS)
   window.setTimeout(() => match.classList.remove(ACTIVE_CLASS), ACTIVE_PULSE_MS)
   const stepContainer = match.closest<HTMLElement>('[data-step]')
@@ -132,13 +142,15 @@ export function DocPopup({ doc, language, onClose, strings }: DocPopupProps) {
   const [search, setSearch] = useState('')
   const [hits, setHits] = useState(0)
   // Zero-based index of the currently-focused hit in the
-  // highlighted `<mark>` list. We track this in state instead of
-  // trying to infer it from `document.activeElement`: after the
-  // search auto-scrolls to the first hit the focused element is
-  // still the search input, so an activeElement lookup would
-  // always return -1 and every "next" press would jump back to
-  // hit 0 (and every "prev" press would jump to the last hit).
-  const [currentHitIndex, setCurrentHitIndex] = useState(0)
+  // highlighted `<mark>` list. We track this in a ref rather than
+  // state: the next "next" click must read the latest position
+  // even before React has flushed the previous update, otherwise
+  // a fast double click would compute the same next index twice
+  // and leave (visually) only the first hit ever active. The
+  // ref-as-source-of-truth avoids that race; an
+  // `activeElement` lookup would also miss because the browser
+  // keeps focus on the search input.
+  const currentHitIndexRef = useRef(0)
   // External focus request for the walkthrough: when set, the
   // walkthrough switches its active step to this id. The DocPopup
   // increments a counter (rather than toggling the same value) so
@@ -161,7 +173,7 @@ export function DocPopup({ doc, language, onClose, strings }: DocPopupProps) {
     if (!open) return
     setSearch('')
     setHits(0)
-    setCurrentHitIndex(0)
+    currentHitIndexRef.current = 0
     setFocusStepRaw(null)
   }, [open, doc, language])
 
@@ -188,7 +200,7 @@ export function DocPopup({ doc, language, onClose, strings }: DocPopupProps) {
     const q = value.trim()
     if (!q) {
       setHits(0)
-      setCurrentHitIndex(0)
+      currentHitIndexRef.current = 0
       return
     }
     const regex = buildSearchRegex(q)
@@ -201,11 +213,11 @@ export function DocPopup({ doc, language, onClose, strings }: DocPopupProps) {
     // highlight class that the prev/next buttons use, so the
     // visible feedback is identical.
     if (count > 0) {
-      setCurrentHitIndex(0)
+      currentHitIndexRef.current = 0
       const first = body.querySelector<HTMLElement>(`mark.${HIGHLIGHT_CLASS}`) ?? null
       if (first) scrollToMatch(first, walkthroughActiveStep, setFocusStep)
     } else {
-      setCurrentHitIndex(0)
+      currentHitIndexRef.current = 0
     }
   }, [walkthroughActiveStep, setFocusStep])
 
@@ -215,23 +227,30 @@ export function DocPopup({ doc, language, onClose, strings }: DocPopupProps) {
     const hits = collectHits(body)
     if (!hits.length) return
     // Cycle through the hits by computing the next index from
-    // `currentHitIndex` rather than trying to derive it from
+    // `currentHitIndexRef` rather than trying to derive it from
     // `document.activeElement`. The browser focus stays on the
     // search input, so an activeElement lookup would always miss
     // and the previous implementation always jumped to hit 0
-    // ("next") or the last hit ("prev"). We clamp into
-    // [0, hits.length) so a stale index from before a re-search
-    // cannot send us out of bounds.
+    // ("next") or the last hit ("prev"). The ref-as-source-of-
+    // truth also dodges a React batching race: a freshly clicked
+    // "next" before React has flushed the previous state update
+    // would otherwise re-derive the same next index and walk
+    // through every hit in lockstep with the previous click,
+    // leaving (visually) only the first hit ever active. We clamp
+    // into [0, hits.length) so a stale index from before a
+    // re-search cannot send us out of bounds.
     const length = hits.length
-    const baseIndex = currentHitIndex >= 0 && currentHitIndex < length ? currentHitIndex : 0
+    const baseIndex = currentHitIndexRef.current >= 0 && currentHitIndexRef.current < length
+      ? currentHitIndexRef.current
+      : 0
     const nextIndex = direction === 1
       ? (baseIndex + 1) % length
       : (baseIndex - 1 + length) % length
     const next = hits[nextIndex]
     if (next === undefined) return
-    setCurrentHitIndex(nextIndex)
+    currentHitIndexRef.current = nextIndex
     scrollToMatch(next, walkthroughActiveStep, setFocusStep)
-  }, [currentHitIndex, walkthroughActiveStep, setFocusStep])
+  }, [walkthroughActiveStep, setFocusStep])
 
   const title = doc ? docTitle(doc, language) : ''
   const fileName = doc ? docFileName(doc) : ''

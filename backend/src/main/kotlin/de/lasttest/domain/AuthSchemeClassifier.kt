@@ -39,10 +39,45 @@ internal object AuthSchemeClassifier {
             isAuthorizationHeaderApiKey(scheme) -> AuthRequirement.Bearer(schemeName)
             isHeaderApiKey(scheme) -> AuthRequirement.ApiKey(schemeName, scheme.name)
             isOAuth2(scheme) -> AuthRequirement.OAuth2(schemeName, parseFlows(scheme))
+            isOpenIdConnect(scheme) -> parseOpenIdConnect(scheme).copy(schemeName = schemeName)
             else -> AuthRequirement.Unsupported(schemeName, describe(scheme))
         }
 
     private fun isOAuth2(scheme: SecurityScheme): Boolean = scheme.type == SecurityScheme.Type.OAUTH2
+
+    private fun isOpenIdConnect(scheme: SecurityScheme): Boolean = scheme.type == SecurityScheme.Type.OPENIDCONNECT
+
+    /**
+     * Returns the OpenID Connect discovery URL together with the
+     * scopes the spec declared on the scheme. The Swagger model
+     * exposes `openIdConnectUrl` as a single string, so the only
+     * metadata we can surface to the UI is that URL plus any
+     * scopes that were declared inline. The discovery URL is
+     * preserved verbatim — a relative URL is the spec's problem,
+     * not the classifier's, and a k6 script does not follow it
+     * (the user pastes a pre-acquired ID token into the UI).
+     *
+     * The `schemeName` is a placeholder; the caller in [classify]
+     * overwrites it with the key under which the scheme was
+     * declared in the spec. The field exists on the wire shape
+     * only so the UI can switch on it alongside Basic / Bearer /
+     * OAuth2.
+     */
+    private fun parseOpenIdConnect(scheme: SecurityScheme): AuthRequirement.OpenIdConnect {
+        val discoveryUrl = scheme.openIdConnectUrl?.takeIf { it.isNotBlank() } ?: ""
+        val scopes =
+            scheme.flows
+                ?.authorizationCode
+                ?.scopes
+                ?.keys
+                ?.toList()
+                ?: emptyList()
+        return AuthRequirement.OpenIdConnect(
+            schemeName = "", // overwritten in classify()
+            openIdConnectUrl = discoveryUrl,
+            scopes = scopes,
+        )
+    }
 
     /**
      * Translate the [io.swagger.v3.oas.models.security.OAuthFlows]
