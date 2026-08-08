@@ -51,7 +51,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
 
     // Walkthrough — UI step explanations (English)
     'walk.stepNavAria': 'Walkthrough steps',
-    'walk.step1.title': 'Step 1 — Import the specification',
+    'walk.step1.title': 'Import the specification',
     'walk.step1.intro': 'Step 1 loads the OpenAPI or Swagger specification of your target API. The backend parses every endpoint, parameter and request body, which you configure in Step 2.',
     'walk.step1.ann.1.title': 'URL field',
     'walk.step1.ann.1.body': 'Paste the URL to the Swagger UI or the raw OpenAPI specification here. For the bundled demo, try http://localhost:8286/demo-swagger-ui.',
@@ -62,7 +62,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step1.ann.4.title': 'Upload file',
     'walk.step1.ann.4.body': 'Alternative to the URL: upload a YAML or JSON file. lasttest accepts both formats and converts Swagger 2.0 to OpenAPI 3 automatically.',
 
-    'walk.step2.title': 'Step 2 — Pick endpoints',
+    'walk.step2.title': 'Pick endpoints',
     'walk.step2.intro': 'Step 2 lists every endpoint imported from the spec. Select the endpoints k6 should drive. For each endpoint you can configure parameters, body and authentication.',
     'walk.step2.ann.1.title': 'Server & Base URL',
     'walk.step2.ann.1.body': 'Pick a server from the spec or enter a custom base URL. lasttest sends all requests against this URL — important when the spec exposes multiple stages (dev/staging/prod).',
@@ -73,7 +73,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step2.ann.4.title': 'Method + path',
     'walk.step2.ann.4.body': 'HTTP method (GET/POST/PUT/DELETE/PATCH) and the operation path. Colours encode the method: green for GET, brown for POST, blue for PUT/PATCH, red for DELETE.',
 
-    'walk.step3.title': 'Step 3 — Load profile',
+    'walk.step3.title': 'Load profile',
     'walk.step3.intro': 'The load profile controls how much pressure k6 produces. Three main knobs: virtual users (VUs), duration, and target RPS. VUs are the number of parallel "users" hammering your API.',
     'walk.step3.ann.1.title': 'VUs (Virtual Users)',
     'walk.step3.ann.1.body': 'VUs are the parallel "users" k6 simulates. 50 VUs means 50 scripts run at the same time and fire requests. More VUs = more load. More is not always better — start with 10–50 VUs before going to the thousands.',
@@ -82,7 +82,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step3.ann.3.title': 'Target RPS',
     'walk.step3.ann.3.body': 'Target requests per second. k6 tries to keep this rate constant. Set to 0 (or leave blank) if you want k6 to fire at maximum speed instead (open-model).',
 
-    'walk.step4.title': 'Step 4 — Test runs',
+    'walk.step4.title': 'Test runs',
     'walk.step4.intro': 'Step 4 shows every previous run as a compact badge. The badge shows status, method and path. Click opens the detail view, right-click opens the action menu (Stop, Rerun, Report link).',
     'walk.step4.ann.1.title': 'Run badge',
     'walk.step4.ann.1.body': 'One badge per run. The colour of the left edge encodes the status: orange = RUNNING, purple = STOPPED, red = FAILED, dark red = ABORTED, green = COMPLETED. Click = details, right-click = actions.',
@@ -93,7 +93,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step4.ann.4.title': 'Right-click menu',
     'walk.step4.ann.4.body': 'A right-click on any badge opens a context menu. In-flight runs (QUEUED, RUNNING, STOPPING) get Stop (SIGTERM) and Force abort (SIGKILL). Terminal runs (COMPLETED, FAILED, STOPPED, ABORTED) get Rerun (replays the same scenario with a fresh run id), Copy report link, Export k6 JSON, and Remove from view. The visible items adapt to the run\'s status — see the User Guide for the full list of all 10 actions.',
 
-    'walk.step5.title': 'Step 5 — Detailed k6 report',
+    'walk.step5.title': 'Detailed k6 report',
     'walk.step5.intro': 'The detailed k6 report opens in a new tab and contains every metric k6 collected, broken down by endpoint and status code. Use it to investigate failures, compare runs, or archive results as PDF.',
     'walk.step5.ann.1.title': 'Header & summary',
     'walk.step5.ann.1.body': 'The report starts with the header (title, status, run ID, timestamp) and four summary cards: duration, total requests, request rate, and average / p95 latency. Data received / sent sit next to the latency card. Failed checks and the threshold verdict (passed / violated) round out the top section.',
@@ -521,7 +521,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
   de: {
     // Walkthrough — UI step explanations
     'walk.stepNavAria': 'Schritte des Walkthrough',
-    'walk.step1.title': 'Schritt 1 — Spezifikation importieren',
+    'walk.step1.title': 'Spezifikation importieren',
     'walk.step1.intro': 'In Schritt 1 lädst du die OpenAPI- oder Swagger-Spezifikation deiner Ziel-API. Das Backend parst daraus alle Endpunkte, Parameter und Request-Bodies, die du in Schritt 2 konfigurieren kannst.',
     'walk.step1.ann.1.title': 'URL-Eingabe',
     'walk.step1.ann.1.body': 'Hier trägst du die URL zur Swagger-UI oder zur rohen OpenAPI-Spezifikation ein. Für die mitgelieferte Demo probiere http://localhost:8286/demo-swagger-ui.',
@@ -532,7 +532,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step1.ann.4.title': 'Datei hochladen',
     'walk.step1.ann.4.body': 'Alternative zur URL: lade eine YAML- oder JSON-Datei hoch. lasttest akzeptiert beide Formate und konvertiert Swagger 2.0 automatisch nach OpenAPI 3.',
 
-    'walk.step2.title': 'Schritt 2 — Endpunkte wählen',
+    'walk.step2.title': 'Endpunkte wählen',
     'walk.step2.intro': 'Schritt 2 listet alle aus der Spec importierten Endpunkte. Wähle die Endpunkte, die k6 später ansteuern soll. Für jeden Endpunkt kannst du Parameter, Body und Authentifizierung konfigurieren.',
     'walk.step2.ann.1.title': 'Server & Base URL',
     'walk.step2.ann.1.body': 'Wähle den Server aus der Spec oder trage eine eigene Base URL ein. lasttest schickt alle Requests gegen diese URL — wichtig, wenn die Spec mehrere Stages (dev/staging/prod) anbietet.',
@@ -543,7 +543,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step2.ann.4.title': 'Methode + Pfad',
     'walk.step2.ann.4.body': 'Zeigt HTTP-Methode (GET/POST/PUT/DELETE/PATCH) und Pfad der Operation. Farben kodieren die Methode: grün für GET, braun für POST, blau für PUT/PATCH, rot für DELETE.',
 
-    'walk.step3.title': 'Schritt 3 — Lastprofil',
+    'walk.step3.title': 'Lastprofil',
     'walk.step3.intro': 'Das Lastprofil bestimmt, wie viel Last k6 erzeugt. Drei Hauptknöpfe: Virtuelle Benutzer (VUs), Gesamtdauer und Ziel-RPS. VUs sind die Anzahl paralleler "Benutzer", die deine API gleichzeitig ansteuern.',
     'walk.step3.ann.1.title': 'VUs (Virtual Users)',
     'walk.step3.ann.1.body': 'VUs sind die parallelen "Benutzer", die k6 simuliert. 50 VUs heisst: 50 Skripte laufen gleichzeitig und feuern Requests. Mehr VUs = mehr Last. Mehr ist nicht immer besser — teste zuerst mit 10–50 VUs, bevor du in die Tausende gehst.',
@@ -552,7 +552,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step3.ann.3.title': 'Target RPS',
     'walk.step3.ann.3.body': 'Ziel-Requests pro Sekunde. k6 versucht, diese Rate konstant zu halten. Setze den Wert auf 0 (oder lasse ihn weg), wenn k6 stattdessen mit maximaler Geschwindigkeit feuern soll (open-model).',
 
-    'walk.step4.title': 'Schritt 4 — Testläufe',
+    'walk.step4.title': 'Testläufe',
     'walk.step4.intro': 'In Schritt 4 siehst du alle bisherigen Läufe als übersichtliche Badges. Das Badge zeigt den Status, die Methode und den Pfad. Klick öffnet die Detail-Ansicht, Rechtsklick öffnet das Aktions-Menü (Stop, Rerun, Report-Link).',
     'walk.step4.ann.1.title': 'Run-Badge',
     'walk.step4.ann.1.body': 'Ein Badge pro Lauf. Die Farbe der linken Kante kodiert den Status: orange = RUNNING, lila = STOPPED, rot = FAILED, dunkelrot = ABORTED, grün = COMPLETED. Klick = Details, Rechtsklick = Aktionen.',
@@ -563,7 +563,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step4.ann.4.title': 'Rechtsklick-Menü',
     'walk.step4.ann.4.body': 'Ein Rechtsklick auf ein Badge öffnet ein Kontextmenü. In-flight-Läufe (QUEUED, RUNNING, STOPPING) bekommen Stop (SIGTERM) und Force abort (SIGKILL). Terminal-Läufe (COMPLETED, FAILED, STOPPED, ABORTED) bekommen Erneut ausführen (spielt dasselbe Szenario mit einer frischen Run-ID erneut ab), Report-Link kopieren, k6-JSON exportieren und Aus Ansicht entfernen. Die sichtbaren Einträge passen sich dem Status des Laufs an — die vollständige Liste aller 10 Aktionen findest du im User Guide.',
 
-    'walk.step5.title': 'Schritt 5 — Ausführlicher k6-Testbericht',
+    'walk.step5.title': 'Ausführlicher k6-Testbericht',
     'walk.step5.intro': 'Der ausführliche k6-Testbericht öffnet sich in einem neuen Tab und enthält jede Metrik, die k6 erfasst hat, aufgeschlüsselt nach Endpunkt und Status-Code. Nutze ihn, um Fehler zu untersuchen, Läufe zu vergleichen oder Ergebnisse als PDF zu archivieren.',
     'walk.step5.ann.1.title': 'Header & Zusammenfassung',
     'walk.step5.ann.1.body': 'Der Report beginnt mit dem Header (Titel, Status, Run-ID, Zeitstempel) und vier Zusammenfassungs-Karten: Dauer, Gesamt-Requests, Request-Rate und durchschnittliche / p95-Latenz. Empfangene / gesendete Daten sitzen neben der Latenz-Karte. Fehlgeschlagene Checks und das Threshold-Urteil (bestanden / verletzt) runden den oberen Bereich ab.',

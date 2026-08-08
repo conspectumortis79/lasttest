@@ -585,6 +585,11 @@ button:disabled { opacity: .5; cursor: wait; }
   border-bottom: 1px solid #233049;
   background: #0d1322;
   flex-shrink: 0;
+  /* Each tab now claims an equal share of the full modal width
+     (see .walkthrough-tab below). On viewports where the labels
+     would no longer fit on a single line, the container falls
+     back to a horizontal scroll so the user can still reach
+     every step. */
   overflow-x: auto;
 }
 .walkthrough-tab {
@@ -596,11 +601,34 @@ button:disabled { opacity: .5; cursor: wait; }
   color: #93a2b8;
   font: inherit;
   cursor: pointer;
+  /* `flex: 1 1 0` makes the tab grow/shrink to fill an equal
+     share of the tab bar. `min-width: 0` is required so the
+     flex item is allowed to shrink below its content's intrinsic
+     width — otherwise long labels like "Ausführlicher k6-Testbericht"
+     would force the tab wider than 1/5 of the bar and break the
+     even distribution. */
+  flex: 1 1 0;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  white-space: nowrap;
+  /* `white-space: normal` + centred text allows the label to
+     wrap onto two lines on narrow viewports instead of pushing
+     the tab wider than its share. */
+  white-space: normal;
+  text-align: center;
   transition: background .15s, color .15s, border-color .15s;
+}
+/* Below ~700 px viewport the modal itself is barely wider than a
+   single tab, so the even-share layout starts to wrap the labels
+   aggressively. Revert to the original "natural width + horizontal
+   scroll" pattern in that case so every tab stays on one line. */
+@media (max-width: 700px) {
+  .walkthrough-tab {
+    flex: 0 0 auto;
+    justify-content: flex-start;
+  }
 }
 .walkthrough-tab:hover {
   background: #1a2638;
@@ -629,6 +657,7 @@ button:disabled { opacity: .5; cursor: wait; }
 .walkthrough-tab-label {
   font-size: 13px;
   font-weight: 600;
+  text-align: center;
 }
 
 .walkthrough-stage {
@@ -649,6 +678,12 @@ button:disabled { opacity: .5; cursor: wait; }
   font-size: 14px;
   line-height: 1.55;
   max-width: 78ch;
+  /* The German intros currently span 2–3 lines. Reserving space
+     for 3 lines (= 65 px) keeps the grid below at a stable Y
+     position across all five tabs, so switching tabs does not
+     look like the example card is jumping up or down. Shorter
+     intros just leave empty space at the bottom of this block. */
+  min-height: calc(14px * 1.55 * 3);
 }
 
 .walkthrough-grid {
@@ -667,6 +702,14 @@ button:disabled { opacity: .5; cursor: wait; }
   border-radius: 10px;
   padding: 8px;
   overflow: hidden;
+  /* Lock the card to the 2:1 aspect ratio of every step's
+     schematic SVG (viewBox 0 0 560 280). Without this, the
+     illustration's height depends on whatever the SVG content
+     happens to draw, and the card visibly grows / shrinks
+     between tabs. The cap keeps the card from becoming
+     comically tall on very wide viewports. */
+  aspect-ratio: 2 / 1;
+  max-height: 300px;
 }
 .walk-svg {
   display: block;
@@ -691,6 +734,14 @@ button:disabled { opacity: .5; cursor: wait; }
   background: #111b29;
   border: 1px solid #233049;
   border-radius: 8px;
+  /* The annotation bodies range from 1 to 4 lines. Reserving
+     space for the longest body (4 lines + title + padding) gives
+     every card a consistent footprint so the right-hand column
+     does not visibly grow / shrink when switching tabs. Cards
+     with very long German text (e.g. tab 4's Rechtsklick-Menü)
+     still grow past this floor — that overflow scrolls inside
+     the stage, which is the intended behaviour. */
+  min-height: 132px;
 }
 .walkthrough-ann-n {
   display: inline-grid;
