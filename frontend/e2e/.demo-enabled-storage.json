@@ -1,0 +1,14 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://localhost:8286",
+      "localStorage": [
+        {
+          "name": "lasttest.demo.enabled",
+          "value": "true"
+        }
+      ]
+    }
+  ]
+}

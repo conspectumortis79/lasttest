@@ -1,9 +1,9 @@
 // Unit tests for the demo-status loader. The tests follow the
-// pattern from `retryFetch.test.ts` and `demoTraffic.test.ts`:
-// each test installs a stub `globalThis.fetch`, runs the loader,
-// and restores the original `fetch` in a `finally` block. The
-// stub does not need to track every call — the contract is just
-// "the loader makes a request and returns the parsed body".
+// pattern from `demoTraffic.test.ts`: each test installs a stub
+// `globalThis.fetch`, runs the loader, and restores the original
+// `fetch` in a `finally` block. The stub does not need to track
+// every call — the contract is just "the loader makes a request
+// and returns the parsed body".
 
 import { deepEqual, equal, ok } from 'node:assert/strict'
 import { test } from 'node:test'

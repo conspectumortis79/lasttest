@@ -21,6 +21,15 @@ async function expandOperation(page: Page, opId: string) {
 }
 
 test.beforeEach(async ({ page }) => {
+  // Pin the language to German so the German UI labels
+  // (e.g. "Validieren & importieren", "Virtual Users" vs.
+  // "Virtuelle Benutzer", "k6-Lasttest starten") match the
+  // assertions below. The default language is English; the
+  // global setup only enables the demo, it does not change
+  // the i18n setting.
+  await page.addInitScript(() => {
+    localStorage.setItem('lasttest.language', 'de')
+  })
   await page.goto('/')
 })
 
@@ -425,7 +434,7 @@ paths:
   // The UI then prioritises the typed failure block ("Connection refused")
   // so the user sees the root cause; a "100 % HTTP error rate" threshold
   // card would be misleading here.
-  await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
+  await expect(page.locator('.status-badge.is-fail')).toHaveText(/FEHLGESCHLAGEN|FAILED/)
   await expect(page.locator('.run-failure').locator('.run-failure-label')).toHaveText('Verbindung abgelehnt')
   await expect(page.locator('.result-header-actions').getByRole('link', { name: /Ausführlicher\s*k6-Testbericht/i })).toBeVisible()
   await expect(page.getByText('k6-Konsolenausgabe')).toBeVisible()
@@ -1392,7 +1401,7 @@ paths:
   // violated) or .run-summary-cards (threshold violated) depending on the
   // root cause. Both signal FAILED.
   await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 60_000 })
-  await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
+  await expect(page.locator('.status-badge.is-fail')).toHaveText(/FEHLGESCHLAGEN|FAILED/)
 
   // The "DNS resolution" diagnosis is shown in the .run-failure
   // card. On a DNS error, k6 also produces a threshold violation
@@ -1400,7 +1409,7 @@ paths:
   // — both are legitimate and should be visible at the same time.
   await expect(page.locator('.run-failure-label')).toHaveText('DNS-Auflösung')
   await expect(page.locator('.run-failure')).toBeVisible()
-  await expect(page.getByText(/verletzt|Threshold/)).toBeVisible()
+  await expect(page.getByText("verletzt")).toBeVisible()
 })
 
 test('renders a typed failure card with connection-refused when the port is not open', async ({ page }) => {
@@ -1435,7 +1444,7 @@ paths:
   // On a Connection Refused k6 still emits threshold metrics, but the
   // run was not actually successful. The UI therefore prioritises the
   // typed-failure card with the label "Verbindung abgelehnt".
-  await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
+  await expect(page.locator('.status-badge.is-fail')).toHaveText(/FEHLGESCHLAGEN|FAILED/)
   await expect(page.locator('.run-failure-label')).toHaveText('Verbindung abgelehnt')
   await expect(page.locator('.run-failure')).toBeVisible()
 })
@@ -2135,7 +2144,7 @@ test.describe('D) Live-Run-Szenarien', () => {
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 30_000 })
     // FAILED pill and summary cards (red highlight due to threshold violation).
-    await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
+    await expect(page.locator('.status-badge.is-fail')).toHaveText(/FEHLGESCHLAGEN|FAILED/)
     await expect(page.locator('.run-summary-cards')).toBeVisible()
   })
 
@@ -2152,7 +2161,7 @@ test.describe('D) Live-Run-Szenarien', () => {
     await page.getByLabel('Dauer (Sekunden)').fill('1')
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-fail')).toBeVisible({ timeout: 30_000 })
-    await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
+    await expect(page.locator('.status-badge.is-fail')).toHaveText(/FEHLGESCHLAGEN|FAILED/)
   })
 
   test('Run mit sehr kurzer Dauer (1 s) startet und endet', async ({ page }) => {
@@ -2199,7 +2208,7 @@ paths:
     // FAILED pill + typed failure card. Connection-refused is a hard
     // infrastructure failure, so the UI prioritises the typed block
     // over the threshold cards.
-    await expect(page.locator('.status-badge.is-fail')).toHaveText('FAILED')
+    await expect(page.locator('.status-badge.is-fail')).toHaveText(/FEHLGESCHLAGEN|FAILED/)
     const failureCard = page.locator('.run-failure')
     await expect(failureCard).toBeVisible()
     await expect(failureCard.locator('.run-failure-label')).toHaveText('Verbindung abgelehnt')

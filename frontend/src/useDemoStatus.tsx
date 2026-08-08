@@ -23,10 +23,6 @@ import {
 type DemoStatusContextValue = {
   status: DemoStatus
   setEnabled: (next: boolean) => Promise<void>
-  /** Force a re-read from the backend. Used by the traffic
-   *  dashboard so it picks up the latest state when the user
-   *  navigates from the drawer. */
-  refresh: () => Promise<void>
 }
 
 const DemoStatusContext = createContext<DemoStatusContextValue | null>(null)
@@ -42,16 +38,12 @@ export function DemoStatusProvider({ children }: { children: ReactNode }) {
     loaded: false,
   }))
 
-  const refresh = useCallback(async () => {
-    const next = await fetchDemoStatus()
-    setStatus({ enabled: next.enabled, loaded: true })
-  }, [])
-
   const setEnabled = useCallback(async (next: boolean) => {
     // Optimistic update: the UI flips the badge / switch the
     // moment the user clicks. The real write happens in the
-    // background; a failure surfaces via the next `refresh`
-    // call, which the toolbar / dashboard already do on mount.
+    // background; the dashboard's polling loop reconciles the
+    // backend-reported state on the next tick, so the UI never
+    // gets stuck on a stale value when the write fails.
     setStatus(prev => ({ enabled: next, loaded: prev.loaded }))
     const reported = await setDemoEnabledOnServer(next)
     setStatus({ enabled: reported.enabled, loaded: true })
@@ -97,7 +89,7 @@ export function DemoStatusProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true }
   }, [])
 
-  const value = useMemo<DemoStatusContextValue>(() => ({ status, setEnabled, refresh }), [status, setEnabled, refresh])
+  const value = useMemo<DemoStatusContextValue>(() => ({ status, setEnabled }), [status, setEnabled])
   return <DemoStatusContext.Provider value={value}>{children}</DemoStatusContext.Provider>
 }
 
@@ -112,10 +104,7 @@ export function useDemoStatus(): DemoStatusContextValue {
   const setFallbackEnabled = useCallback(async (next: boolean) => {
     setFallback({ enabled: next, loaded: true })
   }, [])
-  const refresh = useCallback(async () => {
-    setFallback({ enabled: false, loaded: true })
-  }, [])
 
   if (ctx) return ctx
-  return { status: fallback, setEnabled: setFallbackEnabled, refresh }
+  return { status: fallback, setEnabled: setFallbackEnabled }
 }

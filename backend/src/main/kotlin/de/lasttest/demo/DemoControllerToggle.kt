@@ -1,7 +1,5 @@
 package de.lasttest.demo
 
-import java.net.URI
-
 /**
  * Process-wide switch for the bundled demo API. The toggle is the
  * single source of truth for "is the demo currently active?" and
@@ -10,7 +8,7 @@ import java.net.URI
  *    when the toggle is off, so requests do not even reach the
  *    business logic;
  *  - [DemoRequestLogInterceptor] — when off, the interceptor skips
- *    both the start-time stamp and the entry recording;
+ *    the entry recording in `afterCompletion`;
  *  - the frontend (via `GET /api/demo-api/status`) — to decide
  *    whether the "Demo-API" toolbar entry is rendered and to
  *    drive the "active" badge next to it.
@@ -56,23 +54,5 @@ interface DemoControllerToggle {
          * guide; having a single source of truth avoids drift.
          */
         const val DEMO_PATH: String = "/demo-api"
-
-        /**
-         * Returns `true` when [url] points at the bundled demo.
-         * The check is path-based: the host is ignored so the
-         * helper works for any deployment. A `null`, blank, or
-         * unparseable URL yields `false`.
-         *
-         * The helper is **not** part of the toggle's instance
-         * contract — it does not change any state. It exists so
-         * tests and external code can classify a URL without
-         * having to instantiate an `AtomicBoolean`.
-         */
-        fun usesDemoApi(url: String?): Boolean {
-            if (url.isNullOrBlank()) return false
-            val path =
-                runCatching { URI(url).path }.getOrNull() ?: return false
-            return path == DEMO_PATH || path.startsWith("$DEMO_PATH/")
-        }
     }
 }

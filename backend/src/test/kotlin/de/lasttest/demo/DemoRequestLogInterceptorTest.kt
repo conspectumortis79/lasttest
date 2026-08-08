@@ -1,12 +1,9 @@
 package de.lasttest.demo
 
-import jakarta.servlet.http.HttpServletRequest
-import jakarta.servlet.http.HttpServletResponse
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class DemoRequestLogInterceptorTest {
@@ -122,7 +119,9 @@ class DemoRequestLogInterceptorTest {
     fun `preHandle always returns true so the request flow is never blocked`() {
         // The interceptor is a passive observer; even a malformed
         // request must reach the controller. The preHandle return
-        // value is the gate, and the gate stays open.
+        // value is the gate, and the gate stays open — the actual
+        // toggle check and the entry recording live in
+        // `afterCompletion`.
         val log = RecordingDemoRequestLog()
         val toggle = DefaultDemoControllerToggle()
         toggle.enable()
@@ -133,10 +132,6 @@ class DemoRequestLogInterceptorTest {
         val proceed = interceptor.preHandle(request, response, Any())
 
         assertEquals(true, proceed)
-        // The start-time attribute is set so afterCompletion can
-        // correlate the entry to the moment the request started.
-        val nanos = request.getAttribute(DemoRequestLogInterceptor.START_TIME_ATTRIBUTE)
-        assertNotNull(nanos, "preHandle must record the start timestamp")
     }
 
     @Test
@@ -149,49 +144,16 @@ class DemoRequestLogInterceptorTest {
         // filtered list.
         assertEquals("X-Lasttest-Run-Id", DemoRequestLogInterceptor.RUN_ID_HEADER)
     }
-
-    // Unused but kept here to silence the IDE about the parameter
-    // type — the interceptor accepts the raw servlet types, the
-    // tests use Spring's MockHttp* variants, and the compiler needs
-    // to see the imports in the file scope.
-    @Suppress("unused")
-    private fun typeHints(
-        request: HttpServletRequest,
-        response: HttpServletResponse,
-    ) {
-    }
 }
 
 class DemoRequestLogInterceptorDisabledTest {
     @Test
-    fun `preHandle returns true without recording the start timestamp when the toggle is off`() {
-        // The interceptor's hot-path optimisation: when the
-        // demo is off we do not even read `System.nanoTime()`,
-        // so the cost of an off-state request is a single
-        // volatile load.
-        val log = RecordingDemoRequestLog()
-        val toggle = DefaultDemoControllerToggle() // no enable()
-        val interceptor = DemoRequestLogInterceptor(log, toggle)
-        val request = MockHttpServletRequest("GET", "/demo-api/products")
-        val response = MockHttpServletResponse()
-
-        val proceed = interceptor.preHandle(request, response, Any())
-
-        assertEquals(true, proceed)
-        // The start-time attribute is only set when the toggle
-        // is on; when off, the request flows through with no
-        // side effect on the request object.
-        assertNull(request.getAttribute(DemoRequestLogInterceptor.START_TIME_ATTRIBUTE))
-    }
-
-    @Test
     fun `afterCompletion does not record an entry when the toggle is off`() {
-        // Mirror of the preHandle check: the after-completion
-        // hook is the one that actually pushes the entry into
-        // the ring buffer. With the toggle off it must be a
-        // no-op so the buffer stays empty and the user sees no
-        // phantom traffic for a demo they have explicitly turned
-        // off.
+        // The after-completion hook is the one that actually
+        // pushes the entry into the ring buffer. With the toggle
+        // off it must be a no-op so the buffer stays empty and
+        // the user sees no phantom traffic for a demo they have
+        // explicitly turned off.
         val log = RecordingDemoRequestLog()
         val toggle = DefaultDemoControllerToggle()
         val interceptor = DemoRequestLogInterceptor(log, toggle)

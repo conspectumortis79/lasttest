@@ -15,9 +15,10 @@ import org.springframework.web.servlet.HandlerInterceptor
  * The interceptor is the **only** place that translates a live
  * servlet request into an entry. The translation is deliberately
  * tiny:
- *  - `preHandle` records the entry timestamp so the "when" reflects
- *    the moment the request started, not the moment the response
- *    finished (matters for long-running uploads);
+ *  - `preHandle` is a pass-through; the toggle gate and the actual
+ *    `record` call both live in `afterCompletion` so a request that
+ *    starts while the demo is on and finishes after it has been
+ *    disabled cannot leak a stale entry into the buffer;
  *  - `afterCompletion` reads the status, method, path, query string,
  *    `User-Agent` and the `X-Lasttest-Run-Id` header, and hands the
  *    assembled entry to the log.
@@ -40,17 +41,12 @@ internal class DemoRequestLogInterceptor(
         response: HttpServletResponse,
         handler: Any,
     ): Boolean {
-        // The toggle is consulted before any work is done so the
-        // interceptor costs nothing on the hot path when the demo
-        // is off — no `setAttribute`, no `nanoTime()` call, no
-        // thread-local state. The flag is also re-checked in
-        // `afterCompletion` because a request can legitimately
-        // start while the demo is on and finish after the user
-        // disabled it; the second check guarantees we never
-        // record an entry for a request that arrived while the
-        // demo was off.
-        if (!toggle.isEnabled()) return true
-        request.setAttribute(START_TIME_ATTRIBUTE, System.nanoTime())
+        // Pure pass-through — the actual gate and the actual
+        // `record` call live in `afterCompletion`. The override
+        // exists because [HandlerInterceptor] declares it; doing
+        // the work here would let a request that finishes after
+        // the user disabled the demo leak an entry into the
+        // buffer.
         return true
     }
 
@@ -78,10 +74,6 @@ internal class DemoRequestLogInterceptor(
     }
 
     companion object {
-        /** Request attribute that carries the request start timestamp
-         *  between [preHandle] and [afterCompletion]. Kept private
-         *  so the rest of the app cannot collide with the name. */
-        internal const val START_TIME_ATTRIBUTE: String = "de.lasttest.demo.startNanos"
         private const val USER_AGENT_HEADER: String = "User-Agent"
 
         /** Header the k6 script generator injects to correlate a

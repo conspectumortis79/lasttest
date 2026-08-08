@@ -2,9 +2,9 @@
 // surface is mocked via `globalThis.fetch` so the tests can pin
 // every branch — happy path, server error, malformed JSON, empty
 // runId, etc. — without spinning up a real backend. The pattern
-// matches `retryFetch.test.ts`: stash the real `fetch`, install a
-// stub, restore in `finally`. The `no-unused-vars` lint rule is
-// happy because the stashed value is used in the restore line.
+// is "stash the real `fetch`, install a stub, restore in
+// `finally`". The `no-unused-vars` lint rule is happy because the
+// stashed value is used in the restore line.
 
 import { deepEqual, equal, ok } from 'node:assert/strict'
 import { test } from 'node:test'

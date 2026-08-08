@@ -60,32 +60,6 @@ class DefaultDemoControllerToggleTest {
     }
 
     @Test
-    fun `usesDemoApi recognises the canonical demo URL with the default host`() {
-        assertTrue(DemoControllerToggle.usesDemoApi("http://localhost:8286/demo-api"))
-        assertTrue(DemoControllerToggle.usesDemoApi("http://localhost:8286/demo-api/products"))
-        assertTrue(DemoControllerToggle.usesDemoApi("https://localhost:8286/demo-api/products/search"))
-    }
-
-    @Test
-    fun `usesDemoApi recognises the demo on any host because the check is path-based`() {
-        // The host can be anything — production deployments
-        // behind a reverse proxy or on a custom hostname still
-        // count as the bundled demo.
-        assertTrue(DemoControllerToggle.usesDemoApi("https://staging.lasttest.example.com/demo-api"))
-        assertTrue(DemoControllerToggle.usesDemoApi("https://api.lasttest.example.com/demo-api/products"))
-    }
-
-    @Test
-    fun `usesDemoApi returns false for non-demo paths and for unparseable input`() {
-        assertFalse(DemoControllerToggle.usesDemoApi("https://example.com/api/products"))
-        assertFalse(DemoControllerToggle.usesDemoApi("https://example.com/demo-api-fake"))
-        assertFalse(DemoControllerToggle.usesDemoApi(""))
-        assertFalse(DemoControllerToggle.usesDemoApi(null))
-        assertFalse(DemoControllerToggle.usesDemoApi("   "))
-        assertFalse(DemoControllerToggle.usesDemoApi("not a url"))
-    }
-
-    @Test
     fun `DEMO_PATH is the canonical constant every caller agrees on`() {
         // The OpenAPI spec, the user guide and the run-id
         // detector all hard-code `/demo-api`; a single constant

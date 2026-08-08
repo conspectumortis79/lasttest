@@ -18,10 +18,14 @@ async function importDemo(page: Page) {
 }
 
 // Read the run id from the badge title (`<uuid> · GET /...`).
-async function runIdFromBadge(page: Page): Promise<string> {
+// `assertNonEmpty=false` skips the strict-mode assertion so the
+// helper is safe to call from a `finally` block where the
+// badge may already have been removed (e.g. by the very action
+// the test is asserting on).
+async function runIdFromBadge(page: Page, assertNonEmpty = true): Promise<string> {
   const title = await page.locator('.run-badge').first().getAttribute('title')
   const id = title?.split(' · ')[0] ?? ''
-  expect(id).not.toBe('')
+  if (assertNonEmpty) expect(id).not.toBe('')
   return id
 }
 
@@ -55,9 +59,11 @@ test('context menu opens on right-click and closes on Escape', async ({ page }) 
   await page.getByLabel('Dauer (Sekunden)').fill('5')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
+  let runId = ''
   try {
     const badge = page.locator('.run-badge').first()
     await expect(badge).toBeVisible({ timeout: 10_000 })
+    runId = await runIdFromBadge(page)
 
     await badge.click({ button: 'right' })
 
@@ -74,8 +80,16 @@ test('context menu opens on right-click and closes on Escape', async ({ page }) 
     await page.keyboard.press('Escape')
     await expect(menu).toBeHidden()
   } finally {
-    const id = await runIdFromBadge(page).catch(() => '')
-    if (id) await forceAbortRun(id)
+    // Free the executor thread for the next test. Without
+    // this, a 5 s run can still hold its slot for the rest
+    // of the suite if the k6 process has not yet been
+    // reaped — the polling window is too coarse to
+    // guarantee the badge stays around.
+    if (runId) await forceAbortRun(runId)
+    else {
+      const id = await runIdFromBadge(page).catch(() => '')
+      if (id) await forceAbortRun(id)
+    }
   }
 })
 
@@ -135,6 +149,7 @@ test('right-click on a completed badge removes it from the dashboard', async ({ 
   await page.getByLabel('Dauer (Sekunden)').fill('3')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
+  let runId = ''
   try {
     const badge = page.locator('.run-badge').first()
     await expect(badge).toBeVisible({ timeout: 10_000 })
@@ -142,7 +157,7 @@ test('right-click on a completed badge removes it from the dashboard', async ({ 
     // answers 200, so the badge ends up as COMPLETED.
     await expect(badge).toContainText('COMPLETED', { timeout: 30_000 })
 
-    const id = await runIdFromBadge(page)
+    runId = await runIdFromBadge(page)
     await badge.click({ button: 'right' })
     const menu = page.locator('.run-context-menu')
     await expect(menu).toBeVisible()
@@ -151,83 +166,96 @@ test('right-click on a completed badge removes it from the dashboard', async ({ 
     // The badge must disappear from the grid. We match the
     // specific id so we don't accidentally match a sibling
     // badge that might appear later.
-    await expect(page.locator(`.run-badge[title^="${id}"]`)).toHaveCount(0)
+    await expect(page.locator(`.run-badge[title^="${runId}"]`)).toHaveCount(0)
   } finally {
     // The run may already be terminal; a force-cancel is a
     // safe no-op then, but it keeps the cleanup contract
-    // consistent with the other tests in this file.
-    const id = await page.locator('.run-badge').first().getAttribute('title').catch(() => '')
-    if (id) await forceAbortRun(id.split(' · ')[0] ?? '')
+    // consistent with the other tests in this file. The
+    // action under test may have removed the badge from
+    // the dashboard already, in which case `getAttribute`
+    // would hang waiting for a non-existent element. We
+    // therefore skip the UI lookup entirely and rely on
+    // the captured run id (or the API to clean up stale
+    // COMPLETED runs if the helper was never reached).
+    if (runId) await forceAbortRun(runId)
   }
 })
 
 test('right-click on a failed badge offers "Alle anderen fehlgeschlagenen entfernen" which clears the other FAILED badges', async ({ page }) => {
   // Bulk cleanup check: right-click on a FAILED badge and
   // confirm the bulk-remove entry drops every other FAILED
-  // badge from the dashboard. We use the cancel endpoint to
-  // turn two runs into STOPPED-equivalent terminal states
-  // before the test reaches the menu — the FAILED status is
-  // harder to provoke from the happy-path demo API, so this
-  // test directly seeds two FAILED runs via the API.
+  // badge from the dashboard. The pre-toggle test seeded
+  // FAILED runs by sending `cancel?force=true`, but the
+  // backend now turns a force-cancel into ABORTED (SIGKILL
+  // produces a non-OK exit code, not a threshold failure).
+  // To get a real FAILED record we point a fresh spec at
+  // an unreachable base URL — k6 fails fast with
+  // `connection refused` and the run lands in FAILED.
+  const unreachableSpec = `openapi: 3.0.3
+info:
+  title: Bulk Remove Probe
+  version: "1"
+servers:
+  - url: http://127.0.0.1:1
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '200': {description: OK}
+`
   const api = await playwrightRequest.newContext({ baseURL: 'http://localhost:8286' })
   let firstRunId = ''
   let secondRunId = ''
   try {
-    await importDemo(page)
-    // Start the first run normally so the frontend owns its
-    // in-memory record (the dashboard then polls it and
-    // surfaces it as a badge).
+    // First FAILED run: drive it from the UI so the
+    // dashboard owns the in-memory record and renders a
+    // badge for it. The user-facing flow is "import an
+    // unreachable spec, hit start" — the connection-refused
+    // path is the same one `lasttest.spec.ts` uses for its
+    // "Verbindung abgelehnt" assertion.
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'probe-bulk-1.yaml',
+      mimeType: 'application/yaml',
+      buffer: Buffer.from(unreachableSpec),
+    })
+    await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+    await expect(page.getByRole('heading', { name: 'Bulk Remove Probe' })).toBeVisible()
+
     await page.getByLabel('Virtual Users').fill('1')
     await page.getByLabel('Dauer (Sekunden)').fill('3')
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     const firstBadge = page.locator('.run-badge').first()
     await expect(firstBadge).toBeVisible({ timeout: 10_000 })
+    await expect(firstBadge).toContainText('FAILED', { timeout: 30_000 })
     firstRunId = await runIdFromBadge(page)
 
-    // Drive the run into a FAILED state by cancelling it
-    // forcefully: SIGKILL on a still-running k6 process
-    // is reported by the backend as FAILED with a
-    // partial / no-summary payload. The dashboard picks
-    // that up on the next poll tick.
-    await api.post(`/api/test-runs/${firstRunId}/cancel?force=true`)
-    await expect(firstBadge).toContainText('FAILED', { timeout: 10_000 })
+    // Second FAILED run: start a fresh one from the same
+    // imported spec. The first run is already terminal, so
+    // the executor thread is free; the second run also
+    // fails against the unreachable base URL. We must not
+    // re-import — that would clear the dashboard's run
+    // records and break the "two FAILED badges" assertion.
+    // A short wait is required: k6 against a refused
+    // connection typically exits within a few hundred ms,
+    // but the executor thread only releases its slot once
+    // the process is fully reaped. The `MaxParallelRuns=2`
+    // pool rejects new starts with a 429 while both slots
+    // are still occupied, so the second click must wait
+    // for the first reaping to complete.
+    await page.waitForTimeout(500)
+    await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+    const secondBadge = page.locator('.run-badge').nth(1)
+    await expect(secondBadge).toBeVisible({ timeout: 10_000 })
+    await expect(secondBadge).toContainText('FAILED', { timeout: 60_000 })
+    const secondTitle = await secondBadge.getAttribute('title')
+    secondRunId = secondTitle?.split(' · ')[0] ?? ''
 
-    // Seed a second FAILED run via the API so the bulk
-    // action has another badge to remove. We do not need
-    // the frontend to ever display it — we just need a
-    // second FAILED record that the bulk removal will
-    // clean up after a page reload. Reload the page so
-    // the frontend re-hydrates its in-memory map from
-    // /api/test-runs.
-    secondRunId = await (async () => {
-      const startResponse = await api.post('/api/test-runs', {
-        data: {
-          specification: await (await api.get('/api/demo-specification')).text(),
-          baseUrl: 'http://localhost:8286',
-          operationIds: ['homepage'],
-          operationConfigurations: {},
-          loadProfile: {
-            executor: 'constant-vus',
-            vus: 1,
-            duration: '1s',
-            payloadStrategy: 'sequential',
-          },
-        },
-      })
-      const body = await startResponse.json()
-      const id = body.id as string
-      await api.post(`/api/test-runs/${id}/cancel?force=true`)
-      return id
-    })()
-
-    await page.reload()
-    const badges = page.locator('.run-badge')
-    // At least the two FAILED badges must be visible after
-    // the re-hydration. Other runs may linger from prior
-    // tests; the bulk action targets only FAILED entries.
-    await expect(badges.first()).toBeVisible({ timeout: 15_000 })
     const failedBadges = page.locator('.run-badge-failed')
-    expect(await failedBadges.count()).toBeGreaterThanOrEqual(2)
+    // Wait for the badge to actually carry the FAILED class —
+    // the text update can race the class swap by a frame.
+    await expect.poll(async () => failedBadges.count(), { timeout: 10_000 })
+      .toBeGreaterThanOrEqual(2)
 
     // Right-click the first FAILED badge, then click the
     // bulk entry. The clicked badge stays, every other
@@ -251,26 +279,45 @@ test('bulk "remove all other failed" is disabled when no other FAILED run is pre
   // FAILED one in the dashboard, the bulk entry must be
   // visible but disabled with an explanatory reason so the
   // user is not tempted to click an action with no effect.
+  // We need a FAILED record, which the happy-path demo API
+  // does not produce — use the same unreachable-spec trick
+  // as the bulk-remove happy-path test.
+  const unreachableSpec = `openapi: 3.0.3
+info:
+  title: Lone Failed Probe
+  version: "1"
+servers:
+  - url: http://127.0.0.1:1
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '200': {description: OK}
+`
   const api = await playwrightRequest.newContext({ baseURL: 'http://localhost:8286' })
   let runId = ''
   try {
-    await importDemo(page)
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'probe-lone-failed.yaml',
+      mimeType: 'application/yaml',
+      buffer: Buffer.from(unreachableSpec),
+    })
+    await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+    await expect(page.getByRole('heading', { name: 'Lone Failed Probe' })).toBeVisible()
     await page.getByLabel('Virtual Users').fill('1')
     await page.getByLabel('Dauer (Sekunden)').fill('3')
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     const badge = page.locator('.run-badge').first()
     await expect(badge).toBeVisible({ timeout: 10_000 })
+    await expect(badge).toContainText('FAILED', { timeout: 30_000 })
     runId = await runIdFromBadge(page)
-    await api.post(`/api/test-runs/${runId}/cancel?force=true`)
-    await expect(badge).toContainText('FAILED', { timeout: 10_000 })
 
-    // Wait for any stale COMPLETED siblings from previous
-    // tests to drop from the polling map by reloading; this
-    // also guarantees the dashboard sees only the freshly
-    // started FAILED run on a clean page.
-    await page.reload()
+    // Wait for the only FAILED badge the dashboard knows
+    // about to settle. No reload — the bulk-remove UX must
+    // work on the in-memory state the user just produced.
     const failedBadges = page.locator('.run-badge-failed')
-    await expect(failedBadges.first()).toBeVisible({ timeout: 15_000 })
+    await expect(failedBadges).toHaveCount(1, { timeout: 5_000 })
 
     await failedBadges.first().click({ button: 'right' })
     const menu = page.locator('.run-context-menu')
