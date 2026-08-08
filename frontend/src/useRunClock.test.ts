@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { act, createElement, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
-import { useRunClock } from './useRunClock.ts'
+import { useRunClock, useLiveClock } from './useRunClock.ts'
 import type { TestRun } from './k6Report.ts'
 
 // JSDOM provides a real DOM so React's createRoot + effects can run
@@ -159,6 +159,94 @@ test('useRunClock restarts ticking when a failed run is followed by a running on
     handle.setRun(makeRun('RUNNING'))
     const runningNow = handle.getNow()
     ok(runningNow >= failedNow)
+  } finally {
+    handle.unmount()
+  }
+})
+
+// --- useLiveClock ----------------------------------------------------
+//
+// The grid uses `useLiveClock` directly so it can tick whenever *any*
+// run is in flight, independent of which run the user is currently
+// inspecting. The tests below cover the boolean flag and confirm the
+// ticker stops cleanly when the flag flips to false.
+
+type LiveHandle = {
+  root: Root
+  container: HTMLDivElement
+  getNow: () => number
+  setLive: (live: boolean) => void
+  unmount: () => void
+}
+
+function renderLiveProbe(initialLive: boolean): LiveHandle {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  let getNow: () => number = () => NaN
+  let setLiveState: (live: boolean) => void = () => {}
+
+  function Probe() {
+    const [live, setLive] = useState(initialLive)
+    const now = useLiveClock(live)
+    setLiveState = setLive
+    getNow = () => now
+    return createElement('span', { 'data-now': now, 'data-live': String(live) }, String(now))
+  }
+
+  act(() => {
+    root.render(createElement(Probe))
+  })
+
+  return {
+    root,
+    container,
+    getNow: () => getNow(),
+    setLive: live => {
+      act(() => {
+        setLiveState(live)
+      })
+    },
+    unmount: () => {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    },
+  }
+}
+
+test('useLiveClock ticks the now value while the live flag is true', async () => {
+  const handle = renderLiveProbe(true)
+  try {
+    const initial = handle.getNow()
+    await new Promise(resolve => setTimeout(resolve, 1100))
+    ok(handle.getNow() >= initial)
+  } finally {
+    handle.unmount()
+  }
+})
+
+test('useLiveClock does not tick when the live flag is false', async () => {
+  const handle = renderLiveProbe(false)
+  try {
+    const initial = handle.getNow()
+    await new Promise(resolve => setTimeout(resolve, 1100))
+    equal(handle.getNow(), initial)
+  } finally {
+    handle.unmount()
+  }
+})
+
+test('useLiveClock stops ticking when the live flag flips from true to false', async () => {
+  const handle = renderLiveProbe(true)
+  try {
+    const before = handle.getNow()
+    handle.setLive(false)
+    const afterFlip = handle.getNow()
+    await new Promise(resolve => setTimeout(resolve, 1100))
+    equal(handle.getNow(), afterFlip)
+    ok(afterFlip >= before)
   } finally {
     handle.unmount()
   }

@@ -461,6 +461,11 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'menu.removeAllOtherFailed': 'Remove all other failed runs',
     'menu.removeAllOtherFailed.disabled.noOther': 'No other failed runs to remove.',
 
+    // Run badge inline actions
+    'runBadge.cancel': 'Cancel run',
+    'runBadge.remove': 'Remove from view',
+    'runBadge.stopping': 'Run is stopping',
+
     // Errors
     'error.cancelFailed': 'Cancel failed (HTTP {status})',
     'error.rerunFailed': 'Rerun failed (HTTP {status})',
@@ -924,6 +929,11 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'menu.removeFromView': 'Aus Ansicht entfernen',
     'menu.removeAllOtherFailed': 'Alle anderen fehlgeschlagenen Läufe entfernen',
     'menu.removeAllOtherFailed.disabled.noOther': 'Keine weiteren fehlgeschlagenen Läufe zum Entfernen.',
+
+    // Run badge inline actions
+    'runBadge.cancel': 'Testlauf abbrechen',
+    'runBadge.remove': 'Aus Ansicht entfernen',
+    'runBadge.stopping': 'Testlauf wird gestoppt',
 
     // Errors
     'error.cancelFailed': 'Cancel fehlgeschlagen (HTTP {status})',

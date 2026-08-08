@@ -1332,6 +1332,7 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 }
 
 .run-badge {
+  position: relative;
   display: flex;
   align-items: center;
   gap: .55rem;
@@ -1394,6 +1395,15 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   letter-spacing: .06rem;
   text-transform: uppercase;
   color: #79e6c8;
+  /* Inline-flex so the spinner + stopwatch sit on the same row
+     as the status text without breaking the upper-case alignment.
+     The 5 px gap mirrors the spacing between the method pill
+     and the info column so the in-line pieces feel like one
+     composed pill. */
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
 }
 .run-badge.running .run-badge-status,
 .run-badge.queued  .run-badge-status,
@@ -1402,6 +1412,42 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 .run-badge.stopped  .run-badge-status { color: #c5b8ff; }
 .run-badge.failed    .run-badge-status,
 .run-badge.aborted   .run-badge-status { color: #ffb5c3; }
+
+/* Live stopwatch + spinner shown only on RUNNING badges. The
+   spinner mirrors the icon-action spinner (cancel button on
+   STOPPING) so the app speaks one visual language for "in
+   flight". The time is rendered in a slightly muted amber so
+   the RUNNING word keeps the visual lead. */
+.run-badge .status-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(212, 167, 44, .25);
+  border-top-color: #d4a72c;
+  border-radius: 50%;
+  animation: run-badge-spin .85s linear infinite;
+  flex: none;
+  /* Sit the ring on the same baseline as the upper-case text.
+     A small negative offset compensates for the lowercase
+     descender area of the spinner bounding box. */
+  vertical-align: -1px;
+}
+.run-badge .status-time {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .04rem;
+  color: #c8b06a;
+  /* Monospace so the value does not jitter as the seconds tick.
+     `font-variant-numeric: tabular-nums` is the modern equivalent
+     and is supported in every browser this app ships to. */
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  white-space: nowrap;
+  /* Slightly more breathing room before the path so the value
+     reads as a stopwatch, not as a glued-on suffix. */
+  padding-right: 4px;
+}
 .run-badge-path {
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: .8rem;
@@ -1409,6 +1455,99 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* The icon-action is always visible on the right edge of
+     the badge, so reserve room for it unconditionally —
+     otherwise the path would slide under the icon. The
+     transition is kept so a future re-hover treatment (or
+     a status-driven reflow) does not have to re-introduce
+     layout shift. */
+  padding-right: 38px;
+  transition: padding-right .14s ease;
+}
+
+/* ---- Inline icon action on a run badge ------------------------- */
+/* Two affordances share the right edge of the badge: the cancel
+   (stop square) for in-flight runs, and the remove (X) for
+   terminal runs. Both stay visible the whole time so the user
+   can spot and use the action without first hovering the
+   badge. The Stopping state swaps in a spinner and ignores
+   clicks — the backend is already tearing the run down. The
+   hover/focus treatment is the danger palette (red tint);
+   the default state is a muted colour that keeps the grid
+   readable when the badges are scanned. */
+.run-badge .icon-action {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  transition: background .12s ease, border-color .12s ease, color .12s ease, transform .08s ease;
+}
+.run-badge .icon-action svg { width: 13px; height: 13px; flex: none; display: block; }
+.run-badge .icon-action:focus-visible { outline: 2px solid #ff6b81; outline-offset: 2px; }
+.run-badge .icon-action:active { transform: translateY(-50%) scale(.94); }
+
+/* Cancel: only RUNNING + STOPPING render the button (gated by
+   `isCancellable` in App.tsx, so QUEUED does not get one).
+   Visible by default in a muted amber that signals "action
+   available" without screaming for attention; hover/focus
+   flips to the danger palette. */
+.run-badge.running .icon-action--cancel { color: #f0c98a; }
+.run-badge.running:hover .icon-action--cancel:hover,
+.run-badge.running:focus-within .icon-action--cancel {
+  background: rgba(255, 107, 129, .12);
+  border-color: rgba(255, 107, 129, .45);
+  color: #ff8fa0;
+}
+
+/* Stopping: spinner, disabled. The pulse border still lives
+   on the badge so the user sees the in-flight state, and
+   the danger palette is suppressed because the backend is
+   already tearing the run down. */
+.run-badge.stopping .icon-action--cancel {
+  color: #f0c98a;
+  pointer-events: none;
+  opacity: .55;
+}
+.run-badge .icon-action-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, .18);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: run-badge-spin .8s linear infinite;
+}
+@keyframes run-badge-spin { to { transform: rotate(360deg); } }
+
+/* Remove: terminal. Visible by default in a muted grey so
+   every badge already says "you can clear me"; hover/focus
+   flips to the danger palette to confirm the intent. */
+.run-badge.completed .icon-action--remove,
+.run-badge.failed    .icon-action--remove,
+.run-badge.aborted   .icon-action--remove,
+.run-badge.stopped   .icon-action--remove {
+  color: #6b7a93;
+}
+.run-badge.completed:hover .icon-action--remove:hover,
+.run-badge.failed:hover    .icon-action--remove:hover,
+.run-badge.aborted:hover   .icon-action--remove:hover,
+.run-badge.stopped:hover   .icon-action--remove:hover,
+.run-badge.completed:focus-within .icon-action--remove,
+.run-badge.failed:focus-within    .icon-action--remove,
+.run-badge.aborted:focus-within   .icon-action--remove,
+.run-badge.stopped:focus-within   .icon-action--remove {
+  background: rgba(255, 107, 129, .12);
+  border-color: rgba(255, 107, 129, .45);
+  color: #ff8fa0;
 }
 
 /* ---- Right-click context menu on a run badge ---------------------- */

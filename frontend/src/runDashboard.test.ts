@@ -2,6 +2,7 @@ import { deepEqual, equal, ok } from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   hasOtherFailedRun,
+  isCancellable,
   isInFlight,
   isTerminalRun,
   pickActiveRunId,
@@ -42,6 +43,25 @@ test('isInFlight covers QUEUED, RUNNING and STOPPING; everything else is termina
   equal(isInFlight('FAILED'), false)
   equal(isInFlight('STOPPED'), false)
   equal(isInFlight('ABORTED'), false)
+})
+
+test('isCancellable covers RUNNING and STOPPING only; QUEUED is intentionally excluded', () => {
+  // The badge cancel button is gated on this predicate. A
+  // QUEUED run is still in the dashboard (so isInFlight
+  // returns true and the live ticker keeps running) but the
+  // k6 process has not been spawned yet, so a cancel request
+  // would have no effect and the affordance must be hidden.
+  equal(isCancellable('RUNNING'), true)
+  // STOPPING stays cancellable so the user can still see
+  // the in-progress spinner until the backend reports the
+  // terminal state. (Escalating to force-abort is handled
+  // via the right-click menu, not the inline button.)
+  equal(isCancellable('STOPPING'), true)
+  equal(isCancellable('QUEUED'), false)
+  equal(isCancellable('COMPLETED'), false)
+  equal(isCancellable('FAILED'), false)
+  equal(isCancellable('STOPPED'), false)
+  equal(isCancellable('ABORTED'), false)
 })
 
 test('isTerminalRun is the complement of isInFlight (STOPPING is neither)', () => {

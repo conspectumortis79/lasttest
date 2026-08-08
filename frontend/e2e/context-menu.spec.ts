@@ -35,6 +35,16 @@ async function forceAbortRun(runId: string): Promise<void> {
 }
 
 test.beforeEach(async ({ page }) => {
+  // Pin the language to German via localStorage so the
+  // button labels, menu items and status texts match the
+  // assertions below. Without this the default English
+  // chrome breaks every selector that names a translated
+  // string. `addInitScript` runs before any page script,
+  // so the React LanguageProvider reads the stored value
+  // on its first read.
+  await page.addInitScript(() => {
+    localStorage.setItem('lasttest.language', 'de')
+  })
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'lasttest' })).toBeVisible()
 })

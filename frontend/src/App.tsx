@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  isCancellable,
+  isInFlight,
   isTerminalRun,
   pickActiveRunId,
   pickActiveRunIdAfterStart,
@@ -19,6 +21,7 @@ import {
   buildMetricRow,
   copyTextToClipboard,
   parseK6Summary,
+  runElapsedSeconds,
   summarizeFailure,
   type TestRun,
 } from './k6Report.ts'
@@ -31,7 +34,7 @@ import { WikiPopup } from './WikiPopup.tsx'
 import { useLanguage, LanguageProvider } from './useLanguage.tsx'
 import { translate, formatters, type SupportedLanguage } from './i18n.ts'
 import { RunStatusView } from './runStatusView.tsx'
-import { useRunClock } from './useRunClock.ts'
+import { useRunClock, useLiveClock } from './useRunClock.ts'
 import { LoadProfileEditor } from './LoadProfileEditor.tsx'
 import {
   defaultLoadProfile,
@@ -136,6 +139,22 @@ paths:
         '200': { description: OK }
 `
 
+// Formats a (possibly undefined) elapsed-seconds value as the
+// compact `M:SS` string the badge shows next to the spinner.
+// `undefined` (run not started yet) is rendered as `--:--` so
+// the badge layout stays stable — the status pill and the
+// spinner already convey the "not yet running" state, so the
+// stopwatch does not have to. Mirrors the helper in
+// `lastRunsView.ts`; inlined here because the badge lives
+// outside that file's render tree.
+function formatMmSs(totalSeconds: number | undefined): string {
+  if (totalSeconds == null) return '--:--'
+  const safe = Math.max(0, Math.floor(totalSeconds))
+  const minutes = Math.floor(safe / 60)
+  const seconds = safe % 60
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
 function App() {
   const reportRunId = new URLSearchParams(window.location.search).get('report')
   return (
@@ -234,6 +253,14 @@ function LoadTestApp() {
   // run is QUEUED or RUNNING; the hook forwards the current `now`
   // to <RunStatusView>.
   const runNow = useRunClock(run)
+  // The badge grid needs its own ticker so the per-row stopwatch
+  // keeps advancing even when the user is inspecting a *finished*
+  // run's detail card. The flag flips to true whenever at least
+  // one badge is in flight, and back to false when the last one
+  // settles — so the grid re-renders at most once per tick
+  // interval while there is something to count.
+  const hasAnyInFlight = Object.values(runs).some(r => isInFlight(r.status))
+  const gridNow = useLiveClock(hasAnyInFlight)
   // Right-click context menu on a run badge. `null` when no menu
   // is open. `position` keeps the menu at the cursor location;
   // `menuRef` lets us detect outside clicks.
@@ -602,19 +629,11 @@ function LoadTestApp() {
         return
       case 'remove-from-view':
         // Frontend-only cleanup: drops the clicked badge from
-        // the in-memory runs map. The backend still holds the
-        // run; a page refresh would re-hydrate it from
-        // /api/test-runs. The dashboard focus is re-evaluated
-        // via pickActiveRunId so the detail card keeps pointing
-        // at a run that is still in the map — or hides if no
-        // run is left. The remaining badges re-sort on the next
-        // render via the existing sortRunsByCreatedAt call in
-        // the grid.
-        setRuns(current => {
-          const next = removeRun(current, run.id)
-          setActiveRunId(pickActiveRunId(next, activeRunId))
-          return next
-        })
+        // the in-memory runs map. The implementation is shared
+        // with the inline X button on the badge (see
+        // `handleRemoveRun`) so the two affordances cannot
+        // drift apart.
+        handleRemoveRun(run.id)
         return
       case 'remove-all-other-failed':
         // Bulk frontend cleanup: keeps the clicked badge but
@@ -706,6 +725,23 @@ function LoadTestApp() {
     } catch (cause) {
       setRunActionError(cause instanceof Error ? cause.message : translate(language, 'error.rerunFailedNoStatus'))
     }
+  }
+
+  // Drops a single run from the in-memory dashboard map and
+  // re-evaluates which run should keep the focus. Shared by
+  // the right-click "Aus Ansicht entfernen" entry and the
+  // inline X button on the badge so the two affordances stay
+  // in lock-step. Pure: a missing id is a no-op (the runs map
+  // comes back referentially equal and React skips the
+  // re-render). The backend still holds the run; a page
+  // refresh would re-hydrate it from /api/test-runs.
+  function handleRemoveRun(runId: string) {
+    setRuns(current => {
+      if (current[runId] === undefined) return current
+      const next = removeRun(current, runId)
+      setActiveRunId(pickActiveRunId(next, activeRunId))
+      return next
+    })
   }
 
   return <>
@@ -907,6 +943,14 @@ function LoadTestApp() {
             const primary = operations[0]
             const method = primary?.method ?? '–'
             const path = operations.map(op => op.path).join(', ') || '–'
+            // Stricter than `isInFlight` (used for the grid
+            // ticker): a QUEUED run is still on the dashboard
+            // (so the live ticker keeps running) but it has
+            // no spawned k6 process to cancel, so the inline
+            // stop button is hidden until the run transitions
+            // to RUNNING.
+            const candidateCancellable = isCancellable(candidate.status)
+            const candidateTerminal = isTerminalRun(candidate.status)
             return (
               <button
                 key={candidate.id}
@@ -920,9 +964,100 @@ function LoadTestApp() {
               >
                 <span className={`run-badge-method method-${method.toLowerCase()}`}>{method}</span>
                 <div className="run-badge-info">
-                  <span className="run-badge-status">{candidate.status}</span>
+                  <span className="run-badge-status">
+                    {candidate.status}
+                    {/* The spinner + live stopwatch only show on
+                        RUNNING. QUEUED keeps the layout minimal
+                        (the run has not started yet, so there is
+                        nothing to count) and STOPPING uses the
+                        spinner in the cancel button instead so the
+                        user sees the action is in progress without
+                        doubling up. The status text is `aria-hidden`
+                        redundant: screen readers announce "running"
+                        and the stopwatch's content — the spinner
+                        itself is `aria-hidden` for the same reason. */}
+                    {candidate.status === 'RUNNING' && (
+                      <>
+                        <span className="status-spinner" aria-hidden="true" />
+                        <span className="status-time" data-testid={`run-badge-time-${candidate.id}`}>
+                          {formatMmSs(runElapsedSeconds(candidate, gridNow))}
+                        </span>
+                      </>
+                    )}
+                  </span>
                   <span className="run-badge-path">{path}</span>
                 </div>
+                {/* Inline action buttons on the right edge of the
+                    badge — appear on hover/focus so the default
+                    grid stays visually quiet. Two affordances
+                    share the same anchor: in-flight runs get a
+                    stop button (graceful cancel via the existing
+                    `cancelRun`), terminal runs get an X to drop
+                    the badge from the dashboard. `stopPropagation`
+                    keeps the badge-click from firing alongside
+                    the action. The Stopping state shows a spinner
+                    and ignores clicks — the backend is already
+                    tearing the run down. */}
+                {candidateCancellable && (
+                  <span
+                    className="icon-action icon-action--cancel"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={candidate.status === 'STOPPING'
+                      ? translate(language, 'runBadge.stopping')
+                      : translate(language, 'runBadge.cancel')}
+                    title={candidate.status === 'STOPPING'
+                      ? translate(language, 'runBadge.stopping')
+                      : translate(language, 'runBadge.cancel')}
+                    data-testid={`run-badge-cancel-${candidate.id}`}
+                    onClick={event => {
+                      event.stopPropagation()
+                      void cancelRun(candidate.id, false)
+                    }}
+                    onKeyDown={event => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      void cancelRun(candidate.id, false)
+                    }}
+                  >
+                    {candidate.status === 'STOPPING'
+                      ? <span className="icon-action-spinner" aria-hidden="true" />
+                      : <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                          <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+                        </svg>}
+                    <span className="sr-only">
+                      {candidate.status === 'STOPPING'
+                        ? translate(language, 'runBadge.stopping')
+                        : translate(language, 'runBadge.cancel')}
+                    </span>
+                  </span>
+                )}
+                {candidateTerminal && (
+                  <span
+                    className="icon-action icon-action--remove"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={translate(language, 'runBadge.remove')}
+                    title={translate(language, 'runBadge.remove')}
+                    data-testid={`run-badge-remove-${candidate.id}`}
+                    onClick={event => {
+                      event.stopPropagation()
+                      handleRemoveRun(candidate.id)
+                    }}
+                    onKeyDown={event => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      handleRemoveRun(candidate.id)
+                    }}
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                      <path d="M4 4l8 8M12 4l-8 8" />
+                    </svg>
+                    <span className="sr-only">{translate(language, 'runBadge.remove')}</span>
+                  </span>
+                )}
               </button>
             )
           })}
