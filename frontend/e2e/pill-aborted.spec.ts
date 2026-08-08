@@ -4,6 +4,15 @@ import { expect, test } from '@playwright/test'
 // compared with the FAILED pill — they should share the same
 // tonal palette now.
 
+test.beforeEach(async ({ page }) => {
+  // The visual contract uses German UI labels (e.g.
+  // "Validieren & importieren"). Pin the language before the
+  // app boots — `useLanguage` defaults to English and the
+  // i18n mockups speak German.
+  await page.addInitScript(() => localStorage.setItem('lasttest.language', 'de'))
+  await page.goto('/')
+})
+
 test('ABORTED pill — visual snapshot for design parity', async ({ page }) => {
   // Start the run from the UI so the dashboard knows about it
   // (cross-session runs are not loaded from the server).

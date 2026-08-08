@@ -68,17 +68,34 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
 export function useLanguage(): LanguageContextValue {
   const ctx = useContext(LanguageContext)
-  if (ctx !== null) return ctx
-  // Defensive fallback for components rendered outside the
-  // provider (tests, isolated renders). We read from
-  // localStorage so the surface stays consistent with the rest
-  // of the app until the next mount under <LanguageProvider>.
-  const [language, setLanguageState] = useState<SupportedLanguage>(readStoredLanguage)
+  // Rules of hooks: every call site must invoke the same hooks
+  // in the same order on every render. The defensive fallback
+  // (no provider above us — tests, isolated renders) therefore
+  // also runs through hooks *unconditionally*, and the actual
+  // "do we have a provider?" decision happens after the hooks
+  // are wired up. Without this, calling useLanguage() in a
+  // component that sometimes renders under <LanguageProvider>
+  // and sometimes without would crash with "rendered fewer
+  // hooks than during the previous render" the first time the
+  // branches diverged.
+  const [fallbackLanguage, setFallbackLanguageState] = useState<SupportedLanguage>(readStoredLanguage)
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, language) } catch { /* ignore */ }
-  }, [language])
-  const setLanguage = useCallback((next: SupportedLanguage) => {
-    setLanguageState(next)
-  }, [])
-  return { language, setLanguage }
+    if (ctx !== null) return
+    // Defensive fallback for components rendered outside the
+    // provider (tests, isolated renders). We read from
+    // localStorage so the surface stays consistent with the
+    // rest of the app until the next mount under
+    // <LanguageProvider>.
+    try {
+      localStorage.setItem(STORAGE_KEY, fallbackLanguage)
+    } catch {
+      // Ignore — persistence is a nice-to-have, not a contract.
+    }
+  }, [ctx, fallbackLanguage])
+  const setFallbackLanguage = useCallback((next: SupportedLanguage) => {
+    if (ctx !== null) return
+    setFallbackLanguageState(next)
+  }, [ctx])
+  if (ctx !== null) return ctx
+  return { language: fallbackLanguage, setLanguage: setFallbackLanguage }
 }

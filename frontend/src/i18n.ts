@@ -461,6 +461,46 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'menu.removeAllOtherFailed': 'Remove all other failed runs',
     'menu.removeAllOtherFailed.disabled.noOther': 'No other failed runs to remove.',
 
+    // Run badge inline actions
+    'runBadge.cancel': 'Cancel run',
+    'runBadge.remove': 'Remove from view',
+    'runBadge.stopping': 'Run is stopping',
+
+    // Last runs panel — header
+    'lastRuns.heading': 'Last runs',
+    'lastRuns.empty': 'No runs yet — start a load test to populate this list.',
+    'lastRuns.project': '{name} runs',
+    'lastRuns.filter': 'Filter',
+    'lastRuns.aria': 'Recent runs',
+    'lastRuns.hintTitle': 'Right-click for actions',
+    'lastRuns.forActions': 'for actions',
+
+    // Last runs panel — meta line (under the run name)
+    'lastRuns.meta.vus': '{vus} VUs',
+    'lastRuns.meta.duration': '{seconds}',
+    'lastRuns.meta.seconds': '{seconds} s',
+    'lastRuns.meta.minutes': '{minutes} min',
+    'lastRuns.meta.hours': '{hours} h',
+    'lastRuns.meta.hoursMinutes': '{hours} h {minutes} min',
+    'lastRuns.meta.running': 'in flight',
+    'lastRuns.meta.stopping': 'stopping',
+    'lastRuns.meta.queued': 'waiting for worker',
+    'lastRuns.meta.failed': 'with errors',
+
+    // Last runs panel — right-hand duration column
+    'lastRuns.duration.elapsedOf': '{elapsed} / ~{planned}',
+
+    // Last runs panel — relative "when" stamp
+    'lastRuns.when.queued': 'queued',
+    'lastRuns.when.runningFor': 'running for {duration}',
+    'lastRuns.when.ago': '{value} ago',
+
+    // Last runs panel — humanised time delta buckets
+    'lastRuns.delta.justNow': 'just now',
+    'lastRuns.delta.minutes': '{minutes} min',
+    'lastRuns.delta.hours': '{hours} h',
+    'lastRuns.delta.days': '{days} d',
+
     // Errors
     'error.cancelFailed': 'Cancel failed (HTTP {status})',
     'error.rerunFailed': 'Rerun failed (HTTP {status})',
@@ -924,6 +964,46 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'menu.removeFromView': 'Aus Ansicht entfernen',
     'menu.removeAllOtherFailed': 'Alle anderen fehlgeschlagenen Läufe entfernen',
     'menu.removeAllOtherFailed.disabled.noOther': 'Keine weiteren fehlgeschlagenen Läufe zum Entfernen.',
+
+    // Run badge inline actions
+    'runBadge.cancel': 'Testlauf abbrechen',
+    'runBadge.remove': 'Aus Ansicht entfernen',
+    'runBadge.stopping': 'Testlauf wird gestoppt',
+
+    // Last runs panel — header
+    'lastRuns.heading': 'Letzte Läufe',
+    'lastRuns.empty': 'Noch keine Läufe — starten Sie einen Lasttest, um diese Liste zu füllen.',
+    'lastRuns.project': '{name}-Läufe',
+    'lastRuns.filter': 'Filter',
+    'lastRuns.aria': 'Letzte Läufe',
+    'lastRuns.hintTitle': 'Rechtsklick für Aktionen',
+    'lastRuns.forActions': 'für Aktionen',
+
+    // Last runs panel — meta line (under the run name)
+    'lastRuns.meta.vus': '{vus} VUs',
+    'lastRuns.meta.duration': '{seconds}',
+    'lastRuns.meta.seconds': '{seconds} s',
+    'lastRuns.meta.minutes': '{minutes} min',
+    'lastRuns.meta.hours': '{hours} Std.',
+    'lastRuns.meta.hoursMinutes': '{hours} Std. {minutes} Min',
+    'lastRuns.meta.running': 'läuft',
+    'lastRuns.meta.stopping': 'wird gestoppt',
+    'lastRuns.meta.queued': 'wartet auf Worker',
+    'lastRuns.meta.failed': 'mit Fehlern',
+
+    // Last runs panel — right-hand duration column
+    'lastRuns.duration.elapsedOf': '{elapsed} / ~{planned}',
+
+    // Last runs panel — relative "when" stamp
+    'lastRuns.when.queued': 'wartet',
+    'lastRuns.when.runningFor': 'läuft seit {duration}',
+    'lastRuns.when.ago': 'vor {value}',
+
+    // Last runs panel — humanised time delta buckets
+    'lastRuns.delta.justNow': 'gerade eben',
+    'lastRuns.delta.minutes': '{minutes} Min',
+    'lastRuns.delta.hours': '{hours} Std.',
+    'lastRuns.delta.days': '{days} Tagen',
 
     // Errors
     'error.cancelFailed': 'Cancel fehlgeschlagen (HTTP {status})',

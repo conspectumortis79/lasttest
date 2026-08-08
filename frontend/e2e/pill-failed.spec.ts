@@ -9,6 +9,15 @@ import { expect, test } from '@playwright/test'
 // port is not open" exercises the same flow end-to-end; this
 // spec is just the screenshot counterpart.
 
+test.beforeEach(async ({ page }) => {
+  // The visual contract uses German UI labels (e.g.
+  // "Validieren & importieren"). Pin the language before the
+  // app boots — `useLanguage` defaults to English and the
+  // i18n mockups speak German.
+  await page.addInitScript(() => localStorage.setItem('lasttest.language', 'de'))
+  await page.goto('/')
+})
+
 test('FAILED pill uses the tonal palette as ABORTED', async ({ page }) => {
   // Use a canned spec with one unreachable server. Matches the
   // pattern lasttest.spec.ts uses for the same flow.

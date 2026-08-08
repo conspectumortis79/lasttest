@@ -88,6 +88,20 @@ export function isInFlight(status: string): boolean {
 }
 
 /**
+ * True once the run can be cancelled from the UI. This is
+ * stricter than `isInFlight`: a QUEUED run is still in the
+ * dashboard (so the live ticker keeps running) but the k6
+ * process has not been spawned yet, so a stop request would
+ * have no effect and the affordance is intentionally hidden
+ * on the badge. STOPPING stays in the set so the badge can
+ * keep showing the in-progress spinner until the backend
+ * reports the terminal state.
+ */
+export function isCancellable(status: string): boolean {
+  return status === 'RUNNING' || status === 'STOPPING'
+}
+
+/**
  * True once the run has settled in a terminal state and no more
  * transitions are expected. Polling on the frontend uses the
  * negation of this predicate to stop refreshing runs that have

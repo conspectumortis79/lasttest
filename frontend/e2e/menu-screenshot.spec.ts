@@ -43,6 +43,20 @@ async function gracefulStopRun(runId: string): Promise<void> {
   }
 }
 
+test.beforeEach(async ({ page }) => {
+  // The app's default language is English, but the production
+  // chrome (and every other e2e spec) is German. Pin the
+  // language via localStorage so the rendered button labels,
+  // menu items and status texts match the assertions below.
+  // `addInitScript` runs before any page script, so the React
+  // LanguageProvider reads the stored value on its first read.
+  await page.addInitScript(() => {
+    localStorage.setItem('lasttest.language', 'de')
+  })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'lasttest' })).toBeVisible()
+})
+
 test('in-flight menu', async ({ page }) => {
   await page.goto('/')
   await importDemo(page)
