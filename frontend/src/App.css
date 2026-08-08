@@ -205,8 +205,16 @@ button:disabled { opacity: .5; cursor: wait; }
 .doc-popup {
   position: fixed; top: 50%; left: 50%;
   transform: translate(-50%, -46%) scale(.98);
-  width: min(960px, 92vw);
-  max-height: 84vh;
+  /* Fixed footprint: the popup is always the same size regardless
+     of how long the rendered content is. Short docs leave empty
+     space inside the body; long docs scroll inside the body
+     (`.doc-popup-body` has `overflow: auto; flex: 1`). The
+     `max-height: 90vh` is a safety net for viewports shorter than
+     800 px so the popup never overflows the screen. The width
+     stays viewport-bounded (`min(..., 94vw)`) for the same reason. */
+  width: min(1100px, 94vw);
+  height: 800px;
+  max-height: 90vh;
   background: #111b29;
   border: 1px solid #233049;
   border-radius: 14px;
@@ -317,7 +325,12 @@ button:disabled { opacity: .5; cursor: wait; }
   overflow: auto;
   flex: 1;
   color: #e8edf5;
-  font-size: 14px;
+  /* Bumped from 14px to 15px so the long-form body text in the
+     User Guide / README / Wiki popups is a touch more readable
+     without changing the line-height. The walkthrough sub-elements
+     that pin their own font-size still override this, so the tab
+     bar, nav buttons and counters stay compact. */
+  font-size: 15px;
   line-height: 1.65;
   scroll-behavior: smooth;
 }
@@ -619,7 +632,7 @@ button:disabled { opacity: .5; cursor: wait; }
 }
 
 .walkthrough-stage {
-  padding: 22px 28px;
+  padding: 24px 32px;
   overflow: auto;
   flex: 1;
   min-height: 0;
