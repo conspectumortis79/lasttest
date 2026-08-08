@@ -65,6 +65,8 @@ test('terminal menu offers rerun and disables export when no summary is present'
   const viewGroup = groups[0]
   equal(viewGroup.find(item => item.id === 'focus')?.action, 'focus')
   equal(viewGroup.find(item => item.id === 'copy-report-link')?.action, 'copy-report-link')
+  equal(viewGroup.find(item => item.id === 'open-report')?.action, 'open-report')
+  equal(viewGroup.find(item => item.id === 'download-script')?.action, 'download-script')
   const exportItem = viewGroup.find(item => item.id === 'export-metrics')!
   ok(!isMenuItemEnabled(exportItem), 'export is disabled when no summary is present')
 
@@ -98,13 +100,41 @@ test('ABORTED menu labels the focus item as Aborted-Details and disables export'
 
 test('menuItemCount counts every item across every group', () => {
   // Terminal runs carry the cleanup group (remove-from-view,
-  // remove-all-other-failed) on top of the standard two groups,
-  // so they have 7 items instead of 5. In-flight runs stay at 5.
+  // remove-all-other-failed) and the download-script item on
+  // top of the standard two groups, so they have 8 items
+  // instead of 5. In-flight runs stay at 5 — the download is
+  // only meaningful once the test is finished.
   equal(menuItemCount(runWith('RUNNING')), 5)
-  equal(menuItemCount(runWith('COMPLETED')), 7)
-  equal(menuItemCount(runWith('FAILED')), 7)
-  equal(menuItemCount(runWith('STOPPED')), 7)
-  equal(menuItemCount(runWith('ABORTED')), 7)
+  equal(menuItemCount(runWith('COMPLETED')), 8)
+  equal(menuItemCount(runWith('FAILED')), 8)
+  equal(menuItemCount(runWith('STOPPED')), 8)
+  equal(menuItemCount(runWith('ABORTED')), 8)
+})
+
+test('download-script is offered for every terminal status and never for in-flight runs', () => {
+  // A user right-clicking a finished (or otherwise terminal)
+  // badge must be able to grab the k6 script that produced the
+  // result. In-flight runs are excluded on purpose: the script
+  // is still in-flight from the user's point of view, and the
+  // view already exposes `open-report` for inspection.
+  for (const status of ['COMPLETED', 'FAILED', 'STOPPED', 'ABORTED']) {
+    const items = buildRunMenuItems(runWith(status)).flat()
+    const scriptItem = items.find(item => item.action === 'download-script')
+    ok(scriptItem, `download-script must be present for ${status}`)
+    equal(scriptItem?.disabledReason ?? null, null, `download-script must be enabled for ${status}`)
+  }
+  for (const status of ['QUEUED', 'RUNNING', 'STOPPING']) {
+    const items = buildRunMenuItems(runWith(status)).flat()
+    ok(!items.some(item => item.action === 'download-script'), `download-script must not appear for ${status}`)
+  }
+})
+
+test('German label for download-script matches the i18n dictionary', () => {
+  // Lock in the German label so a translation regression shows
+  // up here rather than only in production. The English text is
+  // covered by the default-language tests above.
+  const groups = buildRunMenuItems(runWith('COMPLETED'), 'de')
+  equal(groups[0].find(item => item.id === 'download-script')?.label, 'k6-Skript herunterladen')
 })
 
 test('terminal menu offers a cleanup group with remove-from-view and remove-all-other-failed', () => {

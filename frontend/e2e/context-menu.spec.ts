@@ -330,3 +330,41 @@ paths:
     if (runId) await forceAbortRun(runId)
   }
 })
+
+test('right-click on a completed badge offers "k6-Skript herunterladen" which downloads the .js file', async ({ page }) => {
+  // End-to-end check for the new context-menu entry: start a
+  // short run, wait for COMPLETED, right-click the badge, pick
+  // the download entry, and assert that the browser receives a
+  // download whose filename matches the `lasttest-<id>.js`
+  // contract used by the report page. The download uses the
+  // same `/api/test-runs/{id}/script` endpoint the report's
+  // link uses, so the wire contract is covered twice.
+  await importDemo(page)
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('3')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  let runId = ''
+  try {
+    const badge = page.locator('.run-badge').first()
+    await expect(badge).toBeVisible({ timeout: 10_000 })
+    await expect(badge).toContainText('COMPLETED', { timeout: 30_000 })
+    runId = await runIdFromBadge(page)
+
+    await badge.click({ button: 'right' })
+    const menu = page.locator('.run-context-menu')
+    await expect(menu).toBeVisible()
+    // The new entry must appear next to the other view/export
+    // entries in the terminal menu.
+    const downloadItem = menu.getByRole('menuitem', { name: 'k6-Skript herunterladen' })
+    await expect(downloadItem).toBeVisible()
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      downloadItem.click(),
+    ])
+    expect(download.suggestedFilename()).toBe(`lasttest-${runId}.js`)
+  } finally {
+    if (runId) await forceAbortRun(runId)
+  }
+})

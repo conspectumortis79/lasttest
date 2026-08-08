@@ -24,6 +24,8 @@ import { DemoStatusProvider, useDemoStatus } from './useDemoStatus.tsx'
 import {
   buildMetricRow,
   copyTextToClipboard,
+  k6ScriptDownloadName,
+  k6ScriptUrl,
   parseK6Summary,
   runElapsedSeconds,
   summarizeFailure,
@@ -730,6 +732,9 @@ function LoadTestApp() {
       case 'export-metrics':
         await downloadSummary(run)
         return
+      case 'download-script':
+        await downloadScript(run)
+        return
       case 'stop':
         await cancelRun(run.id, false)
         return
@@ -796,6 +801,25 @@ function LoadTestApp() {
     anchor.click()
     document.body.removeChild(anchor)
     URL.revokeObjectURL(url)
+  }
+
+  /**
+   * Downloads the generated k6 script for a finished run by
+   * delegating to the browser's native download behaviour: a
+   * transient anchor with the `download` attribute and the
+   * server-side content-disposition filename. The same URL
+   * powers the in-report download link, so the two affordances
+   * stay in sync and pick up any future server-side filename
+   * change automatically.
+   */
+  async function downloadScript(run: TestRun) {
+    const anchor = document.createElement('a')
+    anchor.href = k6ScriptUrl(run.id)
+    anchor.download = k6ScriptDownloadName(run.id)
+    anchor.rel = 'noopener'
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
   }
 
   async function cancelRun(runId: string, force: boolean) {
