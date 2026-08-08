@@ -1,6 +1,7 @@
 import { deepEqual, equal, ok } from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  cancellableRunIds,
   hasOtherFailedRun,
   isCancellable,
   isInFlight,
@@ -280,4 +281,71 @@ test('hasOtherFailedRun ignores non-FAILED sibling statuses', () => {
 
 test('hasOtherFailedRun on an empty map returns false', () => {
   equal(hasOtherFailedRun({}, 'anything'), false)
+})
+
+test('cancellableRunIds returns every RUNNING and STOPPING run id', () => {
+  // The "demo is off" reset walks this list to issue one
+  // cancel per in-flight run. The helper must pick up both
+  // RUNNING (the user just started a test) and STOPPING (the
+  // user already clicked Stop but the backend has not yet
+  // reported the terminal state) so a residual STOPPING does
+  // not slip through the reset.
+  const runs = {
+    running: makeRun('running', '2026-01-01T00:00:00Z', 'RUNNING'),
+    stopping: makeRun('stopping', '2026-01-02T00:00:00Z', 'STOPPING'),
+    queued: makeRun('queued', '2026-01-03T00:00:00Z', 'QUEUED'),
+    completed: makeRun('completed', '2026-01-04T00:00:00Z', 'COMPLETED'),
+    failed: makeRun('failed', '2026-01-05T00:00:00Z', 'FAILED'),
+    stopped: makeRun('stopped', '2026-01-06T00:00:00Z', 'STOPPED'),
+    aborted: makeRun('aborted', '2026-01-07T00:00:00Z', 'ABORTED'),
+  }
+  deepEqual(cancellableRunIds(runs).sort(), ['running', 'stopping'])
+})
+
+test('cancellableRunIds intentionally excludes QUEUED runs', () => {
+  // A QUEUED run is in the dashboard (so the live ticker keeps
+  // running) but the k6 process has not been spawned yet. A
+  // cancel request would have no effect, so the helper must
+  // skip QUEUED entries — otherwise the reset would issue a
+  // useless HTTP round-trip per queued badge.
+  const runs = { queued: makeRun('queued', '2026-01-01T00:00:00Z', 'QUEUED') }
+  deepEqual(cancellableRunIds(runs), [])
+})
+
+test('cancellableRunIds on an empty map returns an empty array', () => {
+  // Edge case: a fresh page or a user who has not started any
+  // run yet. The reset path then has nothing to cancel and
+  // can skip the fetch loop entirely.
+  deepEqual(cancellableRunIds({}), [])
+})
+
+test('cancellableRunIds preserves no order guarantee — callers must sort if they need a stable sequence', () => {
+  // The implementation iterates `Object.entries`, which on
+  // modern engines preserves insertion order for string keys
+  // but is not part of the documented contract. The tests
+  // assert membership via `.sort()` so a future refactor
+  // (e.g. switching to a plain loop) does not break them.
+  const runs = {
+    a: makeRun('a', '2026-01-02T00:00:00Z', 'RUNNING'),
+    b: makeRun('b', '2026-01-01T00:00:00Z', 'STOPPING'),
+    c: makeRun('c', '2026-01-03T00:00:00Z', 'COMPLETED'),
+  }
+  const ids = cancellableRunIds(runs)
+  deepEqual(ids.slice().sort(), ['a', 'b'])
+  equal(ids.length, 2)
+})
+
+test('cancellableRunIds does not mutate the input map', () => {
+  // Pure-helper contract: the caller passes the runs map by
+  // reference and expects it back unchanged. A regression
+  // that starts deleting entries (e.g. to "save work") would
+  // silently break React's reference-equality short-circuit
+  // and force a re-render on every test run.
+  const runs = {
+    a: makeRun('a', '2026-01-01T00:00:00Z', 'RUNNING'),
+    b: makeRun('b', '2026-01-02T00:00:00Z', 'STOPPING'),
+  }
+  const before = JSON.stringify(runs)
+  cancellableRunIds(runs)
+  equal(JSON.stringify(runs), before)
 })

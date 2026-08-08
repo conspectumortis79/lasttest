@@ -17,6 +17,8 @@
    - 3.2 [Docker with InfluxDB + Grafana (time-series)](#32-docker-with-influxdb--grafana-time-series)
    - 3.3 [Local development install](#33-local-development-install)
 4. [First run and the demo API](#4-first-run-and-the-demo-api)
+   - 4.1 [Loading the demo](#loading-the-demo)
+   - 4.2 [Toggling the demo on and off](#toggling-the-demo-on-and-off)
 5. [The main workflow at a glance](#5-the-main-workflow-at-a-glance)
 6. [The top toolbar, settings and language](#6-the-top-toolbar-settings-and-language)
    - 6.1 [Toolbar layout](#61-toolbar-layout)
@@ -277,6 +279,7 @@ most:
 - **HTTP Bearer** authentication, demonstrated by `POST /products/search`
 - **API Key** in a custom header, demonstrated by `GET /products/lookup-by-id`
 - **OAuth 2.0** access tokens, demonstrated by `GET /products/me`
+- **OpenID Connect (OIDC)** ID tokens, demonstrated by `GET /products/my-profile`
 
 After the import, lasttest itself runs a tiny in-process server that
 answers the same paths under `/demo-api/*`. The demo backend is
@@ -305,6 +308,63 @@ You should see a card with six operations (two read-only GETs and four
 destructive writes). The first read-only operation is pre-selected
 as a safe starting point — every other endpoint, including the
 remaining read-only one, has to be ticked explicitly.
+
+### Toggling the demo on and off
+
+The demo is opt-in. The Settings drawer (top toolbar → **⚙ gear**)
+exposes a **Demo API** master switch in its own section. Flipping the
+switch is the only path that turns the demo on or off — there is no
+auto-detection, no hidden default, no URL magic. The bundled
+`/demo-api/*` server, the `/?demo-traffic` dashboard link in the
+top toolbar, the `/demo-swagger-ui` page and the bundled
+`openapi-demo.yaml` are all gated behind this single switch.
+
+The switch is a **process-wide** setting (not per-user) and is
+persisted in `localStorage` under `lasttest.demo.enabled`, so the
+choice survives a page reload and a fresh tab.
+
+**What happens when you flip the switch — in both directions:**
+
+| Direction | Effect |
+| --- | --- |
+| **Off → On** (enable) | The bundled `openapi-demo.yaml` is fetched from `/api/demo-specification` and dropped into the Swagger textarea. The `Demo-API` link appears in the top toolbar (with an "active" pill while the switch stays on). `/demo-api/*` and `/demo-swagger-ui` start answering requests. |
+| **On → Off** (disable) | The Swagger textarea is cleared back to the empty sample. The `Demo-API` link disappears from the toolbar. `/demo-api/*` and `/demo-swagger-ui` return 404 again. |
+
+**Both directions trigger a full dashboard reset — exactly the same
+as a page reload.** Whatever the user had on screen before the
+toggle belongs to the previous session, so flipping the switch is a
+hard cut:
+
+- Every in-flight k6 run is cancelled with the same graceful
+  `SIGTERM` the inline Stop button sends, so the k6 processes go
+  away before the rest of the state is wiped. The cancel request
+  is best-effort: if the backend already settled the run, the
+  call is a no-op.
+- The runs map is cleared — no badges, no detail card, no
+  run-menu state.
+- The imported spec is forgotten — the operations card (Step 2)
+  disappears, the `selected` / `collapsed` / `operationSettings`
+  sets are dropped.
+- The load profile resets to the default (`constant-vus`, 10 VUs
+  for 30 s). Picking a preset, switching the executor type or
+  tuning the fields is reverted.
+- The error and run-action banners are cleared.
+- The right-click context menu on a run badge, if it was open,
+  is dismissed.
+
+> 💡 **Why the reset is symmetric.** Toggling the demo means "I
+> want a clean session against the demo backend". Whether the
+> user is moving into the demo (off → on) or out of it (on → off)
+> the previous contents of the dashboard are stale: imported
+> endpoints were picked for the previous backend, the load
+> profile was tuned for the previous target, and a running test
+> is hitting the wrong server. Resetting the dashboard in both
+> directions is the only way to keep the two mental models — "I
+> am testing the demo" and "I am testing my own API" — strictly
+> separate. A user who wants to keep their configuration can
+> finish the current test, copy the settings out by hand, then
+> flip the switch.
+
 
 ---
 
@@ -364,10 +424,11 @@ control). It is rendered by `TopToolbar.tsx`; the popup is rendered by
 
 Clicking the gear opens a slide-in drawer from the right edge of the
 viewport. The drawer is modal: it traps focus while open, closes on
-`Esc`, on backdrop click, and on the close button. The current
-implementation exposes a single section — **Language** — so the
-drawer is not empty. New sections (Theme, Telemetry opt-out, etc.) can
-be added without touching the i18n core.
+`Esc`, on backdrop click, and on the close button. The drawer
+exposes three sections — **Language**, **Notifications** and
+**Demo API** — so every user-facing toggle lives in one place. The
+Language section is the only one that affects localisation chrome;
+the other two are described in their own sub-sections.
 
 **Switching language, step by step:**
 
@@ -385,6 +446,17 @@ be added without touching the i18n core.
    a fresh tab keeps the language you picked.
 5. Close the drawer with `Esc`, the close button, or a click on the
    dimmed backdrop.
+
+> 💡 **Toggling the Demo API.** The third section of the drawer
+> carries the **Demo API** master switch. Flipping it on enables
+> the bundled `/demo-api/*` server and the `/?demo-traffic`
+> dashboard link; flipping it off disables both. **Both
+> directions wipe the dashboard** — every running k6 test is
+> cancelled (the same graceful `SIGTERM` the inline Stop button
+> sends), the imported spec is forgotten and the load profile
+> resets to the default. The full behaviour is documented in
+> [Section 4.2](#toggling-the-demo-on-and-off). The choice is
+> persisted in `localStorage` under `lasttest.demo.enabled`.
 
 > 💡 **Worked example — switching to German for a demo session:** you
 > start lasttest in English because the README pointed you here. For
@@ -663,12 +735,13 @@ the user can copy the demo secrets into the input with one click.
 | **HTTP Bearer** (RFC 6750) | `type: http, scheme: bearer` | `Authorization: Bearer <token>` | `POST /products/search` | `demo-bearer-token` |
 | **API Key in custom header** | `type: apiKey, in: header, name: X-…` | `X-…: <key>` | `GET /products/lookup-by-id?id=1` | `X-API-Key: demo-api-key-12345` |
 | **OAuth 2.0** (RFC 6749, RFC 6750) | `type: oauth2, flows: {…}` | `Authorization: Bearer <access_token>` | `GET /products/me` | `Bearer demo-oauth2-token-12345` |
+| **OpenID Connect** (OIDC, identity layer on top of OAuth 2.0) | `type: openIdConnect, openIdConnectUrl: <discovery-URL>` | `Authorization: Bearer <id_token>` | `GET /products/my-profile` | `Bearer demo-oidc-id-token-12345` |
 
-The legacy `apiKey in: query`, `apiKey in: cookie` and `openIdConnect`
-schemes are reported in the import as *unsupported* (so the user sees
-which scheme was detected, even if lasttest does not yet know how to
-use it). They can always be added manually as a regular header
-parameter on the operation card.
+The legacy `apiKey in: query`, `apiKey in: cookie` and
+mutual-TLS schemes are reported in the import as *unsupported* (so
+the user sees which scheme was detected, even if lasttest does not
+yet know how to use it). They can always be added manually as a
+regular header parameter on the operation card.
 
 #### 8.5.1 HTTP Basic
 
@@ -711,7 +784,30 @@ the *scopes* (e.g. `read:products, write:products`) declared in the
 securityScheme's `flows` object, so the user knows which scopes
 their token is allowed to exercise.
 
-#### 8.5.5 Per-endpoint configuration
+#### 8.5.5 OpenID Connect (OIDC)
+
+OpenID Connect is the identity layer on top of OAuth 2.0. The
+spec declares it as `type: openIdConnect, openIdConnectUrl: <URL>`
+where the URL points to the OP's discovery document (the
+`.well-known/openid-configuration` endpoint). From the k6
+generator's point of view an OIDC ID token rides exactly the same
+`Authorization: Bearer <id_token>` header (RFC 6750) as Bearer and
+OAuth 2.0 — the `openIdConnect` subtype is split out because the
+banner shows the discovery URL and the typical OIDC scopes
+(`openid`, `profile`, `email`, …) so the user can see at a glance
+that the token came from an OIDC provider rather than a plain
+OAuth 2.0 authorization server.
+
+lasttest renders a separate password-style input under the column
+header `OIDC` so the user types the ID token in a dedicated slot,
+but the generated k6 script still emits
+`Authorization: Bearer <id_token>`. The yellow demo banner
+additionally shows the **discovery URL** declared on the security
+scheme and the **scopes** (`openid, profile, email` for the
+bundled demo) so the user can verify that the ID token was
+issued for the right audience.
+
+#### 8.5.6 Per-endpoint configuration
 
 A single endpoint can declare more than one requirement via the
 spec's `security` list. lasttest surfaces every requirement in the

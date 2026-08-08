@@ -83,15 +83,27 @@ export async function fetchDemoTraffic(runId?: string | undefined): Promise<Demo
  * smoke tests where two requests can land within the same wall-
  * clock second; without milliseconds, the table would show
  * duplicates that hide the actual call rate.
+ *
+ * The hour/minute/second parts are rendered in the **user's local
+ * time zone** — i.e. whatever the browser host is configured to —
+ * so the column matches the wall-clock time the user sees on
+ * their machine. The wire format itself stays ISO-8601 UTC (server
+ * emits `Instant.now().toString()`), only the rendered time is
+ * local. The millisecond part is timezone-independent (the same
+ * instant always has the same `.mmm` value), so we read it via
+ * `getUTCMilliseconds()` for convenience.
  */
 export function formatTrafficTimestamp(timestamp: string): string {
   const date = new Date(timestamp)
   if (Number.isNaN(date.getTime())) return timestamp
-  const hours = date.getUTCHours().toString().padStart(2, '0')
-  const minutes = date.getUTCMinutes().toString().padStart(2, '0')
-  const seconds = date.getUTCSeconds().toString().padStart(2, '0')
+  const time = date.toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
   const millis = date.getUTCMilliseconds().toString().padStart(3, '0')
-  return `${hours}:${minutes}:${seconds}.${millis}`
+  return `${time}.${millis}`
 }
 
 /**

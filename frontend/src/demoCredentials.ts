@@ -58,7 +58,26 @@ export type DemoOAuth2 = {
   readonly scopes: ReadonlyArray<string>
 }
 
-type DemoCredentials = DemoBasicAuth | DemoBearerToken | DemoApiKey | DemoOAuth2
+export type DemoOpenIdConnect = {
+  readonly kind: 'openIdConnect'
+  readonly operationIds: ReadonlyArray<string>
+  /**
+   * The OIDC ID token; sent as `Authorization: Bearer <id_token>`
+   * on the wire. Same wire format as OAuth 2.0 / Bearer per RFC
+   * 6750 — the field is split out so the banner can show the
+   * discovery URL and scopes alongside the token.
+   */
+  readonly idToken: string
+  /**
+   * The OpenID Connect discovery URL the spec declared. Carried
+   * for the banner only; the k6 script does not follow it (the
+   * user pastes a pre-acquired ID token into the UI).
+   */
+  readonly discoveryUrl: string
+  readonly scopes: ReadonlyArray<string>
+}
+
+type DemoCredentials = DemoBasicAuth | DemoBearerToken | DemoApiKey | DemoOAuth2 | DemoOpenIdConnect
 
 export const DEMO_CREDENTIALS: ReadonlyArray<DemoCredentials> = [
   {
@@ -84,6 +103,13 @@ export const DEMO_CREDENTIALS: ReadonlyArray<DemoCredentials> = [
     token: 'demo-oauth2-token-12345',
     flowType: 'clientCredentials',
     scopes: ['read:products', 'write:products'],
+  },
+  {
+    kind: 'openIdConnect',
+    operationIds: ['getMyProfile'],
+    idToken: 'demo-oidc-id-token-12345',
+    discoveryUrl: 'http://localhost:8286/demo-api/.well-known/openid-configuration',
+    scopes: ['openid', 'profile', 'email'],
   },
 ]
 

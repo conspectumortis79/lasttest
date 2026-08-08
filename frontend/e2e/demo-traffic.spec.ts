@@ -426,3 +426,198 @@ test('the Demo-API toolbar link sits at the right end of the nav, after Wiki', a
   // sits at the right edge, not in the middle.
   await expect(navLinks.nth(count - 2)).toHaveText(/Wiki/)
 })
+
+test('disabling the demo mid-run cancels the in-flight load test and wipes the dashboard', async ({ page }) => {
+  // The headline contract for the "demo off" reset: while the
+  // user is in the middle of testing the demo API, flipping
+  // the switch off must stop every running k6 process AND
+  // clear the in-memory dashboard, so the user lands on a
+  // clean state — exactly as if they had reloaded the page.
+  // Without this, a stale RUNNING badge would keep polling
+  // and the operations card would still show the demo's
+  // endpoints, leaving the user with two contradictory
+  // signals: "demo is off" + "GET /products is still running".
+
+  // Demo is on by default thanks to the global setup. Make
+  // sure the spec is imported and a run is in flight. We
+  // pick a 30 s run so the test has a comfortable window to
+  // observe the running badge before pulling the rug.
+  await importDemo(page)
+  await page.getByLabel('Endpunkt GET /products auswählen').check()
+  await page.getByLabel('Virtual Users').fill('2')
+  await page.getByLabel('Dauer (Sekunden)').fill('30')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  // Pin the wait on the running badge so we know the k6
+  // process is alive on the backend before we disable the
+  // demo. A regression that misses the running state here
+  // would not actually test the cancel behaviour.
+  await expect(page.getByRole('tab', { name: /RUNNING/ }).first()).toBeVisible({ timeout: 10_000 })
+  const runId = await runIdFromBadge(page)
+
+  try {
+    // Disable the demo via the Settings drawer.
+    await page.getByRole('button', { name: 'Einstellungen' }).click()
+    await page.locator('[data-testid="settings-demo-api-switch"]').uncheck()
+    await page.keyboard.press('Escape')
+
+    // The dashboard must be empty now. The RUNNING badge
+    // should be gone (cancelled + wiped) and the operations
+    // card (Step 2) should be hidden because the import
+    // state was reset. The textarea should be back to the
+    // empty sample — mirroring the existing
+    // "disabling the demo in Settings clears the textarea
+    // back to the empty sample" contract.
+    await expect(page.locator('.run-badge')).toHaveCount(0, { timeout: 5_000 })
+    await expect(page.locator('.specification-textarea')).not.toContainText('Lasttest Demo API', { timeout: 5_000 })
+    // The operations card lists every endpoint of the
+    // imported spec; the import was wiped, so it must
+    // disappear too.
+    await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toHaveCount(0)
+
+    // The cancel request must have reached the backend: the
+    // run is either STOPPING, STOPPED or ABORTED now.
+    // Polling stops after the run hits a terminal state, so
+    // a one-shot `GET` is the simplest way to assert that.
+    const api = await playwrightRequest.newContext({ baseURL: 'http://localhost:8286' })
+    let status = ''
+    try {
+      // Allow up to 5 s for the backend to settle — the
+      // graceful cancel goes through SIGTERM and k6 needs
+      // a moment to flush its summary.
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const response = await api.get(`/api/test-runs/${runId}`)
+        if (response.ok()) {
+          const body = await response.json() as { status: string }
+          status = body.status
+          if (status === 'STOPPING' || status === 'STOPPED' || status === 'ABORTED') break
+        }
+        await page.waitForTimeout(500)
+      }
+    } finally {
+      await api.dispose()
+    }
+    expect(['STOPPING', 'STOPPED', 'ABORTED']).toContain(status)
+
+    // The demo API itself must be off — the bundled
+    // controller short-circuits to 404. Without this, a
+    // partial reset (state wiped but backend still on)
+    // would leave the user staring at an empty dashboard
+    // while their k6 process was still able to hit a
+    // running server.
+    const demoResponse = await page.request.get('http://localhost:8286/demo-api/products')
+    expect(demoResponse.status()).toBe(404)
+
+    // The Swagger UI shell must also 404 when the demo is
+    // off — otherwise a stale tab would still show the
+    // bundled spec even though the controller is down.
+    const swaggerResponse = await page.request.get('http://localhost:8286/demo-swagger-ui')
+    expect(swaggerResponse.status()).toBe(404)
+  } finally {
+    // Belt-and-braces: the test path can fail before the
+    // cancel reaches the backend. Force-abort the run so
+    // the executor pool frees up for the next test in the
+    // suite (MAX_PARALLEL_RUNS = 2 on the Spring side).
+    await forceAbortRun(runId)
+  }
+})
+
+test('enabling the demo mid-session wipes the in-memory dashboard — symmetric to disabling', async ({ page }) => {
+  // The "demo on" reset is the mirror image of the "demo off"
+  // reset: the user is in the middle of testing some non-demo
+  // API, has imported a spec and started a run, and then
+  // decides to switch to the demo. Whatever is on screen at
+  // that moment belongs to the previous target and must go:
+  // the imported spec, the load profile, the in-flight test.
+  // Without this, a user who flips the demo on while a
+  // non-demo run is still RUNNING would end up with the demo
+  // spec in the textarea AND a live k6 process hitting the
+  // *previous* backend — two contradictory signals that the
+  // user has to clean up by hand.
+  //
+  // We start with the demo off so the helper can import a
+  // non-demo spec and run a smoke test against it.
+
+  // Reset the demo flag for this test only — the global
+  // setup turns it on for every other test in the suite.
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem('__demoOffStorageSet')) {
+      localStorage.setItem('lasttest.demo.enabled', 'false')
+      sessionStorage.setItem('__demoOffStorageSet', '1')
+    }
+  })
+  await page.goto('/')
+
+  // Pre-condition: demo is off, toolbar has no Demo-API link.
+  await expect(page.getByRole('link', { name: 'Demo-API' })).toHaveCount(0)
+
+  // Import a non-demo spec and start a long-running test. The
+  // test's k6 process is hitting the in-process demo (which
+  // is currently off) — that's fine, the request will just
+  // 404, but the run is still RUNNING on the backend and the
+  // dashboard has populated state.
+  await importDemo(page)
+  await page.getByLabel('Endpunkt GET /products auswählen').check()
+  await page.getByLabel('Virtual Users').fill('2')
+  await page.getByLabel('Dauer (Sekunden)').fill('30')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  // Pin the wait on the running badge so we know the k6
+  // process is alive on the backend before we enable the
+  // demo. A regression that misses the running state here
+  // would not actually test the cancel behaviour.
+  await expect(page.getByRole('tab', { name: /RUNNING/ }).first()).toBeVisible({ timeout: 10_000 })
+  const runId = await runIdFromBadge(page)
+
+  try {
+    // Enable the demo via the Settings drawer.
+    await page.getByRole('button', { name: 'Einstellungen' }).click()
+    await page.locator('[data-testid="settings-demo-api-switch"]').check()
+    await page.keyboard.press('Escape')
+
+    // The dashboard must be empty. The RUNNING badge should
+    // be gone (cancelled + wiped) and the operations card
+    // (Step 2) should be hidden because the import state
+    // was reset. The textarea should now hold the bundled
+    // demo spec (the auto-load on enable contract).
+    await expect(page.locator('.run-badge')).toHaveCount(0, { timeout: 5_000 })
+    await expect(page.locator('.specification-textarea')).toContainText('Lasttest Demo API', { timeout: 5_000 })
+    await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toHaveCount(0)
+
+    // The cancel request must have reached the backend: the
+    // run is either STOPPING, STOPPED or ABORTED now.
+    const api = await playwrightRequest.newContext({ baseURL: 'http://localhost:8286' })
+    let status = ''
+    try {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const response = await api.get(`/api/test-runs/${runId}`)
+        if (response.ok()) {
+          const body = await response.json() as { status: string }
+          status = body.status
+          if (status === 'STOPPING' || status === 'STOPPED' || status === 'ABORTED') break
+        }
+        await page.waitForTimeout(500)
+      }
+    } finally {
+      await api.dispose()
+    }
+    expect(['STOPPING', 'STOPPED', 'ABORTED']).toContain(status)
+
+    // The toolbar now shows the Demo-API link (with the
+    // "active" pill), confirming the toggle actually reached
+    // the backend. A partial reset that only wiped the
+    // in-memory state but forgot the toggle itself would
+    // leave the user staring at a demo spec in the textarea
+    // while the controller was still 404-ing.
+    await expect(page.getByRole('link', { name: 'Demo-API' })).toBeVisible()
+    await expect(page.locator('.top-toolbar-demo-active')).toBeVisible()
+
+    // The demo API itself is reachable now.
+    const demoResponse = await page.request.get('http://localhost:8286/demo-api/products')
+    expect(demoResponse.status()).toBe(200)
+  } finally {
+    // Belt-and-braces: force-abort the run so the executor
+    // pool frees up for the next test in the suite.
+    await forceAbortRun(runId)
+  }
+})

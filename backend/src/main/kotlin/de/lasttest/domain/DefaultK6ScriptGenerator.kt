@@ -490,6 +490,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                     basicUsername = payload.basicAuthUsername,
                     basicPassword = payload.basicAuthPassword,
                     oauth2Token = payload.oauth2Token,
+                    oidcIdToken = payload.oidcIdToken,
                 ),
             )
         if (authValue != null) {

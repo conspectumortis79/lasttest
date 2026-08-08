@@ -1,5 +1,5 @@
 import { translate, type SupportedLanguage } from './i18n.ts'
-import { findDemoCredentials, type DemoApiKey, type DemoBasicAuth, type DemoBearerToken, type DemoOAuth2 } from './demoCredentials.ts'
+import { findDemoCredentials, type DemoApiKey, type DemoBasicAuth, type DemoBearerToken, type DemoOAuth2, type DemoOpenIdConnect } from './demoCredentials.ts'
 
 /**
  * Yellow callout banner that surfaces hardcoded demo credentials
@@ -45,9 +45,17 @@ type Props = {
    * a dedicated input for clarity in the banner.
    */
   readonly onApplyOAuth2: (token: string) => void
+  /**
+   * Populates the OpenID Connect ID token field of the primary
+   * payload. Same wire format as OAuth 2.0 / Bearer
+   * (`Authorization: Bearer <id_token>` per RFC 6750); the
+   * field is split out so the banner can show the discovery URL
+   * and scopes alongside the token.
+   */
+  readonly onApplyOidc: (idToken: string) => void
 }
 
-export function DemoCredentialsBanner({ operationId, language, onApplyBasic, onApplyBearer, onApplyApiKey, onApplyOAuth2 }: Props) {
+export function DemoCredentialsBanner({ operationId, language, onApplyBasic, onApplyBearer, onApplyApiKey, onApplyOAuth2, onApplyOidc }: Props) {
   const entry = findDemoCredentials(operationId)
   if (!entry) return null
 
@@ -60,7 +68,10 @@ export function DemoCredentialsBanner({ operationId, language, onApplyBasic, onA
   if (entry.kind === 'apiKey') {
     return <ApiKeyBanner entry={entry} language={language} onApply={onApplyApiKey} />
   }
-  return <OAuth2Banner entry={entry} language={language} onApply={onApplyOAuth2} />
+  if (entry.kind === 'oauth2') {
+    return <OAuth2Banner entry={entry} language={language} onApply={onApplyOAuth2} />
+  }
+  return <OidcBanner entry={entry} language={language} onApply={onApplyOidc} />
 }
 
 function BasicAuthBanner({
@@ -186,6 +197,40 @@ function OAuth2Banner({
         aria-label={translate(language, 'demo.banner.oauth2.apply')}
       >
         📋 {translate(language, 'demo.banner.oauth2.apply')}
+      </button>
+    </div>
+  )
+}
+
+function OidcBanner({
+  entry,
+  language,
+  onApply,
+}: {
+  entry: DemoOpenIdConnect
+  language: SupportedLanguage
+  onApply: (idToken: string) => void
+}) {
+  return (
+    <div className="demo-banner" role="note" aria-label={translate(language, 'demo.banner.aria')}>
+      <span className="demo-banner-icon" aria-hidden="true">🆔</span>
+      <div className="demo-banner-text">
+        <span className="demo-banner-label">{translate(language, 'demo.banner.oidc.label')}</span>
+        <span className="demo-banner-creds">
+          <span className="demo-banner-token">{translate(language, 'demo.banner.oidc.discovery')}: <strong>{entry.discoveryUrl}</strong></span>
+          <span className="demo-banner-sep" aria-hidden="true">·</span>
+          <span className="demo-banner-token">{translate(language, 'demo.banner.oidc.scopes')}: <strong>{entry.scopes.join(', ')}</strong></span>
+          <span className="demo-banner-sep" aria-hidden="true">·</span>
+          <span className="demo-banner-token">{translate(language, 'demo.banner.oidc.idToken')}: <strong>{entry.idToken}</strong></span>
+        </span>
+      </div>
+      <button
+        type="button"
+        className="demo-banner-apply"
+        onClick={() => onApply(entry.idToken)}
+        aria-label={translate(language, 'demo.banner.oidc.apply')}
+      >
+        📋 {translate(language, 'demo.banner.oidc.apply')}
       </button>
     </div>
   )

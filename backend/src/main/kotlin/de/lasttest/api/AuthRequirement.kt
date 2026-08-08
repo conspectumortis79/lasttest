@@ -106,11 +106,43 @@ sealed interface AuthRequirement {
     )
 
     /**
-     * Anything the importer does not yet know how to handle (openIdConnect,
-     * query apiKey, cookie apiKey, …). The UI hides the credential
-     * input for these, and the generator skips them. Surfaced as a
-     * first-class value so the report can show *which* schemes were
-     * detected even when no credentials can be configured.
+     * OpenID Connect (OIDC) — an identity layer on top of OAuth 2.0
+     * (the [OAuth2] case above). The spec declares these schemes
+     * with `type: openIdConnect` and a single
+     * `openIdConnectUrl: <discovery-URL>` field; the URL points to
+     * the OP's discovery document (the well-known
+     * `.well-known/openid-configuration` endpoint) where clients can
+     * learn the token endpoint, JWKS URI, supported scopes and the
+     * rest of the metadata.
+     *
+     * The wire format for the access token is identical to
+     * [Bearer] and [OAuth2] (`Authorization: Bearer <token>` per
+     * RFC 6750). The subtype is split out because OIDC carries
+     * additional metadata (the discovery URL and a typical set of
+     * scopes — `openid`, `profile`, `email`, …) that the banner
+     * surfaces so the user knows whether the token they hold came
+     * from an OIDC provider or a plain OAuth 2.0 authorization
+     * server. From the k6 generator's point of view an OIDC
+     * requirement emits the same `Authorization: Bearer <token>`
+     * header as the other two.
+     */
+    data class OpenIdConnect(
+        val schemeName: String,
+        val openIdConnectUrl: String,
+        val scopes: List<String> = emptyList(),
+    ) : AuthRequirement {
+        @get:JsonProperty("kind")
+        override val kind: String = "openIdConnect"
+    }
+
+    /**
+     * Anything the importer does not yet know how to handle (query
+     * apiKey, cookie apiKey, mutual TLS, …). The UI hides the
+     * credential input for these, and the generator skips them.
+     * Surfaced as a first-class value so the report can show *which*
+     * schemes were detected even when no credentials can be
+     * configured. OIDC is no longer in this set — it has its own
+     * [OpenIdConnect] subtype above.
      */
     data class Unsupported(
         val schemeName: String,

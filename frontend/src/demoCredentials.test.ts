@@ -56,9 +56,13 @@ test('every demo credential has a non-empty secret', () => {
     } else if (entry.kind === 'apiKey') {
       equal(entry.key.length > 0, true, `apiKey entry has empty key: ${JSON.stringify(entry)}`)
       equal(entry.headerName.length > 0, true, `apiKey entry has empty headerName: ${JSON.stringify(entry)}`)
-    } else {
+    } else if (entry.kind === 'oauth2') {
       equal(entry.token.length > 0, true, `oauth2 entry has empty token: ${JSON.stringify(entry)}`)
       equal(entry.flowType.length > 0, true, `oauth2 entry has empty flowType: ${JSON.stringify(entry)}`)
+    } else {
+      // openIdConnect
+      equal(entry.idToken.length > 0, true, `oidc entry has empty idToken: ${JSON.stringify(entry)}`)
+      equal(entry.discoveryUrl.length > 0, true, `oidc entry has empty discoveryUrl: ${JSON.stringify(entry)}`)
     }
   }
 })

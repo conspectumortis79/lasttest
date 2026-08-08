@@ -155,4 +155,79 @@ class AuthSchemeClassifierTest {
         assertTrue(requirement is AuthRequirement.OAuth2)
         assertEquals(emptyList(), requirement.flows)
     }
+
+    @Test
+    fun `openIdConnect scheme is classified as OpenIdConnect with its discovery URL`() {
+        // OpenID Connect is declared as
+        // `type: openIdConnect, openIdConnectUrl: <discovery URL>`.
+        // The classifier must surface the URL on the resulting
+        // requirement so the banner can show "this is an OIDC
+        // endpoint" alongside the discovery URL.
+        val scheme =
+            SecurityScheme().apply {
+                type = SecurityScheme.Type.OPENIDCONNECT
+                openIdConnectUrl = "https://example.test/.well-known/openid-configuration"
+            }
+        val requirement = AuthSchemeClassifier.classify("oidcAuth", scheme)
+        assertTrue(requirement is AuthRequirement.OpenIdConnect)
+        val oidc: AuthRequirement.OpenIdConnect = requirement
+        assertEquals("oidcAuth", oidc.schemeName)
+        assertEquals("https://example.test/.well-known/openid-configuration", oidc.openIdConnectUrl)
+        assertEquals(emptyList(), oidc.scopes)
+    }
+
+    @Test
+    fun `openIdConnect scheme surfaces scopes declared on the authorizationCode flow`() {
+        // OIDC scopes are declared on the `authorizationCode` flow
+        // (the only one Swagger v3 models for an `openIdConnect`
+        // security scheme). The classifier pulls them out so the
+        // banner can render them next to the discovery URL.
+        val scheme =
+            SecurityScheme().apply {
+                type = SecurityScheme.Type.OPENIDCONNECT
+                openIdConnectUrl = "https://example.test/.well-known/openid-configuration"
+                flows =
+                    io.swagger.v3.oas.models.security.OAuthFlows().apply {
+                        authorizationCode =
+                            io.swagger.v3.oas.models.security.OAuthFlow().apply {
+                                authorizationUrl = "https://example.test/oauth/authorize"
+                                tokenUrl = "https://example.test/oauth/token"
+                                scopes =
+                                    io.swagger.v3.oas.models.security
+                                        .Scopes()
+                            }
+                    }
+            }
+        val oidcScopes = scheme.flows.authorizationCode.scopes
+        oidcScopes["openid"] = "Sign in"
+        oidcScopes["profile"] = "Read profile"
+        oidcScopes["email"] = "Read email"
+
+        val requirement = AuthSchemeClassifier.classify("oidcAuth", scheme)
+        assertTrue(requirement is AuthRequirement.OpenIdConnect)
+        val oidc: AuthRequirement.OpenIdConnect = requirement
+        assertEquals(
+            listOf("openid", "profile", "email"),
+            oidc.scopes,
+        )
+    }
+
+    @Test
+    fun `openIdConnect scheme with a blank discovery URL still classifies as OpenIdConnect`() {
+        // A spec might leave `openIdConnectUrl` empty (or omit it
+        // entirely) — the classifier must still produce an
+        // OpenIdConnect requirement so the UI can render the ID
+        // token input, just with an empty discovery URL. The user
+        // can then type whatever URL they used to obtain the
+        // token.
+        val scheme =
+            SecurityScheme().apply {
+                type = SecurityScheme.Type.OPENIDCONNECT
+            }
+        val requirement = AuthSchemeClassifier.classify("oidcAuth", scheme)
+        assertTrue(requirement is AuthRequirement.OpenIdConnect)
+        val oidc: AuthRequirement.OpenIdConnect = requirement
+        assertEquals("", oidc.openIdConnectUrl)
+        assertEquals(emptyList(), oidc.scopes)
+    }
 }

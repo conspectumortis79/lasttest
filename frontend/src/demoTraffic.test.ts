@@ -121,13 +121,36 @@ test('fetchDemoTraffic returns the empty envelope when fetch itself throws', asy
 })
 
 test('formatTrafficTimestamp renders milliseconds with the expected precision', () => {
-  // Pinned to UTC so the test is locale-independent.
-  const formatted = formatTrafficTimestamp('2026-01-01T12:34:56.789Z')
-  equal(formatted, '12:34:56.789')
+  // The dashboard shows the time in the user's local zone, so the
+  // expected string is the same UTC instant rendered in *whatever
+  // zone the test runner happens to be in*. We compute the
+  // expected local HH:MM:SS via `toLocaleTimeString` with the
+  // same options the production code uses — that keeps the test
+  // runnable on every developer machine and on CI without a
+  // TZ environment override.
+  const date = new Date('2026-01-01T12:34:56.789Z')
+  const expectedTime = date.toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  equal(formatTrafficTimestamp('2026-01-01T12:34:56.789Z'), `${expectedTime}.789`)
 })
 
 test('formatTrafficTimestamp pads single-digit fields to keep columns aligned', () => {
-  equal(formatTrafficTimestamp('2026-01-01T01:02:03.004Z'), '01:02:03.004')
+  // Local-time equivalent of the previous UTC-pinned assertion:
+  // whatever the host zone, the millisecond suffix is the same
+  // (`.mmm` is timezone-independent) and the HH:MM:SS part is
+  // padded to two digits by the `2-digit` option above.
+  const date = new Date('2026-01-01T01:02:03.004Z')
+  const expectedTime = date.toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  equal(formatTrafficTimestamp('2026-01-01T01:02:03.004Z'), `${expectedTime}.004`)
 })
 
 test('formatTrafficTimestamp returns the input verbatim when the timestamp is unparseable', () => {

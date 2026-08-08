@@ -264,4 +264,75 @@ class AuthHeaderEncoderTest {
             )
         assertEquals("Bearer real-token", header)
     }
+
+    @Test
+    fun `openIdConnect id token uses the same Bearer wire format as plain Bearer and OAuth2`() {
+        // OIDC ID tokens ride the same `Authorization: Bearer <token>`
+        // header (RFC 6750). The encoder must produce the same
+        // output for all three so the k6 script is identical
+        // regardless of how the spec declared the scheme.
+        val oidcValue =
+            AuthHeaderEncoder.encode(
+                listOf(
+                    AuthRequirement.OpenIdConnect(
+                        schemeName = "oidcAuth",
+                        openIdConnectUrl = "https://example.test/.well-known/openid-configuration",
+                    ),
+                ),
+                AuthHeaderEncoder.AuthCredentials(oidcIdToken = "demo-oidc-id-token-12345"),
+            )
+        assertEquals("Bearer demo-oidc-id-token-12345", oidcValue)
+
+        val plainBearer =
+            AuthHeaderEncoder.encode(
+                listOf(AuthRequirement.Bearer("bearer")),
+                AuthHeaderEncoder.AuthCredentials(bearerToken = "demo-oidc-id-token-12345"),
+            )
+        assertEquals(oidcValue, plainBearer)
+
+        val oauth2 =
+            AuthHeaderEncoder.encode(
+                listOf(AuthRequirement.OAuth2("oauth2")),
+                AuthHeaderEncoder.AuthCredentials(oauth2Token = "demo-oidc-id-token-12345"),
+            )
+        assertEquals(oidcValue, oauth2)
+    }
+
+    @Test
+    fun `blank openIdConnect id token produces no contribution`() {
+        val header =
+            AuthHeaderEncoder.encode(
+                listOf(
+                    AuthRequirement.OpenIdConnect(
+                        schemeName = "oidcAuth",
+                        openIdConnectUrl = "https://example.test/.well-known/openid-configuration",
+                    ),
+                ),
+                AuthHeaderEncoder.AuthCredentials(oidcIdToken = "   "),
+            )
+        assertNull(header)
+    }
+
+    @Test
+    fun `openIdConnect id token does not bleed into the Bearer or OAuth2 fields`() {
+        // If the user fills only the OIDC input, the Bearer /
+        // OAuth2 credentials (if any) must NOT be sent. The
+        // encoder reads the right slot per requirement type so
+        // the wire form matches the user's intent.
+        val header =
+            AuthHeaderEncoder.encode(
+                listOf(
+                    AuthRequirement.OpenIdConnect(
+                        schemeName = "oidcAuth",
+                        openIdConnectUrl = "https://example.test/.well-known/openid-configuration",
+                    ),
+                ),
+                AuthHeaderEncoder.AuthCredentials(
+                    bearerToken = "should-be-ignored",
+                    oauth2Token = "should-also-be-ignored",
+                    oidcIdToken = "real-id-token",
+                ),
+            )
+        assertEquals("Bearer real-id-token", header)
+    }
 }

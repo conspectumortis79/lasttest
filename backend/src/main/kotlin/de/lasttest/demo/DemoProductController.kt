@@ -162,6 +162,36 @@ class DemoProductController(
         )
     }
 
+    @GetMapping("/my-profile")
+    fun myProfile(
+        @RequestHeader(name = "Authorization", required = false) authorization: String?,
+    ): ResponseEntity<Map<String, Any>> {
+        notFoundIfDisabled()?.let { return it.cast() }
+        // OpenID Connect demo. Same wire format as OAuth 2.0 and
+        // Bearer (RFC 6750) — the k6 script sends
+        // `Authorization: Bearer <id_token>` and the controller
+        // validates the opaque token here. The pinned token is
+        // different from the OAuth 2.0 demo so a smoke test can
+        // tell the two endpoints apart on the wire. A real OIDC
+        // resource server would verify the ID token's signature
+        // against the OP's JWKS endpoint, check the `iss` / `aud`
+        // / `exp` claims, and call the userinfo endpoint; the
+        // demo keeps the loop closed so a typo is immediately
+        // visible in the k6 report.
+        if (!hasOidcIdToken(authorization)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        }
+        return ResponseEntity.ok(
+            mapOf(
+                "userId" to "demo-oidc-user",
+                "scopes" to listOf("openid", "profile", "email"),
+                "clientId" to "lasttest-demo-oidc-client",
+                "discoveryUrl" to "http://localhost:8286/demo-api/.well-known/openid-configuration",
+                "issuedAt" to Instant.now().toString(),
+            ),
+        )
+    }
+
     @GetMapping("/{id}")
     fun get(
         @PathVariable id: Long,
@@ -312,6 +342,24 @@ class DemoProductController(
         return token == DEMO_OAUTH2_TOKEN
     }
 
+    /**
+     * Validates the `Authorization` header as an OpenID Connect
+     * ID token (RFC 6750). Same wire format as Bearer and OAuth 2.0;
+     * pinned to a different demo token so the smoke test can tell
+     * the OIDC endpoint apart from the OAuth 2.0 one. The pinned
+     * value matches the `DemoOpenIdConnect` entry in
+     * `frontend/src/demoCredentials.ts` and the
+     * `description` field on `/products/my-profile` in the demo
+     * spec.
+     */
+    private fun hasOidcIdToken(authorization: String?): Boolean {
+        if (authorization == null) return false
+        if (!authorization.startsWith(BEARER_PREFIX, ignoreCase = true)) return false
+        val token = authorization.substring(BEARER_PREFIX.length).trim()
+        if (token.isEmpty()) return false
+        return token == DEMO_OIDC_ID_TOKEN
+    }
+
     private companion object {
         const val BEARER_PREFIX = "Bearer "
         const val BASIC_PREFIX = "Basic "
@@ -327,6 +375,7 @@ class DemoProductController(
         const val DEMO_BASIC_PASSWORD = "s3cret"
         const val DEMO_API_KEY = "demo-api-key-12345"
         const val DEMO_OAUTH2_TOKEN = "demo-oauth2-token-12345"
+        const val DEMO_OIDC_ID_TOKEN = "demo-oidc-id-token-12345"
 
         val SEED_PRODUCTS: List<Product> =
             listOf(
