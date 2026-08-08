@@ -544,14 +544,47 @@ class LocalK6TestRunServiceCoverageTest {
         // around Thread.sleep. Interrupting the executor thread
         // between polls must surface the InterruptedException, set
         // the interrupt flag and return — never escalate to
-        // destroyForcibly. We capture the result by checking that
-        // the stub process is still alive after the interrupt.
-        val captureThread = arrayOf<Thread?>(null)
+        // destroyForcibly.
+        //
+        // Determinism note: the previous version polled
+        // `Thread.state` for up to 2 s looking for
+        // `TIMED_WAITING` and then interrupted. On a loaded CI
+        // runner the thread can enter and leave a 50 ms sleep
+        // faster than the test's 20 ms polling cadence, so the
+        // interrupt was occasionally delivered after the loop had
+        // already exited naturally and the InterruptedException
+        // catch block was never entered — dropping JaCoCo branch
+        // coverage. We now synchronise on a CountDownLatch that
+        // the executor signals as soon as the worker thread is
+        // running, then wait a few hundred ms so the thread is
+        // very likely already inside (or about to enter) its
+        // first `Thread.sleep(50)`. The interrupt then reliably
+        // surfaces the catch block.
+        val threadStarted = java.util.concurrent.CountDownLatch(1)
+        val escalationThread = java.util.concurrent.atomic.AtomicReference<Thread?>(null)
+        val escalationFinished = java.util.concurrent.CountDownLatch(1)
+        val escalationExitReason = java.util.concurrent.atomic.AtomicReference<String?>(null)
         val capturingExecutor =
             Executor { task ->
-                val t = Thread(task, "escalation-capture")
-                captureThread[0] = t
+                val t = Thread({
+                    try {
+                        task.run()
+                        escalationExitReason.set("completed")
+                    } catch (t2: Throwable) {
+                        escalationExitReason.set("threw: ${t2.javaClass.simpleName}: ${t2.message}")
+                        throw t2
+                    } finally {
+                        println(
+                            "[DEBUG] escalation lambda finished: " +
+                                "exitReason=${escalationExitReason.get()}, " +
+                                "thread.interrupted=${Thread.currentThread().isInterrupted}",
+                        )
+                        escalationFinished.countDown()
+                    }
+                }, "escalation-capture")
+                escalationThread.set(t)
                 t.start()
+                threadStarted.countDown()
             }
         val svc = service(executor = capturingExecutor)
         val run =
@@ -568,32 +601,94 @@ class LocalK6TestRunServiceCoverageTest {
         @Suppress("UNCHECKED_CAST")
         val runsMap = runsField.get(svc) as ConcurrentHashMap<String, TestRun>
         runsMap[run.id] = run.copy(status = TestRunStatus.RUNNING, startedAt = "2026-01-01T00:00:01Z")
-        // Stub that lives long enough for the escalation lambda to
-        // enter the while loop and start sleeping.
-        val stub = ProcessBuilder("sleep", "10").start()
+        // Stub that survives the SIGTERM that cancel() sends via
+        // process.destroy(). A plain `sleep 10` would die on
+        // SIGTERM, the escalation lambda would observe
+        // `!process.isAlive` on its first poll, and return
+        // without ever entering the Thread.sleep(50) block — the
+        // InterruptedException catch block would never be hit.
+        //
+        // The shell-trap pattern (`trap '' TERM; sleep 60`) is
+        // not enough on macOS: `Process.destroy()` resolves to a
+        // `killpg`-style signal that takes down the child sleep
+        // process even though the parent shell ignores the
+        // signal. We therefore use a tiny Python helper that
+        // installs a SIGTERM handler that explicitly ignores the
+        // signal and then sleeps in a loop. Python re-raises the
+        // signal handler on every iteration, so a stray SIGTERM
+        // cannot terminate the process. The script is bundled
+        // here as a here-document so the test has no external
+        // file dependency.
+        val stub =
+            ProcessBuilder(
+                "/usr/bin/env",
+                "python3",
+                "-c",
+                """
+                import signal, time
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                # Signal that the handler is installed and the
+                # process is now safe to SIGTERM.
+                print("READY", flush=True)
+                while True:
+                    time.sleep(60)
+                """.trimIndent(),
+            ).start()
         svc.processes[run.id] = stub
+        // Wait until the Python script has installed its SIGTERM
+        // handler. Without this barrier `cancel()` can race the
+        // handler installation: `Process.destroy()` delivers
+        // SIGTERM before the Python process has had a chance to
+        // call `signal.signal(SIGTERM, SIG_IGN)`, and the default
+        // action kills the process before the escalation lambda
+        // ever observes it. The script prints "READY" on its
+        // stdout once the handler is in place; we block here on
+        // the first byte of that line.
+        val readyMarker = ByteArray(5)
+        var readyRead = 0
+        while (readyRead < readyMarker.size) {
+            val n = stub.inputStream.read(readyMarker, readyRead, readyMarker.size - readyRead)
+            if (n < 0) break
+            readyRead += n
+        }
+        assertEquals(
+            "READY",
+            String(readyMarker, 0, readyRead),
+            "Python SIGTERM-ignoring stub did not announce readiness before being signalled",
+        )
         try {
             assertTrue(svc.cancel(run.id, force = false))
-            // Wait until the escalation lambda has actually entered
-            // the sleep so the interrupt is not lost.
-            val t = assertNotNull(captureThread[0])
-            val deadline = System.currentTimeMillis() + 2_000
-            while (t.state != Thread.State.TIMED_WAITING && System.currentTimeMillis() < deadline) {
-                Thread.sleep(20)
-            }
+            // Block until the escalation thread has actually been
+            // started. cancel() returns before execute() runs, so
+            // without this latch the interrupt below can race the
+            // Thread.sleep(50) and be lost.
+            assertTrue(
+                threadStarted.await(2, java.util.concurrent.TimeUnit.SECONDS),
+                "escalation thread did not start within 2 s",
+            )
+            // Give the thread a comfortable window to enter
+            // Thread.sleep(50). 200 ms is ~4× the sleep length, so
+            // the thread is virtually certain to be parked when
+            // the interrupt fires — and well within the
+            // GRACEFUL_STOP_GRACE_MS so the loop is still alive.
+            Thread.sleep(200)
+            // Debug: surface process and thread state before we try
+            // to interrupt, so a regression is easy to diagnose.
+            val t = assertNotNull(escalationThread.get(), "escalation thread reference must be captured by the executor")
+            println(
+                "[DEBUG] before interrupt: stub.alive=${stub.isAlive}, " +
+                    "thread.state=${t.state}, thread.alive=${t.isAlive}, thread.interrupted=${t.isInterrupted}",
+            )
             t.interrupt()
             t.join(2_000)
+            println(
+                "[DEBUG] after join: thread.state=${t.state}, thread.alive=${t.isAlive}, thread.interrupted=${t.isInterrupted}, stub.alive=${stub.isAlive}, exitReason=${escalationExitReason.get()}",
+            )
+            assertFalse(t.isAlive, "escalation thread did not finish within 2 s after interrupt")
             // The interrupt flag is set again by the catch block —
             // verify the lambda propagated the interrupt rather than
             // swallowing it.
             assertTrue(t.isInterrupted, "catch block must re-set the interrupt flag")
-            // The process was NOT force-killed: the lambda returned
-            // via the early-exit branch and the finally block sees
-            // the process still alive but only as a side effect of
-            // the catch (the finally runs and the if check sees
-            // the process still alive). The crucial assertion is
-            // that the lambda exited in a bounded time, not that
-            // the process is dead.
         } finally {
             if (stub.isAlive) stub.destroyForcibly()
             svc.processes.remove(run.id)

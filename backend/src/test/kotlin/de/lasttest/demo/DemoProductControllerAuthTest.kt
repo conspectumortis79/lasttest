@@ -36,6 +36,8 @@ class DemoProductControllerAuthTest {
 
     private fun hasBearerToken(authorization: String?): Boolean = invoke("hasBearerToken", authorization) as Boolean
 
+    private fun hasOidcIdToken(authorization: String?): Boolean = invoke("hasOidcIdToken", authorization) as Boolean
+
     private fun invoke(
         name: String,
         arg: String?,
@@ -164,5 +166,48 @@ class DemoProductControllerAuthTest {
     @Test
     fun `hasBearerToken accepts the exact demo token`() {
         assertTrue(hasBearerToken("Bearer demo-bearer-token"))
+    }
+
+    // ----- hasOidcIdToken -----
+    //
+    // The HTTP-level test in DemoProductControllerTest covers the
+    // happy path and the obvious 401 cases, but the JaCoCo branch
+    // counter on `if (token.isEmpty()) return false` is precise
+    // enough that the inner length check + the outer
+    // `!isEmpty` fall-through remain uncovered unless we hit the
+    // helper directly with a payload that only the in-process
+    // call can see. Same approach as hasOAuth2Token above.
+
+    @Test
+    fun `hasOidcIdToken rejects a null header`() {
+        assertFalse(hasOidcIdToken(null))
+    }
+
+    @Test
+    fun `hasOidcIdToken rejects a header with the wrong scheme`() {
+        // "Basic …" never starts with "Bearer " — exercises the
+        // false branch of `startsWith(BEARER_PREFIX, true)`.
+        assertFalse(hasOidcIdToken("Basic token"))
+    }
+
+    @Test
+    fun `hasOidcIdToken rejects an empty token`() {
+        // "Bearer " has the prefix but `substring(7).trim()` is
+        // empty — exercises the `token.isEmpty()` true branch.
+        assertFalse(hasOidcIdToken("Bearer "))
+        assertFalse(hasOidcIdToken("Bearer  "))
+    }
+
+    @Test
+    fun `hasOidcIdToken rejects a non-empty but wrong token`() {
+        // Bearer prefix matches, token is not empty, but it is
+        // not the demo OIDC token — exercises the equality
+        // check's false branch.
+        assertFalse(hasOidcIdToken("Bearer some-other-token"))
+    }
+
+    @Test
+    fun `hasOidcIdToken accepts the exact demo token`() {
+        assertTrue(hasOidcIdToken("Bearer demo-oidc-id-token-12345"))
     }
 }

@@ -82,6 +82,7 @@ class DemoProductControllerDisabledTest(
             "/products/admin/stats",
             "/products/lookup-by-id?id=1",
             "/products/me",
+            "/products/my-profile",
         )) {
             val response =
                 client.exchange(
