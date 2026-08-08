@@ -272,3 +272,322 @@ test('duration and relativeWhen agree on zero elapsed for un-started runs', () =
     ['—', relativeWhenFor(run, Date.now(), 'en')],
   )
 })
+
+test('metaLineFor adds the "stopping" suffix for STOPPING runs', () => {
+  // STOPPING is the transient state between "user asked to stop"
+  // and "k6 wound down". The meta line should make the in-between
+  // visible so the row does not look identical to a completed
+  // run.
+  const base = configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 60 })
+  equal(metaLineFor(runWith({ status: 'STOPPING', configuration: base }), 'en'), '10 VUs · 1 min · stopping')
+})
+
+test('metaLineFor renders hours-only durations for runs over an hour', () => {
+  // 7200 s = exactly 2 h with no leftover minutes. The compact
+  // formatter must collapse to the "X h" form so the row does
+  // not read "2 h 0 min" (which would be a visual lie — the
+  // run is exactly 2 hours long).
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 7200 }),
+  })
+  equal(metaLineFor(run, 'en'), '10 VUs · 2 h')
+})
+
+test('metaLineFor renders hours + minutes for runs that span both', () => {
+  // 7320 s = 2 h 2 min. The compact formatter must combine
+  // both buckets so the user sees the full length at a glance
+  // instead of either rounding to "2 h" or splitting into two
+  // separate pieces.
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 7320 }),
+  })
+  equal(metaLineFor(run, 'en'), '10 VUs · 2 h 2 min')
+})
+
+test('metaLineFor omits the duration segment when the profile has neither duration nor stages', () => {
+  // shared-iterations with no explicit durationSeconds and no
+  // stages: the profile is genuinely open-ended. The meta line
+  // should not invent a "0 s" or "—" segment — it just shows
+  // the VUs (and any status suffix).
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: configWith({ type: 'shared-iterations', iterations: 100, virtualUsers: 5 }),
+  })
+  equal(metaLineFor(run, 'en'), '5 VUs')
+})
+
+test('durationFor uses the planned stages total when durationSeconds is missing', () => {
+  // The "elapsed / ~planned" line for ramping-vus runs without
+  // a top-level durationSeconds must fall back to summing the
+  // stage durations. 30 + 60 + 30 = 120 s, so the planned tail
+  // is "~2:00".
+  equal(
+    durationFor(
+      runWith({
+        status: 'RUNNING',
+        startedAt: '2026-01-01T00:00:00Z',
+        configuration: configWith({
+          type: 'ramping-vus',
+          virtualUsers: 50,
+          stages: [
+            { target: 50, durationSeconds: 30 },
+            { target: 100, durationSeconds: 60 },
+            { target: 0, durationSeconds: 30 },
+          ],
+        }),
+      }),
+      65,
+      'en',
+    ),
+    '1:05 / ~2:00',
+  )
+})
+
+test('durationFor suppresses the planned tail when planned is zero', () => {
+  // A degenerate profile (no durationSeconds, no stages)
+  // resolves to planned = undefined, which the formatter must
+  // treat as "no plan to compare against" — not as 0/0.
+  equal(
+    durationFor(
+      runWith({
+        status: 'RUNNING',
+        startedAt: '2026-01-01T00:00:00Z',
+        configuration: configWith({ type: 'shared-iterations', iterations: 100, virtualUsers: 5 }),
+      }),
+      45,
+      'en',
+    ),
+    '0:45',
+  )
+})
+
+test('durationFor shows a dash for STOPPING runs without an elapsed clock', () => {
+  // A STOPPING run that has not yet produced an elapsed tick
+  // should not render "0:00" — the column should look the same
+  // as a QUEUED row (no data yet).
+  equal(
+    durationFor(
+      runWith({
+        status: 'STOPPING',
+        startedAt: '2026-01-01T00:00:00Z',
+        configuration: configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 60 }),
+      }),
+      undefined,
+      'en',
+    ),
+    '—',
+  )
+})
+
+test('relativeWhenFor returns the "running for" label for STOPPING runs', () => {
+  // STOPPING still ticks the wall clock — the run is in flight,
+  // it is just being told to wind down. The "running for" label
+  // is the right affordance until the run reaches a terminal
+  // state.
+  const now = Date.parse('2026-01-01T00:02:41Z')
+  const run = runWith({ status: 'STOPPING', startedAt: '2026-01-01T00:00:00Z' })
+  const label = relativeWhenFor(run, now, 'en')
+  ok(label.includes('2:41'), `expected running-for label to include 2:41, got "${label}"`)
+})
+
+test('relativeWhenFor returns a dash for STOPPING runs with no startedAt', () => {
+  // A STOPPING row without startedAt is an edge case (the run
+  // is "stopping" but we never recorded when it started). The
+  // helper must not crash and must surface the no-data
+  // sentinel, not a NaN.
+  const run = runWith({ status: 'STOPPING' })
+  equal(relativeWhenFor(run, Date.now(), 'en'), '—')
+})
+
+test('relativeWhenFor falls back to "just now" for finished runs with a zero delta', () => {
+  // The clock and finishedAt are equal → the run literally
+  // just finished. The relative stamp must not read "0 min
+  // ago"; it should land in the < 45 s bucket.
+  const now = Date.parse('2026-01-01T12:00:00Z')
+  const run = runWith({
+    status: 'COMPLETED',
+    startedAt: '2026-01-01T12:00:00Z',
+    finishedAt: '2026-01-01T12:00:00Z',
+  })
+  const label = relativeWhenFor(run, now, 'en')
+  ok(label.includes('just now'), `expected "just now" label, got "${label}"`)
+})
+
+test('relativeWhenFor returns a dash for in-flight runs with an unparseable startedAt', () => {
+  // Defensive: a malformed startedAt must not crash the helper
+  // and must not yield NaN. The dash keeps the column width
+  // stable for the user.
+  const run = runWith({ status: 'RUNNING', startedAt: 'not-a-date' })
+  equal(relativeWhenFor(run, Date.now(), 'en'), '—')
+})
+
+test('relativeWhenFor returns a dash for finished runs with an unparseable finishedAt', () => {
+  // A terminal run with a malformed finishedAt is a data
+  // anomaly, but the helper must surface the no-data sentinel
+  // rather than NaN. The user sees a dash, not a crash.
+  const run = runWith({ status: 'COMPLETED', startedAt: '2026-01-01T00:00:00Z', finishedAt: 'not-a-date' })
+  equal(relativeWhenFor(run, Date.now(), 'en'), '—')
+})
+
+test('metaLineFor omits the VUs segment when virtualUsers is missing', () => {
+  // A profile without a virtualUsers field (e.g. arrived-rate
+  // profiles) must not render an empty VUs segment. The meta
+  // line starts with the duration in that case.
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: configWith({ type: 'constant-arrival-rate', rate: 10, durationSeconds: 60 }),
+  })
+  equal(metaLineFor(run, 'en'), '1 min')
+})
+
+test('metaLineFor omits the FAILED suffix when the run has no error message', () => {
+  // A FAILED run without an error field is rare but legal —
+  // the meta line should still show VUs and duration, just
+  // without the "with errors" suffix that depends on a
+  // non-empty error.
+  const run = runWith({
+    status: 'FAILED',
+    configuration: configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 60 }),
+  })
+  equal(metaLineFor(run, 'en'), '10 VUs · 1 min')
+})
+
+test('relativeWhenFor uses the "1 min" bucket for runs that finished around a minute ago', () => {
+  // The 45–89 s bucket is a special case in the delta
+  // formatter: it always reads "1 min" rather than rounding to
+  // 0. Pin it so the bucket does not collapse to "just now"
+  // by accident.
+  const now = Date.parse('2026-01-01T12:01:00Z')
+  const run = runWith({
+    status: 'COMPLETED',
+    startedAt: '2026-01-01T12:00:00Z',
+    finishedAt: '2026-01-01T12:00:00Z',
+  })
+  const label = relativeWhenFor(run, now, 'en')
+  ok(label.includes('1 min'), `expected "1 min" bucket, got "${label}"`)
+})
+
+test('durationFor handles STOPPING with an elapsed clock like RUNNING', () => {
+  // STOPPING is in-flight until the run reaches a terminal
+  // state, so an elapsed clock should produce the same
+  // "<elapsed> / ~<planned>" shape as RUNNING. The condition
+  // chain must not get short-circuited by the "STOPPING with
+  // no elapsed" check above.
+  equal(
+    durationFor(
+      runWith({
+        status: 'STOPPING',
+        startedAt: '2026-01-01T00:00:00Z',
+        configuration: configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 300 }),
+      }),
+      120,
+      'en',
+    ),
+    '2:00 / ~5:00',
+  )
+})
+
+test('durationFor suppresses the planned tail when planned is exactly zero', () => {
+  // A profile with a top-level durationSeconds of 0 is
+  // degenerate but legal (e.g. a smoke test that only sends
+  // a single iteration). The condition `planned <= 0` must
+  // treat it as "no plan" and not render "0:00 / ~0:00".
+  equal(
+    durationFor(
+      runWith({
+        status: 'RUNNING',
+        startedAt: '2026-01-01T00:00:00Z',
+        configuration: configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 0 }),
+      }),
+      30,
+      'en',
+    ),
+    '0:30',
+  )
+})
+
+test('relativeWhenFor returns a dash for in-flight runs with an unparseable finishedAt', () => {
+  // Defensive: an in-flight run with both startedAt and a
+  // malformed finishedAt must not crash and must not surface
+  // NaN. The dash keeps the column stable.
+  const run = runWith({
+    status: 'RUNNING',
+    startedAt: '2026-01-01T00:00:00Z',
+    finishedAt: 'not-a-date',
+  })
+  equal(relativeWhenFor(run, Date.parse('2026-01-01T00:00:30Z'), 'en'), '—')
+})
+
+test('metaLineFor returns a dash for empty profiles with no VUs and no status suffix', () => {
+  // Edge case: a profile with no virtualUsers, no
+  // durationSeconds and no stages, plus a terminal status
+  // that does not match any of the in-flight/FAILED/QUEUED
+  // branches (e.g. STOPPED). The helper must surface the
+  // no-data sentinel instead of joining an empty parts array
+  // into the empty string.
+  const run = runWith({
+    status: 'STOPPED',
+    configuration: configWith({ type: 'shared-iterations', iterations: 1 }),
+  })
+  equal(metaLineFor(run, 'en'), '–')
+})
+
+test('runDisplayName falls back to "–" when the first operation has no method', () => {
+  // Defensive: a malformed operation entry could ship without
+  // a `method` field. The row must not render "undefined" or
+  // throw — the dash keeps the visual contract intact.
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: {
+      apiTitle: 'Demo',
+      apiVersion: '1.0',
+      baseUrl: 'http://x',
+      loadProfile: { type: 'constant-vus', virtualUsers: 10, durationSeconds: 30 } as never,
+      operations: [{ operationId: 'x', method: undefined as never, path: '/x', summary: '', parameterValues: [], bearerTokenConfigured: false, basicAuthConfigured: false, apiKeyConfigured: false, oauth2TokenConfigured: false, payloads: [] }],
+    } as never,
+  })
+  equal(runDisplayName(run), '– /x')
+})
+
+test('metaLineFor handles a profile with a null stages field', () => {
+  // Edge case: a profile that has neither `durationSeconds`
+  // nor a populated `stages` array. The `?? []` fallback in
+  // the stages branch must be exercised so the meta line
+  // collapses to just the VUs segment.
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: {
+      apiTitle: 'Demo',
+      apiVersion: '1.0',
+      baseUrl: 'http://x',
+      loadProfile: { type: 'constant-vus', virtualUsers: 5, durationSeconds: null, stages: null } as never,
+      operations: [],
+    } as never,
+  })
+  equal(metaLineFor(run, 'en'), '5 VUs')
+})
+
+test('durationFor returns a dash for terminal runs with no elapsed time', () => {
+  // Belt-and-braces: a terminal run with no elapsed clock
+  // (e.g. a FAILED run that crashed before producing a
+  // startedAt) must surface the dash sentinel rather than
+  // calling formatMmSs(undefined).
+  equal(durationFor(runWith({ status: 'FAILED' }), undefined, 'en'), '—')
+})
+
+test('durationFor falls back to elapsed only for in-flight runs without a configuration', () => {
+  // Edge case: a RUNNING run without a configuration (the
+  // payload got lost between the wire and the renderer). The
+  // helper must not crash and must not invent a planned
+  // total — it just shows the elapsed clock.
+  equal(
+    durationFor(
+      runWith({ status: 'RUNNING', startedAt: '2026-01-01T00:00:00Z' }),
+      90,
+      'en',
+    ),
+    '1:30',
+  )
+})

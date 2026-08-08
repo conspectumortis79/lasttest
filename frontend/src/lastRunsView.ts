@@ -86,9 +86,12 @@ export function metaLineFor(run: TestRun, lang: SupportedLanguage): string {
   const duration = profile.durationSeconds
   if (duration != null) {
     parts.push(translate(lang, 'lastRuns.meta.duration', { seconds: formatSecondsCompact(duration, lang) }))
-  } else if ((profile.stages ?? []).length > 0) {
-    const total = (profile.stages ?? []).reduce((sum, s) => sum + s.durationSeconds, 0)
-    parts.push(translate(lang, 'lastRuns.meta.duration', { seconds: formatSecondsCompact(total, lang) }))
+  } else {
+    const stages = profile.stages ?? []
+    if (stages.length > 0) {
+      const total = stages.reduce((sum, s) => sum + s.durationSeconds, 0)
+      parts.push(translate(lang, 'lastRuns.meta.duration', { seconds: formatSecondsCompact(total, lang) }))
+    }
   }
   if (run.status === 'RUNNING') {
     parts.push(translate(lang, 'lastRuns.meta.running'))
