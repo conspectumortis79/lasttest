@@ -334,7 +334,7 @@ export function loadProfileLabel(profile: LoadProfile): string {
     case 'constant-vus':
       return `Konstante Last · ${profile.virtualUsers} VUs für ${profile.durationSeconds} s`
     case 'shared-iterations':
-      return `${profile.iterations} parallele Anfragen, so schnell wie möglich`
+      return `Burst-Modus · ${profile.iterations} Iterationen`
     case 'ramping-vus':
       return `Ramping-VUs · ${profile.stages.length} Stages, Spitze ${Math.max(...profile.stages.map(stage => stage.target))} VUs`
     case 'constant-arrival-rate':

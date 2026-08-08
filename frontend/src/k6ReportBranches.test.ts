@@ -59,9 +59,10 @@ test('profileSummary for constant-vus includes virtualUsers and duration', () =>
   ok(summary.includes('60 s'))
 })
 
-test('profileSummary for shared-iterations includes iteration count', () => {
+test('profileSummary for shared-iterations includes burst-mode label and iteration count', () => {
   const summary = profileSummary({ type: 'shared-iterations', virtualUsers: 5, iterations: 200 })
-  ok(summary.includes('200 parallele Anfragen'))
+  ok(summary.includes('Burst-Modus'))
+  ok(summary.includes('200 Iterationen'))
 })
 
 test('profileSummary for ramping-vus includes stage count and peak', () => {

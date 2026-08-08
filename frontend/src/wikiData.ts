@@ -258,9 +258,9 @@ export const WIKI_ENTRIES: ReadonlyArray<WikiEntry> = [
   {
     term: 'shared-iterations',
     termDe: 'Geteilte Iterationen',
-    aliases: ['shared-iterations', 'shared iterations', 'geteilte iterationen', 'n anfragen so schnell wie moeglich'],
+    aliases: ['shared-iterations', 'shared iterations', 'geteilte iterationen', 'n anfragen so schnell wie moeglich', 'burst mode', 'burst modus', 'burst'],
     category: 'executor',
-    title: { en: 'shared-iterations — N Requests as Fast as Possible', de: 'shared-iterations — N Anfragen so schnell wie möglich' },
+    title: { en: 'shared-iterations — Burst Mode (Iterations)', de: 'shared-iterations — Burst-Modus (Iterationen)' },
     body: {
       en: '<code>shared-iterations</code> distributes a fixed total number of iterations across the configured VUs; the run ends as soon as the last response comes back. Use it when you need a reproducible request count between releases (compare p95 of v1.2 vs v1.3 at the same N).',
       de: '<code>shared-iterations</code> verteilt eine feste Gesamtanzahl Iterationen auf die konfigurierten VUs; der Lauf endet, sobald die letzte Antwort zurück ist. Nutze ihn, wenn du eine reproduzierbare Request-Anzahl zwischen Releases brauchst (vergleiche p95 von v1.2 gegen v1.3 bei gleichem N).',

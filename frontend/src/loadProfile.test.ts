@@ -351,7 +351,8 @@ test('serialiseLoadProfile maps the union onto the wire shape', () => {
 
 test('loadProfileLabel produces a human-readable summary per profile type', () => {
   ok(loadProfileLabel(defaultLoadProfile()).includes('Konstante Last'))
-  ok(loadProfileLabel({ type: 'shared-iterations', virtualUsers: 5, iterations: 100 }).includes('100 parallele Anfragen'))
+  ok(loadProfileLabel({ type: 'shared-iterations', virtualUsers: 5, iterations: 100 }).includes('Burst-Modus'))
+  ok(loadProfileLabel({ type: 'shared-iterations', virtualUsers: 5, iterations: 100 }).includes('100 Iterationen'))
   ok(loadProfileLabel(loadPreset()).includes('Ramping-VUs'))
   ok(loadProfileLabel(arrivalRatePreset()).includes('Constant-Arrival-Rate'))
   ok(loadProfileLabel(arrivalRatePreset()).includes('Anfragen/1s'))

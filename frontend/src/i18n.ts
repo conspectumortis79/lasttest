@@ -130,7 +130,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'common.no': 'No',
 
     // Header / Hero
-    'app.tagline': 'Import Swagger / OpenAPI. Configure endpoints. Measure load.',
+    'app.tagline': 'Import Swagger / OpenAPI. Configure endpoints. Configure load profile. Measure load.',
     'app.k6.brand': 'k6',
 
     // Step 1
@@ -207,7 +207,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'profile.editor.legend': 'Load profile fields',
     'profile.editor.type': 'Load profile type',
     'profile.editor.type.constant-vus': 'Constant load (constant-vus)',
-    'profile.editor.type.shared-iterations': 'N requests as fast as possible (shared-iterations)',
+    'profile.editor.type.shared-iterations': 'Burst Mode (Iterations)',
     'profile.editor.type.ramping-vus': 'Ramping VUs (stages)',
     'profile.editor.type.constant-arrival-rate': 'Constant arrival rate (RPS)',
     'profile.virtualUsers': 'Virtual users',
@@ -230,7 +230,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'profile.preset.soak.label': 'Soak',
     'profile.preset.soak.description': '50 VUs for one hour, surfaces leaks',
     'profile.preset.burst.label': 'Burst',
-    'profile.preset.burst.description': '1 000 requests as fast as possible — compare releases with a fixed request count',
+    'profile.preset.burst.description': '1 000 requests in burst mode — compare releases with a fixed request count',
     'profile.preset.arrivalRate.label': 'Arrival-Rate',
     'profile.preset.arrivalRate.description': '50 requests/s independent of response time',
     'profile.stages.title': 'Stages',
@@ -634,7 +634,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'common.no': 'Nein',
 
     // Header / Hero
-    'app.tagline': 'Swagger / OpenAPI importieren. Endpunkte konfigurieren. Last messen.',
+    'app.tagline': 'Swagger / OpenAPI importieren. Endpunkte konfigurieren. Lastprofil konfigurieren. Last messen.',
     'app.k6.brand': 'k6',
 
     // Step 1
@@ -711,7 +711,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'profile.editor.legend': 'Lastprofil-Felder',
     'profile.editor.type': 'Lastprofil-Typ',
     'profile.editor.type.constant-vus': 'Konstante Last (constant-vus)',
-    'profile.editor.type.shared-iterations': 'N Anfragen, so schnell wie möglich (shared-iterations)',
+    'profile.editor.type.shared-iterations': 'Burst Modus (Iterationen)',
     'profile.editor.type.ramping-vus': 'Ramping-VUs (Stages)',
     'profile.editor.type.constant-arrival-rate': 'Constant-Arrival-Rate (RPS)',
     'profile.virtualUsers': 'Virtual Users',
@@ -734,7 +734,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'profile.preset.soak.label': 'Soak',
     'profile.preset.soak.description': '50 VUs über eine Stunde, deckt Leaks auf',
     'profile.preset.burst.label': 'Burst',
-    'profile.preset.burst.description': '1 000 Anfragen so schnell wie möglich — vergleicht Releases mit fester Request-Anzahl',
+    'profile.preset.burst.description': '1 000 Anfragen im Burst-Modus — vergleicht Releases mit fester Request-Anzahl',
     'profile.preset.arrivalRate.label': 'Arrival-Rate',
     'profile.preset.arrivalRate.description': '50 Anfragen/s unabhängig von der Antwortzeit',
     'profile.stages.title': 'Stages',

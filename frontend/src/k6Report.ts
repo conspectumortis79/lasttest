@@ -463,7 +463,7 @@ export function profileSummary(profile: ReportLoadProfile): string {
     case 'constant-vus':
       return `Konstante Last · ${profile.virtualUsers ?? '?'} VUs über ${profile.durationSeconds ?? '?'} s`
     case 'shared-iterations':
-      return `${profile.iterations ?? '?'} parallele Anfragen, so schnell wie möglich`
+      return `Burst-Modus · ${profile.iterations ?? '?'} Iterationen`
     case 'ramping-vus': {
       const stages = profile.stages ?? []
       const peak = stages.reduce((max, stage) => Math.max(max, stage.target), profile.startVUs ?? 0)
