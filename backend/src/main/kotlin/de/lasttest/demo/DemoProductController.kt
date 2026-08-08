@@ -19,7 +19,9 @@ import java.util.concurrent.atomic.AtomicLong
 
 @RestController
 @RequestMapping("/demo-api/products")
-class DemoProductController {
+class DemoProductController(
+    private val toggle: DemoControllerToggle,
+) {
     private val sequence = AtomicLong(SEED_LAST_ID)
     private val products = ConcurrentHashMap<Long, Product>()
 
@@ -27,18 +29,53 @@ class DemoProductController {
         SEED_PRODUCTS.forEach { seed -> products[seed.id] = seed }
     }
 
+    /**
+     * Returns a 404 `ResponseEntity` when the demo is disabled,
+     * `null` when it is enabled. The early-out happens before any
+     * business logic so the handler cost is bounded to a single
+     * volatile read on the cold path. Spring's own dispatcher
+     * still runs — the toggle does not bypass the URL mapping —
+     * so the response shape stays consistent with the enabled
+     * path.
+     *
+     * The wildcard body type matches the call-site pattern
+     * "return whatever `notFoundIfDisabled()` gave us as a
+     * `ResponseEntity<MyBody>`"; the cast helper below makes that
+     * safe because the only thing this method ever returns is a
+     * 404 with no body, which serialises to the same wire format
+     * regardless of the body type the caller declares.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun notFoundIfDisabled(): ResponseEntity<*>? =
+        if (toggle.isEnabled()) {
+            null
+        } else {
+            // `ResponseEntity.notFound().build()` returns
+            // `ResponseEntity<Void>`. We widen it to the call-site
+            // `ResponseEntity<*>` because the caller's return type
+            // varies per handler — the wire response (a 404 with
+            // no body) is identical regardless of the declared
+            // body type, so the cast is safe at runtime.
+            @Suppress("UNCHECKED_CAST")
+            (ResponseEntity.notFound().build<Any>() as ResponseEntity<*>)
+        }
+
     @GetMapping
     fun list(
         @RequestParam(required = false) category: String?,
         @RequestParam(required = false) available: Boolean?,
         @RequestParam(required = false) maxPrice: Double?,
-    ): List<Product> = findProducts(category, available, maxPrice)
+    ): ResponseEntity<List<Product>> {
+        notFoundIfDisabled()?.let { return it.cast() }
+        return ResponseEntity.ok(findProducts(category, available, maxPrice))
+    }
 
     @PostMapping("/search")
     fun search(
         @RequestHeader(name = "Authorization", required = false) authorization: String?,
         @RequestBody request: ProductSearchRequest,
     ): ResponseEntity<List<Product>> {
+        notFoundIfDisabled()?.let { return it.cast() }
         if (!hasBearerToken(authorization)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
         }
@@ -49,6 +86,7 @@ class DemoProductController {
     fun adminStats(
         @RequestHeader(name = "Authorization", required = false) authorization: String?,
     ): ResponseEntity<Map<String, Any>> {
+        notFoundIfDisabled()?.let { return it.cast() }
         if (!hasBasicCredentials(authorization)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
         }
@@ -70,6 +108,7 @@ class DemoProductController {
         @RequestHeader(name = "X-API-Key", required = false) apiKey: String?,
         @RequestParam("id") id: Long,
     ): ResponseEntity<Map<String, Any>> {
+        notFoundIfDisabled()?.let { return it.cast() }
         // Real-world pattern: API key in a custom header (Stripe,
         // GitHub, Twilio, …). The demo backend is strict — every
         // value other than the pinned demo key is rejected with
@@ -96,6 +135,7 @@ class DemoProductController {
     fun me(
         @RequestHeader(name = "Authorization", required = false) authorization: String?,
     ): ResponseEntity<Map<String, Any>> {
+        notFoundIfDisabled()?.let { return it.cast() }
         // OAuth 2.0 demo. The wire format is identical to Bearer
         // (RFC 6750) — the k6 script sends `Authorization: Bearer
         // <token>` and the controller validates the opaque token
@@ -125,12 +165,16 @@ class DemoProductController {
     @GetMapping("/{id}")
     fun get(
         @PathVariable id: Long,
-    ): ResponseEntity<Product> = products[id]?.let(ResponseEntity<Product>::ok) ?: ResponseEntity.notFound().build()
+    ): ResponseEntity<Product> {
+        notFoundIfDisabled()?.let { return it.cast() }
+        return products[id]?.let(ResponseEntity<Product>::ok) ?: ResponseEntity.notFound().build()
+    }
 
     @PostMapping
     fun create(
         @RequestBody request: ProductRequest,
     ): ResponseEntity<Product> {
+        notFoundIfDisabled()?.let { return it.cast() }
         val id = sequence.incrementAndGet()
         val product = request.toProduct(id)
         products[id] = product
@@ -142,6 +186,7 @@ class DemoProductController {
         @PathVariable id: Long,
         @RequestBody request: ProductRequest,
     ): ResponseEntity<Product> {
+        notFoundIfDisabled()?.let { return it.cast() }
         if (!products.containsKey(id)) return ResponseEntity.notFound().build()
         val product = request.toProduct(id)
         products[id] = product
@@ -152,6 +197,7 @@ class DemoProductController {
     fun delete(
         @PathVariable id: Long,
     ): ResponseEntity<Void> {
+        notFoundIfDisabled()?.let { return it.cast() }
         val template = SEED_BY_ID[id]
         if (template != null) {
             products[id] = template
@@ -159,6 +205,19 @@ class DemoProductController {
         }
         return if (products.remove(id) != null) ResponseEntity.noContent().build() else ResponseEntity.notFound().build()
     }
+
+    /**
+     * Narrow helper that turns the wildcard `ResponseEntity<*>?`
+     * from [notFoundIfDisabled] into a typed
+     * [ResponseEntity] for the caller's return type. The cast is
+     * safe because the only `ResponseEntity` we ever return from
+     * [notFoundIfDisabled] is a 404 with no body — the caller
+     * then returns it as `ResponseEntity<Whatever>` and Spring
+     * serialises the body as `null`, which is exactly what the
+     * caller asked for.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun <T : Any> ResponseEntity<*>.cast(): ResponseEntity<T> = this as ResponseEntity<T>
 
     private fun findProducts(
         category: String?,

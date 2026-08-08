@@ -18,6 +18,8 @@ import {
 } from './runNotifications.ts'
 import './App.css'
 import { TestRunReportPage } from './TestRunReport.tsx'
+import { DemoTrafficPage } from './DemoTrafficPage.tsx'
+import { DemoStatusProvider, useDemoStatus } from './useDemoStatus.tsx'
 import {
   buildMetricRow,
   copyTextToClipboard,
@@ -67,7 +69,6 @@ import {
 } from './operationConfiguration.ts'
 import { type FetchedSpecification, validateSpecificationUrl } from './specificationSource.ts'
 import { DemoCredentialsBanner } from './DemoCredentialsBanner.tsx'
-import { fetchWithRetry } from './retryFetch.ts'
 
 type ImportResponse = ImportedSpecification & { message?: string }
 
@@ -157,15 +158,31 @@ function formatMmSs(totalSeconds: number | undefined): string {
 }
 
 function App() {
-  const reportRunId = new URLSearchParams(window.location.search).get('report')
+  const params = new URLSearchParams(window.location.search)
+  const reportRunId = params.get('report')
+  // The demo-traffic page is mounted either with an optional
+  // `?demo-traffic=<runId>` (filtered to a single run) or with
+  // `?demo-traffic` (global stream). The flag-presence check is
+  // the cheap test; the actual filter value is forwarded as-is.
+  const demoTrafficParam = params.has('demo-traffic') ? params.get('demo-traffic') ?? undefined : undefined
   return (
     <LanguageProvider>
-      {reportRunId ? <TestRunReportPage runId={reportRunId} /> : <LoadTestApp />}
+      <DemoStatusProvider>
+        {reportRunId
+          ? <TestRunReportPage runId={reportRunId} />
+          : demoTrafficParam !== undefined
+            ? <DemoTrafficPage runId={demoTrafficParam} />
+            : <LoadTestApp />}
+      </DemoStatusProvider>
     </LanguageProvider>
   )
 }
 
 function LoadTestApp() {
+  // Subscribe to the demo-API status. The hook is the single
+  // source of truth for "is the demo on?", and the auto-load
+  // effect below uses it to keep the textarea in sync.
+  const demoStatus = useDemoStatus()
   // i18n chrome (toolbar + settings drawer). The hook lives here
   // — not in a deeper component — so the toolbar and drawer share
   // the same language state and stay in sync.
@@ -272,31 +289,51 @@ function LoadTestApp() {
   // no place to render a message.
   const [runActionError, setRunActionError] = useState('')
 
+  // The demo toggle is the single source of truth for "is the
+  // demo spec supposed to be loaded?". When the user flips the
+  // switch on in Settings, we (re)load the bundled demo spec so
+  // they can hit Start without any extra click. When the user
+  // flips the switch off, we drop whatever the textarea holds
+  // back to the embedded sample — the spec the user typed or
+  // pasted in is preserved in the sense that the Settings
+  // switch is the only path that resets it, but the textarea
+  // itself no longer claims to point at the demo.
+  //
+  // Both branches are intentionally unconditional: the user's
+  // mental model of "demo is on" includes "the demo spec is in
+  // the textarea" and vice versa, so the two stay locked.
+  // The effect also handles the initial mount: when
+  // `loaded` flips to `true` and `enabled` is `false`, the
+  // textarea stays on the embedded sample (the initial state).
+  // When `enabled` is `true`, the demo spec is fetched —
+  // either from a localStorage-driven start or a fresh user
+  // click. The previous "load on every mount" effect was
+  // removed because it bypassed the toggle entirely and
+  // fetched the demo spec even when the user had the demo
+  // turned off.
   useEffect(() => {
-    let cancelled = false
-
-    async function loadDemo() {
-      // Retry with backoff so that a backend still starting up does
-      // not produce ECONNREFUSED entries in the Vite proxy log. On
-      // persistent failure (e.g. backend responds with 5xx), the
-      // embedded sample in the textarea remains.
-      try {
-        const response = await fetchWithRetry(
-          '/api/demo-specification',
-          undefined,
-          { maxAttempts: 10, delayMs: 500, shouldRetry: response => !response.ok },
-        )
-        if (!response.ok) return
-        const content = await response.text()
-        if (!cancelled && content.trim() !== '') setSpecification(content)
-      } catch {
-        // Fallback to the embedded sample if the backend is not reachable.
+    if (!demoStatus.status.loaded) return
+    if (demoStatus.status.enabled) {
+      let cancelled = false
+      async function loadDemoOnEnable(): Promise<void> {
+        try {
+          const response = await fetch('/api/demo-specification')
+          if (!response.ok) return
+          const content = await response.text()
+          if (!cancelled && content.trim() !== '') setSpecification(content)
+        } catch {
+          // Network failure: leave the textarea as-is. The user
+          // can retry by toggling the switch off and on again.
+        }
       }
+      loadDemoOnEnable()
+      return () => { cancelled = true }
     }
-
-    loadDemo()
-    return () => { cancelled = true }
-  }, [])
+    // Demo is off — clear the spec so the textarea shows the
+    // empty sample and a subsequent import is not overridden by
+    // a stale demo document.
+    setSpecification(sample)
+  }, [demoStatus.status.enabled, demoStatus.status.loaded])
 
   useEffect(() => {
     if (!runMenu) return

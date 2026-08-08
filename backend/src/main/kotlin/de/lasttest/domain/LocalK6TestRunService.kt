@@ -87,17 +87,19 @@ class LocalK6TestRunService(
     override fun create(request: CreateTestRunRequest): TestRun {
         val specification = importer.import(request.specification)
         val loadProfile = resolveLoadProfile(request)
+        val runId = UUID.randomUUID().toString()
         val script =
-            generator.generate(
+            generator.generateForRun(
                 specification,
                 request.baseUrl,
+                runId,
                 request.operationIds,
                 request.operationConfigurations,
                 loadProfile,
             )
         val run =
             TestRun(
-                id = UUID.randomUUID().toString(),
+                id = runId,
                 status = TestRunStatus.QUEUED,
                 createdAt = Instant.now().toString(),
                 configuration = buildRunConfiguration(specification, request, loadProfile),

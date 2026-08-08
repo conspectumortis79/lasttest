@@ -1,5 +1,7 @@
 package de.lasttest.demo
 
+import de.lasttest.demo.DefaultDemoControllerToggle
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -15,8 +17,21 @@ import kotlin.test.assertNotNull
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class DemoProductControllerTest(
     @Autowired private val client: RestTemplate,
+    @Autowired private val demoControllerToggle: DefaultDemoControllerToggle,
     @LocalServerPort private val port: Int,
 ) {
+    @BeforeEach
+    fun enableDemo() {
+        // The bundled toggle defaults to "off" so the demo is
+        // opt-in. The product-controller tests exercise the
+        // happy path of every endpoint, so the toggle has to be
+        // flipped on before each test. We could also reach for a
+        // @TestConfiguration that pre-enables the toggle, but
+        // the explicit `@BeforeEach` is easier to read in the
+        // diff and the cost is one line per test.
+        demoControllerToggle.enable()
+    }
+
     @Test
     fun `supports product lifecycle`() {
         val created = client.postForEntity(url("/products"), ProductRequest("Test Product", "software", 12.5), Product::class.java)
@@ -120,7 +135,7 @@ class DemoProductControllerTest(
 
     @Test
     fun `search rejects an empty bearer token without HTTP header normalization`() {
-        val response = DemoProductController().search("Bearer ", ProductSearchRequest())
+        val response = DemoProductController(DefaultDemoControllerToggle().apply { enable() }).search("Bearer ", ProductSearchRequest())
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
     }

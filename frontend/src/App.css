@@ -2097,5 +2097,76 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 
 @media (max-width: 900px) { .report-cards, .report-cards.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }.report-parameter-list { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .grid, .configuration-grid, .report-cards, .report-cards.compact, .report-thresholds, .report-info-grid { grid-template-columns: 1fr; }.configuration-grid { padding-left: .9rem; }.body-box { grid-column: auto; }.operation-heading { grid-template-columns: auto 64px 1fr; }.operation-summary { padding-left: calc(64px + .7rem + 1.55rem); }.actions { flex-direction: column; }.actions > * { text-align: center; }.report-page { width: 100%; margin: 0; padding: 1rem; border-radius: 0; }.report-title-row { align-items: flex-start; flex-direction: column; }.report-toolbar { align-items: stretch; flex-direction: column; }.report-toolbar > * { text-align: center; } }
-@media print { body { background: #fff; }.report-page { width: 100%; margin: 0; padding: 0; box-shadow: none; }.report-toolbar { display: none; }.report-section { break-before: auto; }.report-card, .report-threshold, .report-info, .report-operation, .report-table tr { break-inside: avoid; }.report-raw { break-before: page; }.report-page pre { max-height: none; }.report-operation details, .report-raw details { display: block; }.report-operation details > *, .report-raw details > * { display: block; } }
+@media print { body { background: #fff; }.report-page { width: 100%; margin: 0; padding: 0; box-shadow: none; }.report-toolbar { display: none; }.report-section { break-before: auto; }.report-card, .report-threshold, .report-info, .report-operation, .report-table tr { break-inside: avoid; }.report-raw { break-before: page; }.report-page pre { max-height: none; }.report-operation details, .report-raw details { display: block; }.report-operation details > *, .report-raw details > * { display: block; }.demo-traffic-row { break-inside: avoid; } }
+
+/* ---- Demo traffic dashboard ----------------------------------
+   The page re-uses the `.report-*` shell from the k6 report so
+   the toolbar / brand / title-row match the rest of the report
+   surfaces. Only the table itself is bespoke; it lives in this
+   block so the new classes are easy to find later. */
+
+.demo-traffic-section { margin-top: 1.25rem; }
+.demo-traffic-table-wrapper { overflow-x: auto; border: 1px solid #d0d5dd; border-radius: 10px; background: #fff; }
+.demo-traffic-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.demo-traffic-table thead th { position: sticky; top: 0; padding: .55rem .75rem; border-bottom: 1px solid #d0d5dd; color: #344054; background: #f9fafb; text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .04rem; }
+.demo-traffic-table tbody td { padding: .45rem .75rem; border-bottom: 1px solid #eaecf0; color: #101828; white-space: nowrap; }
+.demo-traffic-table tbody tr:last-child td { border-bottom: 0; }
+.demo-traffic-table tbody tr:hover { background: #f9fafb; }
+.demo-traffic-cell-time { font-family: "SFMono-Regular", Consolas, monospace; color: #475467; }
+.demo-traffic-cell-path { max-width: 32rem; overflow: hidden; text-overflow: ellipsis; font-family: "SFMono-Regular", Consolas, monospace; }
+.demo-traffic-cell-user-agent { max-width: 18rem; overflow: hidden; text-overflow: ellipsis; color: #475467; font-size: .75rem; }
+.demo-traffic-cell-method { font-weight: 700; font-family: "SFMono-Regular", Consolas, monospace; }
+.demo-traffic-cell-status { font-weight: 700; font-family: "SFMono-Regular", Consolas, monospace; }
+.demo-traffic-method-get { color: #067647; }
+.demo-traffic-method-post { color: #b54708; }
+.demo-traffic-method-put, .demo-traffic-method-patch { color: #1849a9; }
+.demo-traffic-method-delete { color: #b42318; }
+.demo-traffic-status-success { color: #067647; background: #ecfdf3; }
+.demo-traffic-status-redirect { color: #1849a9; background: #eff8ff; }
+.demo-traffic-status-client-error { color: #b42318; background: #fef3f2; }
+.demo-traffic-status-server-error { color: #b42318; background: #fef3f2; }
+.demo-traffic-status-other { color: #93370d; background: #fffaeb; }
+
+/* Live / loading badge — sits next to the page title. Pulses
+   when the dashboard is actively polling so the user gets
+   visual confirmation that the stream is open even when the
+   table is empty. */
+.demo-traffic-live-badge { display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .55rem; border-radius: 999px; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04rem; vertical-align: middle; }
+.demo-traffic-live-badge.is-live { color: #067647; background: #ecfdf3; }
+.demo-traffic-live-badge.is-loading { color: #475467; background: #f2f4f7; }
+.demo-traffic-live-dot { width: .55rem; height: .55rem; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 currentColor; }
+.demo-traffic-live-badge.is-live .demo-traffic-live-dot { animation: demo-traffic-pulse 1.5s ease-in-out infinite; }
+@keyframes demo-traffic-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .55; transform: scale(.75); }
+}
+
+/* "Active" pill — sits next to the Demo-API entry in the
+   toolbar AND inside the Settings drawer. Visually identical
+   to the dashboard's "Live" badge so the three places that
+   expose the demo state look like one family. */
+.top-toolbar-demo-active { display: inline-flex; align-items: center; gap: .3rem; margin-left: .45rem; padding: .1rem .5rem; border-radius: 999px; font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04rem; color: #067647; background: #ecfdf3; }
+.top-toolbar-demo-active-dot { width: .4rem; height: .4rem; border-radius: 50%; background: currentColor; animation: demo-traffic-pulse 1.5s ease-in-out infinite; }
+
+/* Drawer-side "active" status used to live here. Removed:
+   the pill mirrored the TopToolbar's "Active" badge but added
+   no information the user could not get from the toolbar
+   link or the Settings switch's own `is-selected` styling.
+   Keeping the styles would only confuse a future reader
+   into thinking the pill still exists. */
+
+/* Empty-state card — replaces the single-line alert with a
+   proper on-boarding card. Lists the concrete steps to drive
+   traffic and shows a copy-able curl line for the impatient
+   reader. */
+.demo-traffic-empty { padding: 1.5rem 1.75rem; border: 1px solid #d0d5dd; border-radius: 12px; background: #fff; color: #1d2939; }
+.demo-traffic-empty h2 { margin: 0 0 .5rem; color: #101828; font-size: 1.1rem; }
+.demo-traffic-empty p { margin: 0 0 1rem; color: #475467; line-height: 1.5; }
+.demo-traffic-empty-steps { margin: 0 0 1rem 1.25rem; padding: 0; color: #344054; }
+.demo-traffic-empty-steps li { margin-bottom: .35rem; line-height: 1.5; }
+.demo-traffic-empty-curl { margin: 0 0 1rem; padding: .6rem .85rem; border: 1px solid #eaecf0; border-radius: 8px; background: #f9fafb; font-family: "SFMono-Regular", Consolas, monospace; }
+.demo-traffic-empty-curl code { color: #101828; font-size: .82rem; word-break: break-all; }
+.demo-traffic-empty-hint { margin: 0; color: #667085; font-size: .82rem; font-style: italic; }
+
+
 

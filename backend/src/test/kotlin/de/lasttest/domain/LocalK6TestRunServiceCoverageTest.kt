@@ -96,9 +96,10 @@ class LocalK6TestRunServiceCoverageTest {
                 },
             generator =
                 object : K6ScriptGenerator {
-                    override fun generate(
+                    override fun generateForRun(
                         specification: ImportedSpecification,
                         baseUrl: String,
+                        runId: String,
                         operationIds: Set<String>,
                         operationConfigurations: List<OperationConfiguration>,
                         loadProfile: LoadProfile,
@@ -643,9 +644,10 @@ class LocalK6TestRunServiceCoverageTest {
                         },
                     generator =
                         object : K6ScriptGenerator {
-                            override fun generate(
+                            override fun generateForRun(
                                 specification: ImportedSpecification,
                                 baseUrl: String,
+                                runId: String,
                                 operationIds: Set<String>,
                                 operationConfigurations: List<OperationConfiguration>,
                                 loadProfile: LoadProfile,
@@ -876,9 +878,10 @@ class LocalK6TestRunServiceCoverageTest {
                 },
             generator =
                 object : K6ScriptGenerator {
-                    override fun generate(
+                    override fun generateForRun(
                         specification: ImportedSpecification,
                         baseUrl: String,
+                        runId: String,
                         operationIds: Set<String>,
                         operationConfigurations: List<OperationConfiguration>,
                         loadProfile: LoadProfile,
@@ -1152,9 +1155,10 @@ class LocalK6TestRunServiceCoverageTest {
                         },
                     generator =
                         object : K6ScriptGenerator {
-                            override fun generate(
+                            override fun generateForRun(
                                 specification: ImportedSpecification,
                                 baseUrl: String,
+                                runId: String,
                                 operationIds: Set<String>,
                                 operationConfigurations: List<OperationConfiguration>,
                                 loadProfile: LoadProfile,
@@ -1755,9 +1759,10 @@ class LocalK6TestRunServiceCoverageTest {
                         },
                     generator =
                         object : K6ScriptGenerator {
-                            override fun generate(
+                            override fun generateForRun(
                                 specification: ImportedSpecification,
                                 baseUrl: String,
+                                runId: String,
                                 operationIds: Set<String>,
                                 operationConfigurations: List<OperationConfiguration>,
                                 loadProfile: LoadProfile,

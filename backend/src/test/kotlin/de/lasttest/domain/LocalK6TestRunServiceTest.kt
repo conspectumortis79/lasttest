@@ -428,9 +428,10 @@ class LocalK6TestRunServiceTest {
     }
 
     private class SuccessfulGenerator : K6ScriptGenerator {
-        override fun generate(
+        override fun generateForRun(
             specification: ImportedSpecification,
             baseUrl: String,
+            runId: String,
             operationIds: Set<String>,
             operationConfigurations: List<OperationConfiguration>,
             loadProfile: LoadProfile,
@@ -440,9 +441,10 @@ class LocalK6TestRunServiceTest {
     private class RecordingGenerator : K6ScriptGenerator {
         var lastCall: Pair<LoadProfile, String>? = null
 
-        override fun generate(
+        override fun generateForRun(
             specification: ImportedSpecification,
             baseUrl: String,
+            runId: String,
             operationIds: Set<String>,
             operationConfigurations: List<OperationConfiguration>,
             loadProfile: LoadProfile,

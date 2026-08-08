@@ -1,5 +1,6 @@
 package de.lasttest.demo
 
+import de.lasttest.demo.DefaultDemoControllerToggle
 import java.lang.reflect.Method
 import kotlin.test.Test
 import kotlin.test.assertFalse
@@ -20,7 +21,12 @@ import kotlin.test.assertTrue
  * without spinning up the full Spring context for each case.
  */
 class DemoProductControllerAuthTest {
-    private val controller = DemoProductController()
+    // The bundled toggle defaults to "off"; the auth tests call
+    // the controller's credential helpers directly, so the toggle
+    // has to be on for the auth branches to be reachable. The
+    // `apply { enable() }` mirrors the same shape used by the
+    // other controller tests in this package.
+    private val controller = DemoProductController(DefaultDemoControllerToggle().apply { enable() })
 
     private fun hasBasicCredentials(authorization: String?): Boolean = invoke("hasBasicCredentials", authorization) as Boolean
 
