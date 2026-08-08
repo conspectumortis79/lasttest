@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useAutoSizeTextarea } from './useAutoSizeTextarea.ts'
 import {
   isCancellable,
   isInFlight,
@@ -1204,6 +1205,40 @@ function TestRunSummary({ run }: TestRunSummaryProps) {
   )
 }
 
+// Small wrapper around the JSON Request-Body `<textarea>`. The
+// only thing it adds over a plain textarea is the `useAutoSize`
+// hook, which resizes the field to fit its current content (see
+// `useAutoSizeTextarea.ts` for the why). Kept as a separate
+// component so the hook's `useLayoutEffect` is isolated from the
+// outer `OperationEditor`'s render path — otherwise every payload
+// cell re-renders whenever *any* payload in *any* operation
+// changes, which would re-run the effect for all of them.
+function RequestBodyTextarea({
+  operationId,
+  payloadIndex,
+  value,
+  invalid,
+  onChange,
+}: {
+  operationId: string
+  payloadIndex: number
+  value: string
+  invalid: boolean | undefined
+  onChange: (value: string) => void
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useAutoSizeTextarea(ref, value)
+  return <textarea
+    ref={ref}
+    className="request-body"
+    aria-label={`${operationId} · Payload ${payloadIndex + 1}: JSON Request-Body`}
+    aria-invalid={invalid}
+    value={value}
+    onChange={event => onChange(event.target.value)}
+    spellCheck={false}
+  />
+}
+
 type OperationEditorProps = {
   operation: Operation
   selected: boolean
@@ -1388,13 +1423,12 @@ function OperationEditor({
                   })}
                   {operation.hasRequestBody && (
                     <td>
-                      <textarea
-                        className="request-body"
-                        aria-label={`${operation.operationId} · Payload ${payloadIndex + 1}: JSON Request-Body`}
-                        aria-invalid={validation.bodyError ? true : undefined}
+                      <RequestBodyTextarea
+                        operationId={operation.operationId}
+                        payloadIndex={payloadIndex}
                         value={payload.requestBodyJson}
-                        onChange={event => onPayloadField(payloadIndex, 'requestBodyJson', event.target.value)}
-                        spellCheck={false}
+                        invalid={validation.bodyError ? true : undefined}
+                        onChange={value => onPayloadField(payloadIndex, 'requestBodyJson', value)}
                       />
                       {validation.bodyError && <div className="parameter-error" role="alert">{validation.bodyError}</div>}
                     </td>
