@@ -9,22 +9,6 @@ beiden Betriebssystemen ist Docker der empfohlene Verteilungsweg.
 
 ---
 
-## Inhaltsverzeichnis
-
-1. [Was lasttest tut](#1-was-lasttest-tut)
-2. [Schnellstart mit einem Container](#2-schnellstart-mit-einem-container)
-3. [Eigene TLS-Zertifikate vertrauen](#3-eigene-tls-zertifikate-vertrauen)
-4. [UI-Sprache](#4-ui-sprache)
-5. [Aktions-Menü am Run-Badge (Rechtsklick)](#5-aktions-menü-am-run-badge-rechtsklick)
-6. [Payload-Pool (Parameter-Variabilität)](#6-payload-pool-parameter-variabilität)
-7. [Anforderungen für lokale Entwicklung](#7-anforderungen-für-lokale-entwicklung)
-8. [Lokale Entwicklung auf Linux / macOS](#8-lokale-entwicklung-auf-linux--macos)
-9. [Dokumentation](#9-dokumentation)
-10. [Tests und Qualitätssicherung](#10-tests-und-qualitätssicherung)
-11. [Sicherheits-Grenzen des MVP](#11-sicherheits-grenzen-des-mvp)
-
----
-
 ## 1. Was lasttest tut
 
 Pro importierter Spec lässt lasttest dich:
@@ -81,21 +65,6 @@ Es starten drei Container:
 
 Wenn du lasttest ohne Time-Series-Stack brauchst, starte es allein mit
 `docker run`. Die Ramp-Grafik zeigt dann nur die Soll-Linie.
-
-### Erfolgsmeldung
-
-Sobald Spring Boot hochgefahren ist, erscheint im Container-Log eine
-deutlich sichtbare Erfolgsmeldung mit Link auf die Web-UI:
-
-```text
-============================================================
-lasttest wurde erfolgreich gestartet.
-Jetzt im Browser öffnen: http://localhost:8286/
-============================================================
-```
-
-Bei einem anderen Host oder Port kann der angezeigte Link über die
-Umgebungsvariable `LASTTEST_PUBLIC_URL` überschrieben werden.
 
 ### App im Browser öffnen
 

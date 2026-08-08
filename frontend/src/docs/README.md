@@ -9,22 +9,6 @@ Docker is the recommended deployment path.
 
 ---
 
-## Table of contents
-
-1. [What lasttest does](#1-what-lasttest-does)
-2. [Quick start with a single container](#2-quick-start-with-a-single-container)
-3. [Trusting custom TLS certificates](#3-trusting-custom-tls-certificates)
-4. [UI language](#4-ui-language)
-5. [The run-badge action menu (right-click)](#5-the-run-badge-action-menu-right-click)
-6. [Payload pool (parameter variability)](#6-payload-pool-parameter-variability)
-7. [Requirements for local development](#7-requirements-for-local-development)
-8. [Local development on Linux / macOS](#8-local-development-on-linux--macos)
-9. [Documentation](#9-documentation)
-10. [Tests and quality checks](#10-tests-and-quality-checks)
-11. [Security boundaries of the MVP](#11-security-boundaries-of-the-mvp)
-
----
-
 ## 1. What lasttest does
 
 For every imported spec, lasttest lets you:
@@ -79,21 +63,6 @@ This starts three containers:
 
 If you only need lasttest without the time-series parts, start it alone
 with `docker run` and the ramp-grafik will then show only the Soll line.
-
-### Success message
-
-Once Spring Boot has finished starting, a clearly visible success message
-with a link to the web UI is written to the container log:
-
-```text
-============================================================
-lasttest wurde erfolgreich gestartet.
-Jetzt im Browser öffnen: http://localhost:8286/
-============================================================
-```
-
-If a different public host or port is used, the displayed link can be
-overridden via the `LASTTEST_PUBLIC_URL` environment variable.
 
 ### Opening the app
 
