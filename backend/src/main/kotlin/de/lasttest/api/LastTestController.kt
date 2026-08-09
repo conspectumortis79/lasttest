@@ -188,13 +188,14 @@ class LastTestController(
         @PathVariable id: String,
     ): ResponseEntity<StatusCodeTimelineResponse> {
         val run = testRuns.find(id) ?: return ResponseEntity.notFound().build()
-        val samples = if (run.startedAt == null) {
-            emptyList()
-        } else {
-            statusCodeTimeSeriesReader
-                .readStatusCodesOverTime(id)
-                .map { StatusCodeTimelinePoint(epochSecond = it.epochSecond, code = it.code, count = it.count) }
-        }
+        val samples =
+            if (run.startedAt == null) {
+                emptyList()
+            } else {
+                statusCodeTimeSeriesReader
+                    .readStatusCodesOverTime(id)
+                    .map { StatusCodeTimelinePoint(epochSecond = it.epochSecond, code = it.code, count = it.count) }
+            }
         return ResponseEntity.ok(
             StatusCodeTimelineResponse(
                 runId = id,

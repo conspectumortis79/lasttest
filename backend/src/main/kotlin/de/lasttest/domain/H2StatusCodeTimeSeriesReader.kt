@@ -62,14 +62,16 @@ class StatusCodeTimeSeriesWriter(
         code: String,
         count: Long,
     ) {
-        val existing = repository
-            .findByRunIdOrderByEpochSecondAscCodeAsc(runId)
-            .firstOrNull { it.epochSecond == epochSecond && it.code == code }
-        val sample = existing ?: StatusCodeTimeSeriesEntity().apply {
-            this.runId = runId
-            this.epochSecond = epochSecond
-            this.code = code
-        }
+        val existing =
+            repository
+                .findByRunIdOrderByEpochSecondAscCodeAsc(runId)
+                .firstOrNull { it.epochSecond == epochSecond && it.code == code }
+        val sample =
+            existing ?: StatusCodeTimeSeriesEntity().apply {
+                this.runId = runId
+                this.epochSecond = epochSecond
+                this.code = code
+            }
         // The k6 script emits ONE stamp per VU per wall-clock
         // second. Each stamp carries the VU's local cumulative
         // count (the JS-side `__lt_status_counts` mirror of the

@@ -271,26 +271,22 @@ class InMemoryTimeSeriesWriter(
 class InMemoryStatusCodeTimeSeriesRepository : StatusCodeTimeSeriesRepository {
     private val store = ConcurrentHashMap<String, StatusCodeTimeSeriesEntity>()
 
-    private fun keyOf(entity: StatusCodeTimeSeriesEntity): String =
-        "${entity.runId}|${entity.epochSecond}|${entity.code}"
+    private fun keyOf(entity: StatusCodeTimeSeriesEntity): String = "${entity.runId}|${entity.epochSecond}|${entity.code}"
 
     override fun <S : StatusCodeTimeSeriesEntity> save(entity: S): S {
         store[keyOf(entity)] = entity
         return entity
     }
 
-    override fun <S : StatusCodeTimeSeriesEntity> saveAll(entities: Iterable<S>): List<S> =
-        entities.onEach { store[keyOf(it)] = it }.toList()
+    override fun <S : StatusCodeTimeSeriesEntity> saveAll(entities: Iterable<S>): List<S> = entities.onEach { store[keyOf(it)] = it }.toList()
 
-    override fun findById(id: Long): Optional<StatusCodeTimeSeriesEntity> =
-        store.values.firstOrNull { it.id == id }.let { Optional.ofNullable(it) }
+    override fun findById(id: Long): Optional<StatusCodeTimeSeriesEntity> = store.values.firstOrNull { it.id == id }.let { Optional.ofNullable(it) }
 
     override fun existsById(id: Long): Boolean = store.values.any { it.id == id }
 
     override fun findAll(): List<StatusCodeTimeSeriesEntity> = store.values.toList()
 
-    override fun findAllById(ids: Iterable<Long>): List<StatusCodeTimeSeriesEntity> =
-        store.values.filter { entity -> entity.id?.let { it in ids.toList() } == true }
+    override fun findAllById(ids: Iterable<Long>): List<StatusCodeTimeSeriesEntity> = store.values.filter { entity -> entity.id?.let { it in ids.toList() } == true }
 
     override fun count(): Long = store.size.toLong()
 
@@ -317,10 +313,10 @@ class InMemoryStatusCodeTimeSeriesRepository : StatusCodeTimeSeriesRepository {
     }
 
     override fun findAll(pageable: Pageable): org.springframework.data.domain.Page<StatusCodeTimeSeriesEntity> =
-        org.springframework.data.domain.Page.empty(pageable)
+        org.springframework.data.domain.Page
+            .empty(pageable)
 
-    override fun findAll(sort: org.springframework.data.domain.Sort): List<StatusCodeTimeSeriesEntity> =
-        store.values.toList()
+    override fun findAll(sort: org.springframework.data.domain.Sort): List<StatusCodeTimeSeriesEntity> = store.values.toList()
 
     override fun findByRunIdOrderByEpochSecondAscCodeAsc(runId: String): List<StatusCodeTimeSeriesEntity> =
         store.values
@@ -339,6 +335,5 @@ class InMemoryStatusCodeTimeSeriesWriter(
     private val repository: StatusCodeTimeSeriesRepository = InMemoryStatusCodeTimeSeriesRepository(),
 ) : StatusCodeTimeSeriesWriter(repository) {
     /** Test-only: read every sample back so a test can assert on the writer's output. */
-    fun readBack(runId: String): List<StatusCodeTimeSeriesEntity> =
-        repository.findByRunIdOrderByEpochSecondAscCodeAsc(runId)
+    fun readBack(runId: String): List<StatusCodeTimeSeriesEntity> = repository.findByRunIdOrderByEpochSecondAscCodeAsc(runId)
 }

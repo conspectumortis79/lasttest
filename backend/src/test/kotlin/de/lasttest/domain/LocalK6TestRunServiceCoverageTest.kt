@@ -115,7 +115,7 @@ class LocalK6TestRunServiceCoverageTest {
             runRepository = InMemoryTestRunRepository(),
             statisticsRepository = InMemoryOperationStatisticsRepository(),
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
-                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
+            statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
         )
 
     // ------------------------------------------------------------------
@@ -768,7 +768,7 @@ class LocalK6TestRunServiceCoverageTest {
                     runRepository = InMemoryTestRunRepository(),
                     statisticsRepository = InMemoryOperationStatisticsRepository(),
                     timeSeriesWriter = InMemoryTimeSeriesWriter(),
-                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
+                    statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
                 )
             val run =
                 svc.create(
@@ -1007,7 +1007,7 @@ class LocalK6TestRunServiceCoverageTest {
             runRepository = InMemoryTestRunRepository(),
             statisticsRepository = InMemoryOperationStatisticsRepository(),
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
-                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
+            statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
         )
 
     @Test
@@ -1289,7 +1289,7 @@ class LocalK6TestRunServiceCoverageTest {
                     runRepository = InMemoryTestRunRepository(),
                     statisticsRepository = InMemoryOperationStatisticsRepository(),
                     timeSeriesWriter = InMemoryTimeSeriesWriter(),
-                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
+                    statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
                 )
             val run =
                 svc.create(
@@ -1898,7 +1898,7 @@ class LocalK6TestRunServiceCoverageTest {
                     runRepository = InMemoryTestRunRepository(),
                     statisticsRepository = InMemoryOperationStatisticsRepository(),
                     timeSeriesWriter = InMemoryTimeSeriesWriter(),
-                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
+                    statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
                 )
             val run =
                 svc.create(

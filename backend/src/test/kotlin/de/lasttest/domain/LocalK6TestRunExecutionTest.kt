@@ -568,6 +568,6 @@ class LocalK6TestRunExecutionTest {
             runRepository = repository,
             statisticsRepository = statistics,
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
-                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
+            statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
         )
 }

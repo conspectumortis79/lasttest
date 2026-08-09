@@ -86,7 +86,7 @@ class LocalK6TestRunServiceTest {
             runRepository = InMemoryTestRunRepository(),
             statisticsRepository = InMemoryOperationStatisticsRepository(),
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
-                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
+            statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
         )
 
     @Test
@@ -1770,7 +1770,7 @@ class LocalK6TestRunServiceTest {
                     runRepository = InMemoryTestRunRepository(),
                     statisticsRepository = InMemoryOperationStatisticsRepository(),
                     timeSeriesWriter = InMemoryTimeSeriesWriter(),
-                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
+                    statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
                 )
             val stub = ProcessBuilder("sleep", "10").start()
             val run =

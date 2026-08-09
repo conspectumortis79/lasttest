@@ -85,7 +85,7 @@ class LastTestControllerTest {
             demoSpecificationProvider = demoSpecificationProvider,
             remoteFetcher = remoteFetcher,
             timeSeriesReader = timeSeriesReader,
-                statusCodeTimeSeriesReader = statusCodeTimeSeriesReader,
+            statusCodeTimeSeriesReader = statusCodeTimeSeriesReader,
             statisticsRepository = statisticsRepository,
             runRepository = runRepository,
         )

@@ -67,7 +67,7 @@ class LocalK6TestRunServiceBranchesTest {
             runRepository = InMemoryTestRunRepository(),
             statisticsRepository = InMemoryOperationStatisticsRepository(),
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
-                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
+            statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
         )
 
     // --- resolveLoadProfile: legacy fallback branches ---
