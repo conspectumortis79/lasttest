@@ -25,8 +25,7 @@ class InMemoryTestRunRepository : TestRunRepository {
         return entity
     }
 
-    override fun <S : TestRunEntity> saveAll(entities: Iterable<S>): List<S> =
-        entities.onEach { store[it.id] = it }.toList()
+    override fun <S : TestRunEntity> saveAll(entities: Iterable<S>): List<S> = entities.onEach { store[it.id] = it }.toList()
 
     override fun findById(id: String): Optional<TestRunEntity> = Optional.ofNullable(store[id])
 
@@ -34,8 +33,7 @@ class InMemoryTestRunRepository : TestRunRepository {
 
     override fun findAll(): List<TestRunEntity> = store.values.toList()
 
-    override fun findAllById(ids: Iterable<String>): List<TestRunEntity> =
-        ids.mapNotNull { store[it] }
+    override fun findAllById(ids: Iterable<String>): List<TestRunEntity> = ids.mapNotNull { store[it] }
 
     override fun count(): Long = store.size.toLong()
 
@@ -60,13 +58,12 @@ class InMemoryTestRunRepository : TestRunRepository {
     }
 
     override fun findAll(pageable: org.springframework.data.domain.Pageable): org.springframework.data.domain.Page<TestRunEntity> =
-        org.springframework.data.domain.Page.empty(pageable)
+        org.springframework.data.domain.Page
+            .empty(pageable)
 
-    override fun findAll(sort: org.springframework.data.domain.Sort): List<TestRunEntity> =
-        store.values.toList()
+    override fun findAll(sort: org.springframework.data.domain.Sort): List<TestRunEntity> = store.values.toList()
 
-    override fun findAllByOrderByCreatedAtDesc(): List<TestRunEntity> =
-        store.values.sortedByDescending { it.createdAt }
+    override fun findAllByOrderByCreatedAtDesc(): List<TestRunEntity> = store.values.sortedByDescending { it.createdAt }
 
     override fun findByOperationMethodAndOperationPathOrderByCreatedAtDesc(
         method: String,
@@ -90,18 +87,15 @@ class InMemoryOperationStatisticsRepository : OperationStatisticsRepository {
         return entity
     }
 
-    override fun <S : OperationStatisticsEntity> saveAll(entities: Iterable<S>): List<S> =
-        entities.onEach { save(it) }.toList()
+    override fun <S : OperationStatisticsEntity> saveAll(entities: Iterable<S>): List<S> = entities.onEach { save(it) }.toList()
 
-    override fun findById(id: OperationStatisticsEntity.Key): Optional<OperationStatisticsEntity> =
-        Optional.ofNullable(store[id])
+    override fun findById(id: OperationStatisticsEntity.Key): Optional<OperationStatisticsEntity> = Optional.ofNullable(store[id])
 
     override fun existsById(id: OperationStatisticsEntity.Key): Boolean = store.containsKey(id)
 
     override fun findAll(): List<OperationStatisticsEntity> = store.values.toList()
 
-    override fun findAllById(ids: Iterable<OperationStatisticsEntity.Key>): List<OperationStatisticsEntity> =
-        ids.mapNotNull { store[it] }
+    override fun findAllById(ids: Iterable<OperationStatisticsEntity.Key>): List<OperationStatisticsEntity> = ids.mapNotNull { store[it] }
 
     override fun count(): Long = store.size.toLong()
 
@@ -126,18 +120,19 @@ class InMemoryOperationStatisticsRepository : OperationStatisticsRepository {
     }
 
     override fun findAll(pageable: org.springframework.data.domain.Pageable): org.springframework.data.domain.Page<OperationStatisticsEntity> =
-        org.springframework.data.domain.Page.empty(pageable)
+        org.springframework.data.domain.Page
+            .empty(pageable)
 
-    override fun findAll(sort: org.springframework.data.domain.Sort): List<OperationStatisticsEntity> =
-        store.values.toList()
+    override fun findAll(sort: org.springframework.data.domain.Sort): List<OperationStatisticsEntity> = store.values.toList()
 
-    override fun findAllByOrderByTestCountDesc(): List<OperationStatisticsEntity> =
-        store.values.sortedByDescending { it.testCount }
+    override fun findAllByOrderByTestCountDesc(): List<OperationStatisticsEntity> = store.values.sortedByDescending { it.testCount }
 }
 
 class InMemoryTimeSeriesRepository : TimeSeriesRepository {
     private val store = ConcurrentHashMap<Long, TimeSeriesEntity>()
-    private val nextId = java.util.concurrent.atomic.AtomicLong(1)
+    private val nextId =
+        java.util.concurrent.atomic
+            .AtomicLong(1)
 
     override fun <S : TimeSeriesEntity> save(entity: S): S {
         if (entity.id == null) entity.id = nextId.getAndIncrement()
@@ -145,8 +140,7 @@ class InMemoryTimeSeriesRepository : TimeSeriesRepository {
         return entity
     }
 
-    override fun <S : TimeSeriesEntity> saveAll(entities: Iterable<S>): List<S> =
-        entities.onEach { save(it) }.toList()
+    override fun <S : TimeSeriesEntity> saveAll(entities: Iterable<S>): List<S> = entities.onEach { save(it) }.toList()
 
     override fun findById(id: Long): Optional<TimeSeriesEntity> = Optional.ofNullable(store[id])
 
@@ -154,8 +148,7 @@ class InMemoryTimeSeriesRepository : TimeSeriesRepository {
 
     override fun findAll(): List<TimeSeriesEntity> = store.values.toList()
 
-    override fun findAllById(ids: Iterable<Long>): List<TimeSeriesEntity> =
-        ids.mapNotNull { store[it] }
+    override fun findAllById(ids: Iterable<Long>): List<TimeSeriesEntity> = ids.mapNotNull { store[it] }
 
     override fun count(): Long = store.size.toLong()
 
@@ -180,18 +173,19 @@ class InMemoryTimeSeriesRepository : TimeSeriesRepository {
     }
 
     override fun findAll(pageable: org.springframework.data.domain.Pageable): org.springframework.data.domain.Page<TimeSeriesEntity> =
-        org.springframework.data.domain.Page.empty(pageable)
+        org.springframework.data.domain.Page
+            .empty(pageable)
 
-    override fun findAll(sort: org.springframework.data.domain.Sort): List<TimeSeriesEntity> =
-        store.values.toList()
+    override fun findAll(sort: org.springframework.data.domain.Sort): List<TimeSeriesEntity> = store.values.toList()
 
-    override fun findByRunIdOrderByTimestampAsc(runId: String): List<TimeSeriesEntity> =
-        store.values.filter { it.runId == runId }.sortedBy { it.timestamp }
+    override fun findByRunIdOrderByTimestampAsc(runId: String): List<TimeSeriesEntity> = store.values.filter { it.runId == runId }.sortedBy { it.timestamp }
 }
 
 class InMemoryDemoRequestLogRepository : DemoRequestLogRepository {
     private val store = ConcurrentHashMap<Long, DemoRequestLogEntity>()
-    private val nextId = java.util.concurrent.atomic.AtomicLong(1)
+    private val nextId =
+        java.util.concurrent.atomic
+            .AtomicLong(1)
 
     override fun <S : DemoRequestLogEntity> save(entity: S): S {
         if (entity.id == null) entity.id = nextId.getAndIncrement()
@@ -199,8 +193,7 @@ class InMemoryDemoRequestLogRepository : DemoRequestLogRepository {
         return entity
     }
 
-    override fun <S : DemoRequestLogEntity> saveAll(entities: Iterable<S>): List<S> =
-        entities.onEach { save(it) }.toList()
+    override fun <S : DemoRequestLogEntity> saveAll(entities: Iterable<S>): List<S> = entities.onEach { save(it) }.toList()
 
     override fun findById(id: Long): Optional<DemoRequestLogEntity> = Optional.ofNullable(store[id])
 
@@ -208,8 +201,7 @@ class InMemoryDemoRequestLogRepository : DemoRequestLogRepository {
 
     override fun findAll(): List<DemoRequestLogEntity> = store.values.toList()
 
-    override fun findAllById(ids: Iterable<Long>): List<DemoRequestLogEntity> =
-        ids.mapNotNull { store[it] }
+    override fun findAllById(ids: Iterable<Long>): List<DemoRequestLogEntity> = ids.mapNotNull { store[it] }
 
     override fun count(): Long = store.size.toLong()
 
@@ -234,10 +226,10 @@ class InMemoryDemoRequestLogRepository : DemoRequestLogRepository {
     }
 
     override fun findAll(pageable: org.springframework.data.domain.Pageable): org.springframework.data.domain.Page<DemoRequestLogEntity> =
-        org.springframework.data.domain.Page.empty(pageable)
+        org.springframework.data.domain.Page
+            .empty(pageable)
 
-    override fun findAll(sort: org.springframework.data.domain.Sort): List<DemoRequestLogEntity> =
-        store.values.toList()
+    override fun findAll(sort: org.springframework.data.domain.Sort): List<DemoRequestLogEntity> = store.values.toList()
 
     override fun findAllByOrderByTimestampDesc(pageable: Pageable): List<DemoRequestLogEntity> =
         store.values.sortedByDescending { it.timestamp }.let { all ->

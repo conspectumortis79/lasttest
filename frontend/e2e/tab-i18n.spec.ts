@@ -36,7 +36,7 @@ async function startAndOpenTimeline(page: Page) {
   // English text appears once the user has switched.
   await page.getByLabel(/Virtual users|Virtual Users/).first().fill('1')
   await page.getByLabel(/Dauer \(Sekunden\)|Duration \(seconds\)/).fill('3')
-  await page.getByRole('button', { name: /k6-Lasttest starten|k6 load test start/ }).click()
+  await page.getByRole('button', { name: /k6-Lasttest starten|Start k6 load test/ }).click()
   const badge = page.locator('.run-badge').first()
   // Allow up to 90 s: each test starts a 3 s k6 run, and the
   // 2-thread executor serialises them when the previous

@@ -1,10 +1,8 @@
 package de.lasttest.api
 
 import de.lasttest.demo.DemoSpecificationProvider
-import de.lasttest.domain.OperationStatisticsRepository
 import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
-import de.lasttest.domain.TestRunRepository
 import de.lasttest.domain.TestRunService
 import de.lasttest.domain.TimeSeriesPoint
 import de.lasttest.domain.TimeSeriesReader

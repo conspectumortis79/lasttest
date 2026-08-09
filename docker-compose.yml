@@ -97,6 +97,14 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # Initial-mount für den "lasttest"-Dashboard-Provider (siehe
+      # grafana/provisioning/dashboards/dashboards.yml). Ohne diesen
+      # Mount zeigt der Provider auf /var/lib/grafana/dashboards, das
+      # beim ersten Container-Start noch nicht existiert — Folge:
+      # "stat /var/lib/grafana/dashboards: no such file or directory".
+      # Das Repo-Verzeichnis enthält eine .gitkeep als Marker und ist
+      # der Ablageort für eigene Dashboard-JSONs.
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       influxdb:
         condition: service_healthy

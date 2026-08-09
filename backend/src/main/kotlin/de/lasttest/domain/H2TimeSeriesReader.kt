@@ -38,7 +38,10 @@ class H2TimeSeriesReader(
             // both the planned and the actual VU count and let the
             // renderer pick the right line.
             TimeSeriesPoint(
-                time = java.time.Instant.ofEpochSecond(sample.timestamp).toString(),
+                time =
+                    java.time.Instant
+                        .ofEpochSecond(sample.timestamp)
+                        .toString(),
                 value = sample.actualVus,
             )
         }
@@ -53,7 +56,10 @@ class H2TimeSeriesReader(
         // shape regardless of which measurement it is reading.
         repository.findByRunIdOrderByTimestampAsc(runId).map { sample ->
             TimeSeriesPoint(
-                time = java.time.Instant.ofEpochSecond(sample.timestamp).toString(),
+                time =
+                    java.time.Instant
+                        .ofEpochSecond(sample.timestamp)
+                        .toString(),
                 value = sample.actualRps,
             )
         }
@@ -82,12 +88,15 @@ class TimeSeriesWriter(
         // them. Without the upsert we'd accumulate one row per
         // second *and* one row per k6 status line, which would
         // double-plot the chart.
-        val existing = repository.findByRunIdOrderByTimestampAsc(runId)
-            .firstOrNull { it.timestamp == timestampSeconds }
-        val sample = existing ?: TimeSeriesEntity().apply {
-            this.runId = runId
-            this.timestamp = timestampSeconds
-        }
+        val existing =
+            repository
+                .findByRunIdOrderByTimestampAsc(runId)
+                .firstOrNull { it.timestamp == timestampSeconds }
+        val sample =
+            existing ?: TimeSeriesEntity().apply {
+                this.runId = runId
+                this.timestamp = timestampSeconds
+            }
         sample.plannedVus = plannedVus
         sample.actualVus = actualVus
         sample.actualRps = actualRps

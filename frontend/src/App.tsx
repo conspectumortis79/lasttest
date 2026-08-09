@@ -20,7 +20,8 @@ import {
 import './App.css'
 import { TestRunReportPage } from './TestRunReport.tsx'
 import { DemoTrafficPage } from './DemoTrafficPage.tsx'
-import { DemoStatusProvider, useDemoStatus } from './useDemoStatus.tsx'
+import { DemoStatusProvider } from './useDemoStatus.tsx'
+import { useDemoStatus } from './useDemoStatusState.ts'
 import {
   buildMetricRow,
   copyTextToClipboard,
@@ -37,7 +38,8 @@ import { TopToolbar, type ToolbarDocId } from './TopToolbar.tsx'
 import { SettingsDrawer } from './SettingsDrawer.tsx'
 import { DocPopup } from './DocPopup.tsx'
 import { WikiPopup } from './WikiPopup.tsx'
-import { useLanguage, LanguageProvider } from './useLanguage.tsx'
+import { LanguageProvider } from './useLanguage.tsx'
+import { useLanguage } from './languageStorage.ts'
 import { translate, formatters, type SupportedLanguage } from './i18n.ts'
 import { RunStatusView, LiveBanner, AktionenTab, LiveRampChart } from './runStatusView.tsx'
 import { vuSamplesToEpochSeconds } from './timeSeries.ts'
@@ -993,7 +995,7 @@ function LoadTestApp() {
                       </option>
                     ))
                     if (!known && baseUrl) {
-                      options.push(<option key="__custom__" value={baseUrl}>{baseUrl} — Eigene URL</option>)
+                      options.push(<option key="__custom__" value={baseUrl}>{baseUrl} — {translate(language, 'ops.serverSelector.customUrl')}</option>)
                     }
                     return options
                   })()}
@@ -1072,7 +1074,7 @@ function LoadTestApp() {
           return <>
             {hasValidationErrors && <div className="error validation-summary" role="alert">{hint}</div>}
             {!hasValidationErrors && hint && <p className="validation-hint">{hint}</p>}
-            <button className="start" onClick={startTest} disabled={busy || selected.size === 0 || hasValidationErrors}>k6-Lasttest starten</button>
+            <button className="start" data-testid="start-test-button" onClick={startTest} disabled={busy || selected.size === 0 || hasValidationErrors}>{translate(language, 'run.startButton')}</button>
           </>
         })()}
       </section>
@@ -1091,7 +1093,7 @@ function LoadTestApp() {
           (klick- und tastaturbedienbar), so the user does not need a
           separate tab strip below. */}
       <h3 className="run-grid-heading">{translate(language, 'run.grid.heading')}</h3>
-      <div className="run-grid" role="tablist" aria-label="Testläufe">
+      <div className="run-grid" role="tablist" aria-label={translate(language, 'run.grid.aria')}>
         {Object.values(runs)
           .sort((a, b) => {
             if (a.createdAt !== b.createdAt) return b.createdAt.localeCompare(a.createdAt)
@@ -1122,7 +1124,7 @@ function LoadTestApp() {
                 className={`run-badge ${candidate.id === activeRunId ? 'active' : ''} run-badge-${candidate.status.toLowerCase()}`}
                 onClick={() => setActiveRunId(candidate.id)}
                 onContextMenu={event => openRunMenu(event, candidate.id)}
-                title={`${candidate.id} · ${method} ${path} — Rechtsklick für Aktionen`}
+                title={translate(language, 'run.badge.title', { id: candidate.id, method, path })}
               >
                 <span className={`run-badge-method method-${method.toLowerCase()}`}>{method}</span>
                 <div className="run-badge-info">
@@ -2186,7 +2188,7 @@ function RunContextMenu({
     ref={menuRef}
     className="run-context-menu"
     role="menu"
-    aria-label="Aktionen für diesen Testlauf"
+    aria-label={translate(language, 'run.contextMenu.aria')}
     style={{ left: x, top: y }}
     onContextMenu={event => event.preventDefault()}
   >

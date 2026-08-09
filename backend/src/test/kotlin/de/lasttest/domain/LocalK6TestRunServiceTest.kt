@@ -359,9 +359,9 @@ class LocalK6TestRunServiceTest {
                 readerExecutor = Executor { },
                 k6Command = "k6",
                 influxDbProperties = InfluxDbProperties(enabled = true),
-                    runRepository = InMemoryTestRunRepository(),
-                    statisticsRepository = InMemoryOperationStatisticsRepository(),
-                    timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                runRepository = InMemoryTestRunRepository(),
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
             )
 
         recordingService.create(
@@ -397,9 +397,9 @@ class LocalK6TestRunServiceTest {
                 readerExecutor = Executor { },
                 k6Command = "k6",
                 influxDbProperties = InfluxDbProperties(enabled = true),
-                    runRepository = InMemoryTestRunRepository(),
-                    statisticsRepository = InMemoryOperationStatisticsRepository(),
-                    timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                runRepository = InMemoryTestRunRepository(),
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
             )
         val disabledService =
             LocalK6TestRunService(
@@ -412,9 +412,9 @@ class LocalK6TestRunServiceTest {
                 readerExecutor = Executor { },
                 k6Command = "k6",
                 influxDbProperties = InfluxDbProperties(enabled = false),
-                    runRepository = InMemoryTestRunRepository(),
-                    statisticsRepository = InMemoryOperationStatisticsRepository(),
-                    timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                runRepository = InMemoryTestRunRepository(),
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
             )
 
         // Both services must be able to create a run without errors.

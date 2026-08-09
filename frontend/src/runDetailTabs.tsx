@@ -13,7 +13,7 @@
 // [TestRunReport.tsx] still exist for the deep dive, but the
 // quick read is on the dashboard itself.
 
-import { useLanguage } from './useLanguage.tsx'
+import { useLanguage } from './languageStorage.ts'
 import { translate, type SupportedLanguage } from './i18n.ts'
 import {
   formatTimestamp,

@@ -6,7 +6,7 @@
 // shows up in the timeline within a few seconds.
 
 import { useEffect, useState } from 'react'
-import { useLanguage } from './useLanguage.tsx'
+import { useLanguage } from './languageStorage.ts'
 import { translate, type SupportedLanguage } from './i18n.ts'
 import type { TestRun } from './k6Report.ts'
 import { formatTimestamp } from './k6Report.ts'

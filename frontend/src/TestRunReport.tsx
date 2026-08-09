@@ -36,7 +36,7 @@ import { EMPTY_TIME_SERIES, fetchTimeSeries, type TimeSeriesResponse } from './t
 import { RunStatusView } from './runStatusView.tsx'
 import { useRunClock } from './useRunClock.ts'
 import { translate } from './i18n.ts'
-import { useLanguage } from './useLanguage.tsx'
+import { useLanguage } from './languageStorage.ts'
 
 type TestRunReportPageProps = {
   runId: string

@@ -24,7 +24,7 @@
 // arrives — so the panel still works on cold start, offline,
 // or when the backend is down.
 
-import { useLanguage } from './useLanguage.tsx'
+import { useLanguage } from './languageStorage.ts'
 import { translate } from './i18n.ts'
 import type { TestRun } from './k6Report.ts'
 import { runElapsedSeconds } from './k6Report.ts'

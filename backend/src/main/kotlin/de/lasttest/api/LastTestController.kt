@@ -94,7 +94,10 @@ class LastTestController(
         // [finishedAt] is missing is what makes the chart tick
         // instead of returning 404 to the polling client. Only an
         // unknown id (or a never-started run) yields 404.
-        val finished = run.finishedAt ?: java.time.Instant.now().toString()
+        val finished =
+            run.finishedAt ?: java.time.Instant
+                .now()
+                .toString()
         val vus =
             timeSeriesReader
                 .readVusOverTime(id, started, finished)

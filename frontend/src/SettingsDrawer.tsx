@@ -15,7 +15,7 @@ import {
   type NotificationPermissionState,
   type NotificationSettings,
 } from './runNotifications.ts'
-import { useDemoStatus } from './useDemoStatus.tsx'
+import { useDemoStatus } from './useDemoStatusState.ts'
 
 type SettingsDrawerProps = {
   open: boolean
@@ -86,7 +86,7 @@ export function SettingsDrawer({
           type="button"
           className="icon-btn"
           onClick={onClose}
-          aria-label="Close"
+          aria-label={translate(language, 'common.close')}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true" className="icon-btn-glyph">
             <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />

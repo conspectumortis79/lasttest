@@ -7,7 +7,7 @@
 // toolbar can be reordered or hidden without touching the rest of
 // the app.
 import { SUPPORTED_LANGUAGES, translate, type SupportedLanguage } from './i18n.ts'
-import { useDemoStatus } from './useDemoStatus.tsx'
+import { useDemoStatus } from './useDemoStatusState.ts'
 
 export type ToolbarDocId = 'userGuide' | 'readme' | 'wiki'
 
@@ -63,7 +63,7 @@ export function TopToolbar({ language, onOpenSettings, onOpenDoc }: TopToolbarPr
       <span className="top-toolbar-mark" aria-hidden="true">k6</span>
       <span className="top-toolbar-name">{translate(language, 'toolbar.brand')}</span>
     </div>
-    <nav className="top-toolbar-nav" aria-label="Primary">
+    <nav className="top-toolbar-nav" aria-label={translate(language, 'toolbar.nav.aria')}>
       {NAV_ITEMS.map((item, index) => {
         if (item.key === 'toolbar.nav.demoTraffic' && !status.enabled) {
           // The demo is opt-in; hide the link entirely when

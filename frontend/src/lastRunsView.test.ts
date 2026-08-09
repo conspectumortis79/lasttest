@@ -2,6 +2,7 @@ import { deepEqual, equal, ok } from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   durationFor,
+  humaniseDelta,
   metaLineFor,
   operationMethodAndPath,
   relativeWhenFor,
@@ -276,8 +277,13 @@ test('relativeWhenFor returns a humanised "ago" string for finished runs', () =>
   ok(relativeWhenFor(runWith({ ...base, finishedAt: '2026-01-01T10:00:00Z' }), now, 'en').length > 0)
   // ~5 minutes ago
   ok(relativeWhenFor(runWith({ ...base, finishedAt: '2026-01-01T11:55:00Z' }), now, 'en').length > 0)
-  // just now
+  // just now (30 s ago — inside the "< 45 s" bucket)
   ok(relativeWhenFor(runWith({ ...base, finishedAt: '2026-01-01T11:59:30Z' }), now, 'en').length > 0)
+  // ~60 s ago — inside the special "45-89 s" bucket that rounds
+  // up to a single minute. Without this pin the bucket branch
+  // stays uncovered and the branch coverage counter falls below
+  // 100 %.
+  ok(relativeWhenFor(runWith({ ...base, finishedAt: '2026-01-01T11:59:00Z' }), now, 'en').length > 0)
   // days ago
   ok(relativeWhenFor(runWith({ ...base, finishedAt: '2025-12-30T12:00:00Z' }), now, 'en').length > 0)
 })
@@ -286,6 +292,30 @@ test('relativeWhenFor returns a dash when the run has no finishedAt', () => {
   // Belt-and-braces: a finishedAt-less terminal run is a data
   // anomaly, but the row should not render an empty cell.
   equal(relativeWhenFor(runWith({ status: 'COMPLETED' }), Date.now(), 'en'), '—')
+})
+
+test('humaniseDelta rounds the 45-90 s bucket up to one minute', () => {
+  // Direct pin for the only branch that the indirect
+  // `relativeWhenFor` test could not exercise: 60 s sits in the
+  // special "45–89 s" bucket and must round up to "1 min" rather
+  // than rendering as "0 min". Each other bucket is covered by
+  // `relativeWhenFor`; this test pins the 60 s case so the branch
+  // coverage counter reaches 100 %.
+  equal(humaniseDelta(60 * 1000, 'en'), '1 min')
+  // Boundary: 44 999 ms still falls into the just-now bucket; 90 000 ms
+  // jumps to "1 min" via the regular minutes branch.
+  ok(humaniseDelta(44 * 1000, 'en').length > 0)
+})
+
+test('relativeWhenFor returns a dash when an in-flight run has no startedAt', () => {
+  // RUNNING/STOPPING runs without a `startedAt` cannot have an
+  // elapsed clock; the helper must mirror the QUEUED branch and
+  // render an em-dash instead of an unparseable timestamp. This
+  // covers the `elapsedSecondsFrom` "no startedAt" branch that
+  // would otherwise remain un-covered.
+  for (const status of ['RUNNING', 'STOPPING']) {
+    equal(relativeWhenFor(runWith({ status: status as 'RUNNING' | 'STOPPING' }), Date.now(), 'en'), '—')
+  }
 })
 
 test('duration and relativeWhen agree on zero elapsed for un-started runs', () => {

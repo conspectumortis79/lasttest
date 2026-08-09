@@ -12,7 +12,7 @@
 // highlighted `<mark>` back to its owning step.
 import { useEffect, useState, type ReactNode } from 'react'
 import { translate, type SupportedLanguage } from './i18n.ts'
-import { STEPS, ZONE_COLOR, annotationText, type WalkthroughStepId } from './walkthrough.tsx'
+import { STEPS, ZONE_COLOR, annotationText, type WalkthroughStepId } from './walkthroughData.ts'
 
 type UserGuideWalkthroughProps = {
   language: SupportedLanguage

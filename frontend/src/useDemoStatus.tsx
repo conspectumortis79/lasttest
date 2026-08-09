@@ -1,17 +1,9 @@
-// Hook + context that exposes the bundled demo-API status and
-// lets the Settings drawer flip it. The state is owned by the
-// backend (`DemoControllerToggle`); the hook mirrors the
-// backend's view so the toolbar, the drawer and the traffic
-// dashboard all see the same `enabled` flag without each one
-// issuing its own `fetch`.
-//
-// Persistence mirrors the `useLanguage` pattern: the user's
-// last choice lives in `localStorage` under a stable key so a
-// page refresh / app restart restores the same state. The
-// backend is the source of truth while the page is open, the
-// localStorage value is the source of truth across restarts.
-
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+// Provider component for the bundled-demo-API toggle. The
+// hook (`useDemoStatus`) + the storage helpers live in
+// `demoStatus.ts` / `useDemoStatusState.ts`; this file owns only
+// the declarative provider so it passes the
+// `react(only-export-components)` lint cleanly.
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   fetchDemoStatus,
   readStoredDemoEnabled,
@@ -19,13 +11,7 @@ import {
   writeStoredDemoEnabled,
   type DemoStatus,
 } from './demoStatus.ts'
-
-type DemoStatusContextValue = {
-  status: DemoStatus
-  setEnabled: (next: boolean) => Promise<void>
-}
-
-const DemoStatusContext = createContext<DemoStatusContextValue | null>(null)
+import { DemoStatusContext, type DemoStatusContextValue } from './useDemoStatusState.ts'
 
 export function DemoStatusProvider({ children }: { children: ReactNode }) {
   // `useState` is seeded from `localStorage` so the very first
@@ -91,20 +77,4 @@ export function DemoStatusProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<DemoStatusContextValue>(() => ({ status, setEnabled }), [status, setEnabled])
   return <DemoStatusContext.Provider value={value}>{children}</DemoStatusContext.Provider>
-}
-
-export function useDemoStatus(): DemoStatusContextValue {
-  const ctx = useContext(DemoStatusContext)
-  // Without a provider the hook falls back to a local in-memory
-  // state. This is what makes `<DemoTrafficPage />` safe to
-  // render in isolation (e.g. from a unit test that does not
-  // spin up the full app) — the page sees a sensible default
-  // and the toolbar-style reads do not crash.
-  const [fallback, setFallback] = useState<DemoStatus>({ enabled: false, loaded: true })
-  const setFallbackEnabled = useCallback(async (next: boolean) => {
-    setFallback({ enabled: next, loaded: true })
-  }, [])
-
-  if (ctx) return ctx
-  return { status: fallback, setEnabled: setFallbackEnabled }
 }

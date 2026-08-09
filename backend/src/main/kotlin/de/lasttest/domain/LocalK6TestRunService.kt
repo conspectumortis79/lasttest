@@ -403,8 +403,12 @@ class LocalK6TestRunService(
             // yet still cheaper than the polling cadence. The
             // flag + lock guard the writer so only one update is
             // in flight per window.
-            val liveTailLock = java.util.concurrent.locks.ReentrantLock()
-            val liveTailDirty = java.util.concurrent.atomic.AtomicBoolean(false)
+            val liveTailLock =
+                java.util.concurrent.locks
+                    .ReentrantLock()
+            val liveTailDirty =
+                java.util.concurrent.atomic
+                    .AtomicBoolean(false)
             readerExecutor.execute {
                 try {
                     process.inputStream.use { stream ->
@@ -449,9 +453,12 @@ class LocalK6TestRunService(
                                 val match = vuPattern.find(line) ?: continue
                                 val activeVUs = match.groupValues[1].toIntOrNull() ?: continue
                                 val elapsedSec = ((System.currentTimeMillis() - runStartMs) / 1000L).toInt().coerceAtLeast(0)
-                                val plannedVus = if (totalDurationSeconds > 0) {
-                                    (elapsedSec.toDouble() / totalDurationSeconds * targetVus).coerceAtMost(targetVus.toDouble())
-                                } else targetVus.toDouble()
+                                val plannedVus =
+                                    if (totalDurationSeconds > 0) {
+                                        (elapsedSec.toDouble() / totalDurationSeconds * targetVus).coerceAtMost(targetVus.toDouble())
+                                    } else {
+                                        targetVus.toDouble()
+                                    }
                                 timeSeriesWriter.record(
                                     runId = run.id,
                                     timestampSeconds = (runStartMs / 1000L) + elapsedSec,
@@ -635,16 +642,17 @@ class LocalK6TestRunService(
         val snapshot: String
         synchronized(output) {
             val raw = output.toString(Charsets.UTF_8)
-            snapshot = if (raw.length <= LIVE_OUTPUT_MAX_LENGTH) {
-                raw
-            } else {
-                // The k6-Konsole tab only needs the tail — the
-                // head is the early-startup noise the user has
-                // already scrolled past. We also annotate the
-                // truncation so the user knows there is older
-                // output in the run's terminal `consoleOutput`.
-                "…[${raw.length - LIVE_OUTPUT_MAX_LENGTH} Zeichen übersprungen]…\n" + raw.takeLast(LIVE_OUTPUT_MAX_LENGTH)
-            }
+            snapshot =
+                if (raw.length <= LIVE_OUTPUT_MAX_LENGTH) {
+                    raw
+                } else {
+                    // The k6-Konsole tab only needs the tail — the
+                    // head is the early-startup noise the user has
+                    // already scrolled past. We also annotate the
+                    // truncation so the user knows there is older
+                    // output in the run's terminal `consoleOutput`.
+                    "…[${raw.length - LIVE_OUTPUT_MAX_LENGTH} Zeichen übersprungen]…\n" + raw.takeLast(LIVE_OUTPUT_MAX_LENGTH)
+                }
         }
         val current = runs[runId] ?: return
         runs[runId] = current.copy(consoleOutput = snapshot)
@@ -672,6 +680,7 @@ class LocalK6TestRunService(
 
     private companion object {
         const val MAX_ERROR_LENGTH = 4000
+
         /**
          * Tail size of the live k6-Konsole snapshot. Larger than
          * [MAX_ERROR_LENGTH] so the in-flight view shows a
@@ -679,6 +688,7 @@ class LocalK6TestRunService(
          * noisy k6 run cannot blow up the heap.
          */
         const val LIVE_OUTPUT_MAX_LENGTH = 50_000
+
         /**
          * Minimum spacing between two live-tail publishes for
          * the same run. Smaller than the polling interval so
@@ -686,6 +696,7 @@ class LocalK6TestRunService(
          * a chatty k6 run does not burn a CPU on snapshot copies.
          */
         const val LIVE_TAIL_THROTTLE_MS: Long = 250
+
         /**
          * Per-run last-publish timestamp for the throttler. A
          * ConcurrentHashMap because the reader thread, the

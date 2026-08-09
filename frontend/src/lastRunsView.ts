@@ -230,7 +230,9 @@ function formatMmSs(totalSeconds: number): string {
  * `gerade eben`). Buckets: < 60 s → seconds, < 60 m → minutes,
  * < 24 h → hours, otherwise days.
  */
-function humaniseDelta(deltaMs: number, lang: SupportedLanguage): string {
+// Exported so the test file can pin each branch directly; the
+// helper is otherwise internal to `relativeWhenFor`.
+export function humaniseDelta(deltaMs: number, lang: SupportedLanguage): string {
   const seconds = Math.floor(deltaMs / 1000)
   if (seconds < 45) return translate(lang, 'lastRuns.delta.justNow')
   if (seconds < 90) return translate(lang, 'lastRuns.delta.minutes', { minutes: 1 })

@@ -1,13 +1,6 @@
 package de.lasttest.demo
 
-import de.lasttest.domain.DemoRequestLogEntity
-import de.lasttest.domain.DemoRequestLogRepository
-import org.springframework.data.domain.Example
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
-import org.springframework.data.domain.Sort
 import java.time.Instant
-import java.util.Optional
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

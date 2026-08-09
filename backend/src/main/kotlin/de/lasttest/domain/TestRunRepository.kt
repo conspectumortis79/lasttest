@@ -1,8 +1,8 @@
 package de.lasttest.domain
 
+import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.ListCrudRepository
 import org.springframework.data.repository.ListPagingAndSortingRepository
-import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
 

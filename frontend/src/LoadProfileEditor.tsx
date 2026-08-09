@@ -335,7 +335,7 @@ function ArrivalRateFields({ profile, language, onChange }: { profile: Extract<L
       />
       <NumberField
         label={translate(language, 'profile.maxVUs')}
-        hint={`≥ preAllocatedVUs, ≤ ${MAX_PRE_ALLOCATED_VUS}`}
+        hint={translate(language, 'profile.maxVUs.hint', { max: MAX_PRE_ALLOCATED_VUS })}
         min={profile.preAllocatedVUs}
         max={MAX_PRE_ALLOCATED_VUS}
         value={profile.maxVUs}

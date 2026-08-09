@@ -19,5 +19,8 @@ interface DemoRequestLogRepository :
     ListPagingAndSortingRepository<DemoRequestLogEntity, Long> {
     fun findAllByOrderByTimestampDesc(pageable: Pageable): List<DemoRequestLogEntity>
 
-    fun findByRunIdOrderByTimestampDesc(runId: String, pageable: Pageable): List<DemoRequestLogEntity>
+    fun findByRunIdOrderByTimestampDesc(
+        runId: String,
+        pageable: Pageable,
+    ): List<DemoRequestLogEntity>
 }

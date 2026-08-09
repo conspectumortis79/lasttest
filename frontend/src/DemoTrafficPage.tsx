@@ -25,8 +25,8 @@ import {
   type DemoTrafficResponse,
 } from './demoTraffic.ts'
 import { translate } from './i18n.ts'
-import { useLanguage } from './useLanguage.tsx'
-import { useDemoStatus } from './useDemoStatus.tsx'
+import { useLanguage } from './languageStorage.ts'
+import { useDemoStatus } from './useDemoStatusState.ts'
 
 type DemoTrafficPageProps = {
   /**
