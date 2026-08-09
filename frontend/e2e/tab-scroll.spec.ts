@@ -19,6 +19,23 @@ async function importDemo(page: Page) {
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
 }
 
+/**
+ * Some tests left a doc-popup open (User Guide / README /
+ * Wiki) at the end of a previous spec; the persistent
+ * Playwright context kept it visible. Closing any open popup
+ * at the start of a test guarantees a clean surface for the
+ * rest of the spec.
+ */
+async function closeAnyOpenPopup(page: Page) {
+  const closeButton = page.locator('.doc-popup.is-open [aria-label="Schließen"]')
+  if (await closeButton.count() > 0) {
+    await closeButton.first().click()
+  }
+  if (await page.locator('.doc-popup.is-open').count() > 0) {
+    await page.locator('.doc-popup-backdrop.is-open').click()
+  }
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('lasttest.language', 'de')
@@ -31,6 +48,7 @@ test.beforeEach(async ({ page }) => {
   })
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'lasttest' })).toBeVisible()
+  await closeAnyOpenPopup(page)
 })
 
 test('exploratory: capturing scroll position when switching tabs in RunDetail', async ({ page }) => {
@@ -54,7 +72,10 @@ test('exploratory: capturing scroll position when switching tabs in RunDetail', 
 
   // Click the Timeline tab. The Timeline tab body is the longest
   // of all tabs because it renders the Gantt + heatmap + list.
-  await page.getByRole('tab', { name: /Timeline/ }).click()
+  // Use `{ force: true }` because the doc-popup backdrop is
+  // `position: fixed` and intercepts pointer events even when
+  // a previous spec left it open in the shared context.
+  await page.getByRole('tab', { name: /Timeline/ }).click({ force: true })
   // Wait for the tab body to be visible.
   await expect(page.locator('.timeline-tab')).toBeVisible()
 
@@ -89,8 +110,8 @@ test('exploratory: capturing scroll position when switching tabs in RunDetail', 
     document.addEventListener('scroll', () => record('document-scroll'))
     record('baseline')
   })
-  for (const tabName of ['Schwellen', 'Konfiguration', 'Fehler-Diagnose', 'Übersicht', 'k6-Konsole', 'Auslastung', 'Aktionen', 'Timeline']) {
-    await page.getByRole('tab', { name: /Timeline/ }).click()
+  for (const tabName of ['Schwellen', 'Konfiguration', 'Fehler-Diagnose', 'Übersicht', 'k6-Konsole', 'k6 Script', 'Aktionen', 'Timeline']) {
+    await page.getByRole('tab', { name: /Timeline/ }).click({ force: true })
     await expect(page.locator('.timeline-tab')).toBeVisible()
     await page.waitForTimeout(150)
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))

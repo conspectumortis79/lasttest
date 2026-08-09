@@ -78,6 +78,36 @@ export async function fetchDemoTraffic(runId?: string | undefined): Promise<Demo
 }
 
 /**
+ * Outcome of [clearDemoTraffic]. The dashboard uses the
+ * discriminated `kind` to decide whether to swap its local state
+ * for the server's empty envelope (`cleared`) or to surface an
+ * error message (`failed`). The `response` field is only populated
+ * on success; on failure the caller keeps whatever it had before.
+ */
+export type ClearDemoTrafficResult =
+  | { kind: 'cleared', response: DemoTrafficResponse }
+  | { kind: 'failed' }
+
+/**
+ * Drops every captured demo request and returns the empty
+ * envelope the server emits after the wipe. Mirrors the
+ * [fetchDemoTraffic] contract: a network failure is reported via
+ * the discriminated `kind` instead of throwing, so the dashboard
+ * can keep its current state and show an error message without
+ * leaving the polling loop in a torn state.
+ */
+export async function clearDemoTraffic(): Promise<ClearDemoTrafficResult> {
+  try {
+    const response = await fetch('/api/demo-traffic/requests', { method: 'DELETE' })
+    if (!response.ok) return { kind: 'failed' }
+    const data = (await response.json()) as DemoTrafficResponse
+    return { kind: 'cleared', response: data }
+  } catch {
+    return { kind: 'failed' }
+  }
+}
+
+/**
  * Formats an ISO-8601 timestamp as the dashboard's compact
  * "HH:MM:SS.mmm" string. Sub-second precision matters for high-RPS
  * smoke tests where two requests can land within the same wall-

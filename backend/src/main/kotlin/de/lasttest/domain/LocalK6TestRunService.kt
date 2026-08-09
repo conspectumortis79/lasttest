@@ -1,6 +1,7 @@
 package de.lasttest.domain
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.KotlinModule
 import de.lasttest.api.ApiOperation
 import de.lasttest.api.ApiParameter
 import de.lasttest.api.CreateTestRunRequest
@@ -101,7 +102,16 @@ class LocalK6TestRunService(
 ) : TestRunService {
     private val runs = ConcurrentHashMap<String, TestRun>()
     private val scripts = ConcurrentHashMap<String, String>()
-    private val objectMapper = ObjectMapper()
+
+    // Kotlin module is required because [CreateTestRunRequest] is
+    // a Kotlin data class — without it Jackson cannot find a
+    // constructor and silently returns `null` for the whole
+    // object, which would turn every post-restart script lookup
+    // into a 404. The mappers in [TestRunMappers] build their own
+    // mapper per call, so this is the only place the service
+    // touches Jackson.
+    private val objectMapper: ObjectMapper =
+        ObjectMapper().registerModule(KotlinModule.Builder().build())
 
     override fun create(request: CreateTestRunRequest): TestRun {
         val specification = importer.import(request.specification)
@@ -131,15 +141,74 @@ class LocalK6TestRunService(
             )
         runs[run.id] = run
         scripts[run.id] = script
+        // Persist the freshly-queued run to H2 so the row shows up
+        // in `/api/operations/runs` and the dashboard's
+        // EndpointTimelineTab immediately, and so a container
+        // restart can recover the run instead of dropping it. The
+        // entity-to-DTO mapper is the inverse of [toTestRunEntity]
+        // so the row round-trips back to the same wire shape.
+        runRepository.save(run.toTestRunEntity())
         executor.execute { execute(run, script, request.baseUrl) }
         return run
     }
 
-    override fun find(id: String): TestRun? = runs[id]
+    /**
+     * Resolves a run by id. The in-memory map wins when present so
+     * a run that is still in flight (and therefore being mutated
+     * by the executor) returns the freshest snapshot. When the
+     * run is no longer in memory — typical after a container
+     * restart, or for runs that were queued before the JVM came
+     * up — we fall back to the H2 row that [create] /
+     * [execute] persist. Without the fallback, the report page
+     * (`/?report={id}`) would 404 for every historical run
+     * after a restart, and the dashboard's right-click "K6
+     * Bericht öffnen" action would silently break.
+     *
+     * The entity-to-DTO mapper is [toTestRun] in
+     * [TestRunMappers]; it deserialises the persisted
+     * configuration / summary / request blobs lazily so a
+     * malformed row degrades to a run with null fields rather
+     * than a hard error.
+     */
+    override fun find(id: String): TestRun? = runs[id] ?: runRepository.findById(id).orElse(null)?.toTestRun(objectMapper)
 
     override fun list(): List<TestRun> = runs.values.sortedByDescending { it.createdAt }
 
-    override fun script(id: String): String? = scripts[id]
+    /**
+     * Resolves the k6 script for a run. The in-memory cache wins
+     * when present so a concurrent download does not pay the
+     * regeneration cost. After a restart, the cache is empty;
+     * the script is then re-rendered on demand from the run's
+     * persisted [CreateTestRunRequest] (see
+     * [TestRunEntity.originalRequestJson]). The generator is
+     * deterministic given the same inputs, so the regenerated
+     * script is byte-identical to the original — the dashboard's
+     * diff and the k6 fingerprint both stay stable.
+     *
+     * A run that has no preserved request (synthetic fixtures,
+     * pre-persistence rows) returns `null` and the controller
+     * surfaces a 404, exactly as it would for a truly unknown
+     * run. The user-visible behaviour matches the in-memory
+     * branch, so callers do not have to special-case it.
+     */
+    override fun script(id: String): String? {
+        scripts[id]?.let { return it }
+        val entity = runRepository.findById(id).orElse(null) ?: return null
+        val requestJson = entity.originalRequestJson ?: return null
+        val request =
+            runCatching { objectMapper.readValue(requestJson, CreateTestRunRequest::class.java) }
+                .getOrNull() ?: return null
+        val specification = importer.import(request.specification)
+        val loadProfile = resolveLoadProfile(request)
+        return generator.generateForRun(
+            specification,
+            request.baseUrl,
+            id,
+            request.operationIds,
+            request.operationConfigurations,
+            loadProfile,
+        )
+    }
 
     /**
      * Tracks k6 processes keyed by run id so cancel() can send them
@@ -359,6 +428,27 @@ class LocalK6TestRunService(
         name: String,
     ): String = "${location.lowercase()}:$name"
 
+    /**
+     * Upserts the per-endpoint × N counter for the (method, path)
+     * pair the run targeted. Called from the terminal-state
+     * branches of [execute] so the counter ticks up exactly once
+     * per run, regardless of whether the run completed cleanly,
+     * was cancelled, or failed with an IOException.
+     *
+     * Runs without a configuration (synthetic test fixtures that
+     * bypassed [create]) are silently ignored: the counter is
+     * about real endpoints, not about test-only stubs. The
+     * helper is also safe against missing operations — a run with
+     * an empty operations list is treated as not contributing to
+     * any counter.
+     */
+    private fun updateOperationStatistics(run: TestRun) {
+        val firstOp = run.configuration?.operations?.firstOrNull() ?: return
+        val key = OperationStatisticsEntity.Key(firstOp.method, firstOp.path)
+        val previous = statisticsRepository.findById(key).orElse(null)
+        statisticsRepository.save(operationStatisticsFor(run, previous))
+    }
+
     private fun execute(
         run: TestRun,
         script: String,
@@ -524,7 +614,7 @@ class LocalK6TestRunService(
             // cancelledByForce / status=STOPPING). Otherwise our
             // final copy() would silently revert cancel()'s state.
             val latest = runs[run.id] ?: run
-            runs[run.id] =
+            val finalRun =
                 latest.copy(
                     status = status,
                     startedAt = started,
@@ -541,6 +631,18 @@ class LocalK6TestRunService(
                     // parse. COMPLETED runs get `error = null`.
                     error = if (status == TestRunStatus.COMPLETED) null else consoleOutput,
                 )
+            runs[run.id] = finalRun
+            // Persist the terminal state to H2 so the row reflects
+            // the final outcome (status, summary, exit code,
+            // finishedAt). The /api/operations/runs endpoint and
+            // the × N badge in the operation list read from the DB,
+            // and a container restart after this point must find
+            // the run in a terminal state, not the stale QUEUED
+            // snapshot that create() wrote. Updates the
+            // denormalised per-endpoint counter so the badge ticks
+            // up exactly once per run.
+            runRepository.save(finalRun.toTestRunEntity())
+            updateOperationStatistics(finalRun)
         } catch (exception: java.io.IOException) {
             // Reading the script or summary file failed. cancel()
             // may have raced ahead and pre-set the run as STOPPING
@@ -556,13 +658,20 @@ class LocalK6TestRunService(
                     null -> TestRunStatus.FAILED
                 }
             val latest = runs[run.id] ?: run
-            runs[run.id] =
+            val finalRun =
                 latest.copy(
                     status = status,
                     startedAt = started,
                     finishedAt = Instant.now().toString(),
                     error = exception.message,
                 )
+            runs[run.id] = finalRun
+            // Same persistence contract as the main try block:
+            // even when the run never produced k6 output we still
+            // record the terminal status so the DB row matches the
+            // in-memory state and the × N badge ticks up.
+            runRepository.save(finalRun.toTestRunEntity())
+            updateOperationStatistics(finalRun)
         } finally {
             processes.remove(run.id)
             directory.toFile().deleteRecursively()

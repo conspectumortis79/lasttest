@@ -138,6 +138,41 @@ class DemoTrafficControllerTest {
         assertTrue(log.snapshotCalled)
     }
 
+    @Test
+    fun `clearRequests empties the log and returns the empty envelope`() {
+        val log = RecordingDemoRequestLog()
+        log.entries.add(
+            entry(method = "GET", path = "/demo-api/products", status = 200, runId = "r"),
+        )
+        log.entries.add(
+            entry(method = "POST", path = "/demo-api/products/search", status = 401, runId = "r"),
+        )
+        val controller = DemoTrafficController(log, DefaultDemoControllerToggle())
+
+        val response = controller.clearRequests()
+
+        // The log must have been cleared.
+        assertTrue(log.entries.isEmpty(), "clear() must drop every entry the log held")
+        // The response mirrors the empty envelope so the client can
+        // adopt it as the new local state without a follow-up GET.
+        assertEquals(null, response.runId)
+        assertEquals(0, response.count)
+        assertEquals(emptyList(), response.entries)
+    }
+
+    @Test
+    fun `clearRequests is idempotent on an already-empty log`() {
+        // The dashboard's "reset" button may be clicked twice in
+        // a row; the second call must not error and must still
+        // return the empty envelope.
+        val controller = DemoTrafficController(RecordingDemoRequestLog(), DefaultDemoControllerToggle())
+
+        val response = controller.clearRequests()
+
+        assertEquals(0, response.count)
+        assertEquals(emptyList(), response.entries)
+    }
+
     private fun entry(
         method: String,
         path: String,
@@ -159,6 +194,7 @@ class DemoTrafficControllerTest {
         var lastRunId: String? = null
         var lastLimit: Int = 0
         var snapshotCalled: Boolean = false
+        var clearCount: Int = 0
 
         override fun record(entry: DemoRequestLogEntry) {
             entries.add(entry)
@@ -179,6 +215,7 @@ class DemoTrafficControllerTest {
 
         override fun clear() {
             entries.clear()
+            clearCount++
         }
     }
 }

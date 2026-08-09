@@ -1139,27 +1139,17 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
 /* ---- Result-Header, Notice und Foot (Pass + Fail nach k6-Abschluss) ---- */
 
 /* Header row that carries the BESTANDEN / FAILED / STOPPED / ABORTED
-   pill, the Exit-Code caption, the optional stop reason and the
-   "Ausführlicher k6-Testbericht" link (right-aligned). `flex-end`
-   keeps every child's bottom edge on the same baseline so the
-   bigger `.report-btn` (its own padding/font-size) hangs down from
-   the same line as the small status pill — the visual goal stated
-   in the request: "Die Unterkante des ausführlicher k6-Testbericht
-   soll dabei auf höhe der Unterkante vom bestanden-Badge links
-   sein." */
+   pill, the Exit-Code caption and the optional stop reason.
+   `flex-end` keeps every child's bottom edge on the same baseline
+   so the stop-reason text hangs down from the same line as the
+   status pill. The right-aligned "Ausführlicher k6-Testbericht"
+   button used to live here too, but it was removed in favour of
+   the "K6 Bericht öffnen" tab in the run detail tab strip. */
 .run-result-head {
   display: flex;
   align-items: flex-end;
   gap: .65rem;
   margin: .9rem 0 .55rem;
-}
-
-/* Pushes the report link to the right edge of the row. Combined
-   with the parent's `align-items: flex-end` the link's bottom edge
-   sits exactly on the bottom edge of the status pill, which is
-   what the request asks for. */
-.run-result-head .report-btn {
-  margin-left: auto;
 }
 .status-badge {
   padding: .2rem .6rem;
@@ -1305,42 +1295,6 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: .74rem;
 }
-
-/* Untere Zeile: k6-Konsolenausgabe + k6-JSON-Rohdaten. Nutzt jetzt
-   die volle Kartenbreite, weil der Report-Button oben in den
-   Header gewandert ist (siehe .result-header-actions). */
-.result-extras {
-  margin-top: .9rem;
-  padding-top: .8rem;
-  border-top: 1px dashed #293950;
-}
-.result-extras-details { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
-.result-extras-details details > summary { cursor: pointer; color: #dbe5f3; font-size: .85rem; list-style: none; }
-.result-extras-details details > summary::-webkit-details-marker { display: none; }
-.result-extras-details details > summary::before { content: "▸ "; color: #7d63ff; }
-.result-extras-details details[open] > summary::before { content: "▾ "; }
-.result-extras-details pre {
-  margin: .35rem 0 0; padding: .55rem .7rem;
-  border: 1px solid #233049; border-radius: 6px;
-  background: #080d14; color: #cbd6e6;
-  font-family: "SFMono-Regular", Consolas, monospace; font-size: .78rem;
-  max-height: 320px; overflow: auto;
-}
-.report-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: .45rem;
-  padding: .5rem .85rem;
-  border: 1px solid #7d63ff;
-  border-radius: 8px;
-  background: #1a1d3a;
-  color: #c5b8ff;
-  font-size: .82rem;
-  font-weight: 700;
-  text-decoration: none;
-}
-.report-btn:hover { background: #2a2660; color: #fff; }
-.report-btn::after { content: "↗"; font-weight: 500; }
 
 /* ---- Card header with run ID + report button ---------------------------- */
 /* Two rows: top has step + title + run ID (right-aligned), below
@@ -1688,19 +1642,6 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   background: #1c2638;
 }
 
-/* Per-run detail header. The „Ausführlicher k6 Testbericht"-Button
-   sits ganz rechts über den verkürzten Ergebnissen (TestRunSummary
-   darunter). flex-end schiebt das einzige Kind-Element nach rechts
-   — bei mehreren Kindern würde space-between sie gleichmäßig
-   verteilen, was hier unerwünscht wäre. */
-.result-detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: .65rem;
-  flex-wrap: wrap;
-  margin-bottom: .85rem;
-}
 .result-header-top {
   /* Take the full card width so the step badge sits on the far left
      and the run ID sits on the far right (margin-left: auto) —
@@ -1919,17 +1860,8 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .report-parameter-list > div { display: grid; grid-template-columns: auto 1fr; gap: .25rem .5rem; padding: .65rem; border: 1px solid #e9d7fe; border-radius: 8px; background: #fff; }
 .report-parameter-list span { color: #6941c6; font-size: .7rem; font-weight: 800; text-transform: uppercase; }
 .report-parameter-list code { grid-column: 1 / -1; color: #344054; overflow-wrap: anywhere; }
-.report-operation details, .report-raw details { margin-top: .75rem; }
-.report-operation summary, .report-raw summary { color: #6941c6; font-weight: 800; cursor: pointer; }
-.report-script { margin-top: 1rem !important; padding-top: 1rem; border-top: 1px solid #eaecf0; }
-.script-warning { margin: 1rem 0; padding: .85rem 1rem; border: 1px solid #fedf89; border-radius: 9px; color: #93370d; background: #fffaeb; }
-.script-command { display: grid; gap: .55rem; margin: 1rem 0; padding: .85rem 1rem; border: 1px solid #e4daf6; border-radius: 11px; background: linear-gradient(135deg, #faf7ff 0%, #f4eeff 100%); }
-.script-command-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
-.script-command span { color: #6941c6; font-size: .72rem; font-weight: 800; letter-spacing: .04rem; text-transform: uppercase; }
-.script-command code { color: #101828; overflow-wrap: anywhere; font-size: .85rem; }
-.script-download { display: inline-block; padding: .75rem 1rem; border-radius: 9px; color: #fff; background: #6941c6; font-weight: 800; text-decoration: none; }
-.script-download:hover { background: #53389e; }
-.script-actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin: 1rem 0; }
+.report-operation details { margin-top: .75rem; }
+.report-operation summary { color: #6941c6; font-weight: 800; cursor: pointer; }
 
 /* ---- Ramp-Grafik (Report) ---------------------------------------------- */
 
@@ -2005,77 +1937,6 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 
 @media (max-width: 720px) { .profile-fields-grid { grid-template-columns: 1fr; } .stages-table th, .stages-table td { padding: .35rem; } }
 
-/* Glassmorphism: zwei versetzte Glas-Panels (Vorderglas + Schatten-Layer dahinter). */
-.script-copy {
-  position: relative;
-  isolation: isolate;
-  display: inline-flex;
-  align-items: center;
-  gap: .35rem;
-  padding: .45rem .85rem;
-  font-size: .78rem;
-  font-weight: 700;
-  letter-spacing: .01rem;
-  border: 1px solid #ffffff;
-  border-radius: 10px;
-  color: #2e1065;
-  background: linear-gradient(135deg, #ffffff 0%, #f5f1ff 100%);
-  cursor: pointer;
-  font-family: inherit;
-  user-select: none;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 1),
-    0 1px 1px rgba(46, 16, 101, .08),
-    0 8px 22px rgba(105, 65, 198, .22);
-  transition: transform .15s ease, box-shadow .15s ease, color .15s ease, border-color .15s ease, background .15s ease;
-}
-.script-copy::before {
-  content: '';
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  right: -4px;
-  bottom: -4px;
-  z-index: -1;
-  border-radius: inherit;
-  border: 1px solid rgba(255, 255, 255, .9);
-  background: linear-gradient(135deg, rgba(255, 255, 255, .55) 0%, rgba(245, 241, 255, .3) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .7),
-    0 4px 14px rgba(105, 65, 198, .15);
-  pointer-events: none;
-  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, background .15s ease;
-}
-.script-copy:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 1),
-    0 1px 1px rgba(46, 16, 101, .1),
-    0 12px 28px rgba(105, 65, 198, .3);
-}
-.script-copy:hover::before {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .8),
-    0 6px 18px rgba(105, 65, 198, .2);
-}
-.script-copy:active { transform: translateY(0); }
-.script-copy:focus-visible { outline: 2px solid #9a5df3; outline-offset: 2px; }
-.script-copy.copied {
-  color: #0e5132;
-  border-color: #d1fadf;
-  background: linear-gradient(135deg, #ecfdf3 0%, #d1fadf 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 1),
-    0 1px 1px rgba(14, 81, 50, .08),
-    0 8px 22px rgba(31, 122, 77, .22);
-}
-.script-copy.copied::before {
-  border-color: rgba(167, 244, 197, .9);
-  background: linear-gradient(135deg, rgba(236, 253, 244, .6) 0%, rgba(209, 250, 223, .35) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .8),
-    0 4px 14px rgba(31, 122, 77, .15);
-}
 .report-page pre { max-height: 600px; color: #e4e7ec; background: #101828; white-space: pre-wrap; overflow-wrap: anywhere; }
 .report-table-scroll { overflow-x: auto; }
 .report-table { width: 100%; margin-bottom: 1rem; border-collapse: collapse; font-size: .78rem; }
@@ -2095,9 +1956,32 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .report-alert, .report-loading { padding: 1rem; border: 1px solid #fedf89; border-radius: 10px; color: #93370d; background: #fffaeb; }
 .report-alert.failure { border-color: #fecdca; color: #b42318; background: #fef3f2; }
 
+/* Demo-Traffic toolbar: the reset button sits next to the
+ * "Print" button. The container groups both so the toolbar's
+ * `justify-content: space-between` keeps the back-link on the
+ * left and the action cluster on the right. */
+.report-toolbar-actions { display: flex; align-items: center; gap: .6rem; }
+/* The reset button uses a neutral outline so it does not
+ * compete with the primary purple "Print" button — the visual
+ * hierarchy is "reset is a secondary action, print is the
+ * primary one". On hover the outline darkens to mirror the
+ * toolbar's other interactive surfaces. */
+.report-toolbar-reset { background: #fff !important; color: #344054 !important; border: 1px solid #d0d5dd; padding: .5rem 1rem; border-radius: 8px; font-weight: 600; cursor: pointer; transition: border-color .15s, color .15s; }
+.report-toolbar-reset:hover:not(:disabled) { border-color: #6941c6; color: #6941c6 !important; }
+.report-toolbar-reset:disabled { opacity: .55; cursor: progress; }
+
+/* In-page banner that surfaces the outcome of the most recent
+ * reset click. Sits between the page header and the table, so
+ * the user notices it without having to scan the toolbar. The
+ * palette mirrors `.report-alert` so the design language is
+ * consistent across the report. */
+.demo-traffic-banner { margin: 0 0 1.5rem; padding: .75rem 1rem; border-radius: 10px; font-weight: 600; }
+.demo-traffic-banner-ok { border: 1px solid #abefc6; color: #054f31; background: #ecfdf3; }
+.demo-traffic-banner-failed { border: 1px solid #fecdca; color: #b42318; background: #fef3f2; }
+
 @media (max-width: 900px) { .report-cards, .report-cards.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }.report-parameter-list { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .grid, .configuration-grid, .report-cards, .report-cards.compact, .report-thresholds, .report-info-grid { grid-template-columns: 1fr; }.configuration-grid { padding-left: .9rem; }.body-box { grid-column: auto; }.operation-heading { grid-template-columns: auto 64px 1fr; }.operation-summary { padding-left: calc(64px + .7rem + 1.55rem); }.actions { flex-direction: column; }.actions > * { text-align: center; }.report-page { width: 100%; margin: 0; padding: 1rem; border-radius: 0; }.report-title-row { align-items: flex-start; flex-direction: column; }.report-toolbar { align-items: stretch; flex-direction: column; }.report-toolbar > * { text-align: center; } }
-@media print { body { background: #fff; }.report-page { width: 100%; margin: 0; padding: 0; box-shadow: none; }.report-toolbar { display: none; }.report-section { break-before: auto; }.report-card, .report-threshold, .report-info, .report-operation, .report-table tr { break-inside: avoid; }.report-raw { break-before: page; }.report-page pre { max-height: none; }.report-operation details, .report-raw details { display: block; }.report-operation details > *, .report-raw details > * { display: block; }.demo-traffic-row { break-inside: avoid; } }
+@media print { body { background: #fff; }.report-page { width: 100%; margin: 0; padding: 0; box-shadow: none; }.report-toolbar { display: none; }.report-section { break-before: auto; }.report-card, .report-threshold, .report-info, .report-operation, .report-table tr { break-inside: avoid; }.report-page pre { max-height: none; }.report-operation details { display: block; }.report-operation details > * { display: block; }.demo-traffic-row { break-inside: avoid; } }
 
 /* ---- Demo traffic dashboard ----------------------------------
    The page re-uses the `.report-*` shell from the k6 report so
@@ -2362,31 +2246,6 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 }
 .run-detail-tab-external:hover .external-icon {
   color: #c5b8ff;
-}
-
-/* ====================================================================
-   "Ausführlicher k6-Testbericht" button. Prominent violet
-   gradient button next to "Im neuen Tab öffnen" in the
-   detail-head row. Includes a small pulsing live dot.
-   ==================================================================== */
-.btn-report {
-  background: linear-gradient(180deg, #1a2440 0%, #131c30 100%);
-  border: 1px solid #3a4d8a;
-  color: #c5b8ff;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font: inherit; font-size: 12.5px;
-  font-weight: 700;
-  cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px;
-  text-decoration: none;
-}
-.btn-report:hover { background: #1f2c4a; border-color: #5a4293; }
-.btn-report .icon { font-size: 12px; }
-.btn-report .live-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: #7d63ff;
-  animation: lasttest-pulse 1.4s ease-in-out infinite;
 }
 
 /* ====================================================================
@@ -3276,6 +3135,213 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
   margin: 0 auto;
   line-height: 1.5;
 }
+
+/* ====================================================================
+   k6-Script Tab — dark-theme counterpart of the light script
+   section in the printable report. Mirrors the shape the user
+   already knows from the report but swaps the report's white
+   surface for the dashboard's dark cards so the tab reads as
+   part of the chrome rather than as an embedded page.
+   ==================================================================== */
+.k6-script-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.k6-script-tab-head {
+  background: #0f1722;
+  border: 1px solid #293950;
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.k6-script-tab-title {
+  margin: 0 0 6px 0;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+}
+.k6-script-tab-intro {
+  margin: 0;
+  color: #c5d2e4;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.k6-script-section {
+  background: #0f1722;
+  border: 1px solid #293950;
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+.k6-script-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.k6-script-section-title {
+  margin: 0 0 4px 0;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: .02rem;
+}
+.k6-script-section-intro {
+  margin: 0 0 10px 0;
+  color: #c5d2e4;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.k6-script-section-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.k6-script-warning {
+  margin: 6px 0 12px 0;
+  padding: 10px 12px;
+  border: 1px solid #5a4293;
+  border-radius: 8px;
+  background: #1a1430;
+  color: #c5b8ff;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.k6-script-warning strong { color: #fff; }
+.k6-script-pre {
+  margin: 0;
+  padding: 12px 14px;
+  background: #060c14;
+  border: 1px solid #1f2a3a;
+  border-radius: 8px;
+  color: #d2deec;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre;
+}
+.k6-script-loading {
+  padding: 18px 0;
+  color: #93a2b8;
+  font-size: 13px;
+  text-align: center;
+}
+.k6-script-error {
+  padding: 12px 14px;
+  border: 1px solid #893c50;
+  border-radius: 8px;
+  background: #2a1118;
+  color: #ffb5c3;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.k6-script-error-title {
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 4px;
+}
+.k6-script-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #6941c6;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  text-decoration: none;
+  border: 1px solid #5a36ad;
+  transition: background 0.15s ease;
+}
+.k6-script-download:hover { background: #53389e; }
+.k6-script-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: transparent;
+  color: #c5b8ff;
+  font-weight: 700;
+  font-size: 12.5px;
+  border: 1px solid #5a4293;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.k6-script-copy:hover { background: #1a1430; color: #fff; }
+.k6-script-copy:disabled { opacity: 0.4; cursor: not-allowed; }
+.k6-script-copy.copied {
+  background: #163b2a;
+  color: #8fe8c1;
+  border-color: #2d6a4f;
+}
+.k6-script-command {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #060c14;
+  border: 1px solid #1f2a3a;
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.k6-script-command code {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #c5b8ff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.k6-script-cmd-list {
+  margin: 0 0 10px 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.k6-script-cmd-list li {
+  background: #060c14;
+  border: 1px solid #1f2a3a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #d2deec;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.k6-script-cmd-list li strong { color: #fff; display: inline-block; margin-right: 6px; }
+.k6-script-cmd-list li code {
+  display: inline-block;
+  margin-top: 4px;
+  color: #c5b8ff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.k6-script-cmd-desc {
+  display: block;
+  margin-top: 6px;
+  color: #93a2b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.k6-script-external-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: #c5b8ff;
+  font-weight: 700;
+  font-size: 13px;
+  text-decoration: none;
+}
+.k6-script-external-link:hover { color: #fff; text-decoration: underline; }
 
 
 

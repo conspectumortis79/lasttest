@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import de.lasttest.api.CreateTestRunRequest
 import de.lasttest.api.TestRun
 import de.lasttest.api.TestRunConfiguration
+import java.time.Instant
 
 /**
  * Maps a persisted [TestRunEntity] back to the API-facing
@@ -48,4 +49,54 @@ fun TestRunEntity.toTestRun(mapper: ObjectMapper = ObjectMapper()): TestRun {
         cancelledByForce = cancelledByForce,
         originalRequest = originalRequest,
     )
+}
+
+/**
+ * Inverse of [toTestRun]: turns an API-facing [TestRun] into a
+ * JPA-persistable [TestRunEntity]. Used by
+ * [LocalK6TestRunService] to write new runs to H2 so a container
+ * restart does not drop the history. The JSON columns mirror
+ * what [toTestRun] reads back; the test run survives a full
+ * round trip through the database.
+ *
+ * Malformed JSON (e.g. an exotic [CreateTestRunRequest] shape
+ * Jackson cannot serialise) is swallowed the same way the read
+ * path swallows parse errors: the affected column stays null
+ * and the rest of the entity is still saved. Losing the
+ * originalRequest is recoverable (the run is still listed);
+ * losing the whole save is not.
+ */
+fun TestRun.toTestRunEntity(mapper: ObjectMapper = ObjectMapper()): TestRunEntity {
+    val entity = TestRunEntity()
+    entity.id = id
+    entity.status = status
+    entity.createdAt = Instant.parse(createdAt)
+    entity.startedAt = startedAt?.let { Instant.parse(it) }
+    entity.finishedAt = finishedAt?.let { Instant.parse(it) }
+    entity.exitCode = exitCode
+    entity.configurationJson =
+        configuration?.let {
+            runCatching { mapper.writeValueAsString(it) }.getOrNull()
+        }
+    // `summary` is a free-form `Map<String, Any?>` with a single
+    // `raw` key today; persist the raw k6 output as a CLOB so the
+    // read path can re-wrap it into a `mapOf("raw" to it)`. Any
+    // other shape (or a missing key) is treated as no summary.
+    entity.summaryJson = (summary?.get("raw") as? String)
+    entity.consoleOutput = consoleOutput
+    entity.error = error
+    entity.cancelledAt = cancelledAt?.let { Instant.parse(it) }
+    entity.cancelledByForce = cancelledByForce
+    entity.originalRequestJson =
+        originalRequest?.let {
+            runCatching { mapper.writeValueAsString(it) }.getOrNull()
+        }
+    // Flat columns for the per-endpoint × N badge GROUP BY.
+    // The configuration is the source of truth, these are a
+    // denormalised cache populated at write time.
+    val firstOp = configuration?.operations?.firstOrNull()
+    entity.operationMethod = firstOp?.method
+    entity.operationPath = firstOp?.path
+    entity.operationId = firstOp?.operationId
+    return entity
 }

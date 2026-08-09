@@ -4,6 +4,7 @@ import de.lasttest.demo.DemoControllerToggle
 import de.lasttest.demo.DemoRequestLog
 import de.lasttest.demo.DemoRequestLogEntry
 import de.lasttest.demo.RingBufferDemoRequestLog
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -96,6 +97,25 @@ internal class DemoTrafficController(
         )
     }
 
+    /**
+     * Drops every captured entry so the dashboard can be reset to
+     * a pristine "as if the demo API was never started" state.
+     * Both the in-memory ring buffer and the H2 persistent copy
+     * are cleared; the response mirrors the [EMPTY_TRAFFIC]
+     * sentinel so the client can replace its local state without
+     * a follow-up `GET /requests` round-trip.
+     *
+     * The endpoint is a single-process call; there is no per-user
+     * state. Two browsers sharing the same backend would also
+     * share the reset — acceptable for lasttest's single-user
+     * design, same as the demo toggle.
+     */
+    @DeleteMapping("/requests")
+    fun clearRequests(): DemoTrafficResponse {
+        demoRequestLog.clear()
+        return EMPTY_TRAFFIC
+    }
+
     private fun clampLimit(limit: Int?): Int {
         if (limit == null) return DEFAULT_LIMIT
         if (limit <= 0) return DEFAULT_LIMIT
@@ -115,6 +135,18 @@ internal class DemoTrafficController(
 
     private companion object {
         const val DEFAULT_LIMIT: Int = 500
+
+        // Wire-format envelope returned by `DELETE /requests` so the
+        // dashboard can replace its local state without a follow-up
+        // `GET /requests`. Matches the empty state the server would
+        // emit on a freshly booted instance.
+        val EMPTY_TRAFFIC: DemoTrafficResponse =
+            DemoTrafficResponse(
+                runId = null,
+                limit = DEFAULT_LIMIT,
+                count = 0,
+                entries = emptyList(),
+            )
     }
 }
 

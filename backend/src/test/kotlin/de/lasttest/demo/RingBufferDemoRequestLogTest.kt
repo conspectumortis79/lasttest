@@ -124,6 +124,24 @@ class RingBufferDemoRequestLogTest {
     }
 
     @Test
+    fun `clear also drops the persistent copy so a restart does not resurrect the entries`() {
+        // The dashboard's "reset" button promises a pristine state.
+        // The in-memory buffer alone would honour that for the
+        // current session, but the H2 side-write would silently
+        // surface the old entries on a container restart and undo
+        // the reset. The contract is therefore "clear wipes both".
+        val log = newLog()
+        log.record(entry("1", runId = "r"))
+        log.record(entry("2", runId = "r"))
+
+        log.clear()
+
+        // The repository is the in-memory no-op; "all rows gone"
+        // is observable through its `count()`.
+        assertEquals(0, noopRepository.count(), "persistent copy must be wiped on clear()")
+    }
+
+    @Test
     fun `concurrent recorders all see their entries in the snapshot`() {
         // The interceptor is called by any Spring MVC worker
         // thread, so writes must be safe under concurrent load.

@@ -10,6 +10,7 @@ import { deepEqual, equal, ok } from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   EMPTY_DEMO_TRAFFIC,
+  clearDemoTraffic,
   fetchDemoTraffic,
   formatTrafficTimestamp,
   statusBucket,
@@ -185,4 +186,66 @@ test('EMPTY_DEMO_TRAFFIC carries the expected sentinel values', () => {
   equal(EMPTY_DEMO_TRAFFIC.count, 0)
   ok(Array.isArray(EMPTY_DEMO_TRAFFIC.entries))
   equal(EMPTY_DEMO_TRAFFIC.entries.length, 0)
+})
+
+test('clearDemoTraffic sends a DELETE to the requests endpoint', async () => {
+  // The dashboard's "reset" button must hit the same URL the GET
+  // reads from, with a DELETE method. A typo here would silently
+  // hit a 405 and the list would never reset.
+  const { calls, restore } = installFetchMock(() => new Response(JSON.stringify(EMPTY_DEMO_TRAFFIC), { status: 200 }))
+  try {
+    await clearDemoTraffic()
+    equal(calls.length, 1)
+    equal(calls[0]?.url, '/api/demo-traffic/requests')
+    equal(calls[0]?.init?.method, 'DELETE')
+  } finally {
+    restore()
+  }
+})
+
+test('clearDemoTraffic resolves with the cleared envelope on a 2xx response', async () => {
+  // The server returns the empty envelope in the body so the
+  // dashboard can adopt it as the new local state without a
+  // follow-up GET.
+  const { calls, restore } = installFetchMock(() => new Response(JSON.stringify(EMPTY_DEMO_TRAFFIC), { status: 200 }))
+  try {
+    const result = await clearDemoTraffic()
+    equal(result.kind, 'cleared')
+    if (result.kind === 'cleared') {
+      deepEqual(result.response, EMPTY_DEMO_TRAFFIC)
+    }
+    equal(calls.length, 1)
+  } finally {
+    restore()
+  }
+})
+
+test('clearDemoTraffic reports failure on a non-2xx response so the caller can keep its state', async () => {
+  // A 5xx (or any other non-2xx) is a "failed" outcome: the
+  // dashboard must NOT swap its local state for EMPTY_DEMO_TRAFFIC
+  // because the server might still hold the entries. The error
+  // is surfaced via the discriminated `kind` instead of thrown.
+  const { restore } = installFetchMock(() => new Response('boom', { status: 500 }))
+  try {
+    const result = await clearDemoTraffic()
+    equal(result.kind, 'failed')
+  } finally {
+    restore()
+  }
+})
+
+test('clearDemoTraffic reports failure when fetch itself throws', async () => {
+  // Same contract as the non-2xx case: a network error is a
+  // `failed` outcome, never a thrown exception. The polling loop
+  // must keep running so a transient outage does not freeze the
+  // dashboard.
+  const { restore } = installFetchMock(() => {
+    throw new Error('network down')
+  })
+  try {
+    const result = await clearDemoTraffic()
+    equal(result.kind, 'failed')
+  } finally {
+    restore()
+  }
 })

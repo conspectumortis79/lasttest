@@ -9,12 +9,39 @@ import de.lasttest.domain.TimeSeriesReader
 import org.springframework.http.HttpHeaders
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class LastTestControllerTest {
+    private companion object {
+        // The dashboard polls the time-series endpoint at a 1 s
+        // cadence. We replay that burst in the race-condition
+        // regression test so a flake in a single iteration is
+        // caught by the assertion message rather than by a 404
+        // landing on the user's console.
+        const val POLL_WINDOW: Int = 5
+    }
+
     private val imported = ImportedSpecification("Test API", "1", "https://example.test", emptyList())
-    private val existingRun = TestRun("run-1", TestRunStatus.COMPLETED, "2026-01-01T00:00:00Z")
-    private val queuedRun = TestRun("run-queued", TestRunStatus.QUEUED, "2026-01-01T00:00:00Z")
+    private val existingRequest = CreateTestRunRequest(specification = "openapi document", baseUrl = "https://target.test")
+    private val existingRun =
+        TestRun(
+            id = "run-1",
+            status = TestRunStatus.COMPLETED,
+            createdAt = "2026-01-01T00:00:00Z",
+            // The controller's rerun lookup rejects the run with
+            // a 409 when the live snapshot has no preserved
+            // [CreateTestRunRequest]. The happy-path test below
+            // therefore has to attach a request to the run it
+            // asks the controller to rerun.
+            originalRequest = existingRequest,
+        )
+    private val queuedRun =
+        TestRun(
+            id = "run-queued",
+            status = TestRunStatus.QUEUED,
+            createdAt = "2026-01-01T00:00:00Z",
+        )
     private val runningRun =
         TestRun(
             id = "run-running",
@@ -123,7 +150,7 @@ class LastTestControllerTest {
 
         assertEquals(202, response.statusCode.value())
         assertEquals(existingRun, response.body)
-        assertEquals(request, service.createdRequest)
+        assertEquals(request, service.lastCreatedRequest)
     }
 
     @Test
@@ -162,9 +189,77 @@ class LastTestControllerTest {
     }
 
     @Test
-    fun `returns 404 when the run has not started yet`() {
+    fun `returns 200 with empty arrays when the run has not started yet so the dashboard polling does not log a 404`() {
+        // Regression test for the bug the user reported: every
+        // time a new test was started, the dashboard's
+        // `OverviewLiveRamp` polling loop fired a
+        // `GET /api/test-runs/{id}/time-series` request before
+        // `LocalK6TestRunService.execute()` had flipped the run
+        // to RUNNING with a `startedAt` timestamp. The previous
+        // controller returned 404 in that window, which produced
+        // a visible `XHR 404` in the browser console on every
+        // test start. The right behaviour is: the run exists
+        // (the in-memory map has it), so answer 200 with
+        // empty arrays. The InfluxDB stream will deliver the
+        // first real sample a moment later when k6 starts
+        // emitting heartbeats.
         val response = controller.timeSeries(queuedRun.id)
-        assertEquals(404, response.statusCode.value())
+
+        assertEquals(200, response.statusCode.value())
+        val body = response.body
+        // The run id round-trips so the client can correlate
+        // the response with the polling entry — important
+        // when the dashboard jumps between runs in the
+        // multi-run dashboard.
+        assertEquals(queuedRun.id, body?.runId)
+        // No samples have been written yet (k6 hasn't started),
+        // so both arrays are empty. The frontend's
+        // `EMPTY_TIME_SERIES` shape renders the planned line
+        // from the load profile and shows no actual line until
+        // the first sample lands.
+        assertEquals(emptyList(), body?.vus)
+        assertEquals(emptyList(), body?.requestsPerSecond)
+        // The reader must NOT have been called when the
+        // window is empty: the run has no `startedAt`, so
+        // every call to `timeSeriesReader.readVusOverTime`
+        // would have produced a malformed query against the
+        // time-series database. The 404 path was protecting
+        // the reader from that, but it leaked through to the
+        // client. The reader-skip path is the proper fix.
+        // `points` is a `MutableMap`, so a missing key reads
+        // back as `null` — that is the exact signal we want:
+        // "the reader was never asked for this run".
+        assertNull(timeSeriesReader.points[queuedRun.id])
+    }
+
+    @Test
+    fun `consecutive polls on a never-started run all stay 200 so the dashboard polling loop never logs a 404`() {
+        // Regression test for the race the user reported:
+        // `OverviewLiveRamp` polls `GET /api/test-runs/{id}/time-series`
+        // at a 1 s cadence from the moment the run is created.
+        // The previous controller returned 404 for every poll in the
+        // window between `LocalK6TestRunService.create()` and
+        // `execute()` flipping the run to RUNNING — i.e. for the
+        // entire first few hundred milliseconds of every test start.
+        // We replay that polling loop in-test and assert that none
+        // of the calls produce a 404. The body stays empty (no k6
+        // samples yet); the dashboard renders the target-only line
+        // and the browser console stays clean.
+        repeat(POLL_WINDOW) { attempt ->
+            val response = controller.timeSeries(queuedRun.id)
+            assertEquals(
+                200,
+                response.statusCode.value(),
+                "Poll #$attempt of $POLL_WINDOW returned ${response.statusCode.value()} — " +
+                    "the dashboard polling loop would log this 404 in the browser console",
+            )
+            assertEquals(emptyList(), response.body?.vus)
+            assertEquals(emptyList(), response.body?.requestsPerSecond)
+        }
+        // After the polling burst the reader still must not have
+        // been touched — k6 has not started, so any call to
+        // `readVusOverTime` would issue a malformed query.
+        assertNull(timeSeriesReader.points[queuedRun.id])
     }
 
     @Test
@@ -174,8 +269,8 @@ class LastTestControllerTest {
         // polls this endpoint every 2 s while the run is in
         // flight, so we must NOT 404 here — instead we fall back
         // to "now" for the window end so the chart keeps
-        // ticking. Only a never-started run (startedAt still
-        // null) yields 404.
+        // ticking. The reader IS called with the run's
+        // `startedAt` + "now" so the live tail is included.
         val response = controller.timeSeries(runningRun.id)
         assertEquals(200, response.statusCode.value())
     }
@@ -292,13 +387,16 @@ class LastTestControllerTest {
     @Test
     fun `rerun returns 202 with a newly queued run`() {
         val newRun = TestRun(id = "rerun-new", status = TestRunStatus.QUEUED, createdAt = "2026-01-01T00:01:00Z")
-        service.rerunReturn = newRun
+        service.createdReturn = newRun
 
         val response = controller.rerun(existingRun.id)
 
         assertEquals(202, response.statusCode.value())
         assertEquals(newRun, response.body)
-        assertEquals(existingRun.id, service.lastRerunId)
+        // The controller must replay the preserved request that
+        // came back from the in-memory lookup, not a fresh one
+        // the client has to re-send.
+        assertEquals(existingRequest, service.lastCreatedRequest)
     }
 
     @Test
@@ -313,22 +411,123 @@ class LastTestControllerTest {
     }
 
     @Test
-    fun `rerun returns 409 when the service cannot rerun the run`() {
-        // The run exists (we have a recording for it) but the
-        // service rejected the rerun because no originalRequest was
-        // preserved — the right contract code is 409.
-        service.rerunReturn = null
+    fun `rerun returns 409 when the in-memory run has no preserved originalRequest`() {
+        // Synthetic run without an `originalRequest` — the
+        // controller's lookup now returns 409 from the
+        // [LastTestController.lookupRerunRequest] helper before
+        // it ever asks the service to re-run. The service
+        // cannot reject the call because the call never
+        // reaches it.
+        val synthetic = TestRun(id = "synthetic", status = TestRunStatus.COMPLETED, createdAt = "2026-01-01T00:00:00Z")
+        val syntheticService =
+            RecordingTestRunService(synthetic, additionalRuns = emptyMap())
+        val syntheticController =
+            LastTestController(
+                importer =
+                    object : SpecificationImporter {
+                        override fun import(content: String): ImportedSpecification = imported
+                    },
+                testRuns = syntheticService,
+                demoSpecificationProvider = demoSpecificationProvider,
+                remoteFetcher = remoteFetcher,
+                timeSeriesReader = timeSeriesReader,
+                statisticsRepository = statisticsRepository,
+                runRepository = runRepository,
+            )
 
-        val response = controller.rerun(existingRun.id)
+        val response = syntheticController.rerun(synthetic.id)
 
         assertEquals(409, response.statusCode.value())
+        // The controller must not even attempt to start a new
+        // run when the lookup tells it the source has no
+        // preserved payload.
+        assertNull(syntheticService.lastCreatedRequest)
+    }
+
+    @Test
+    fun `rerun falls back to the database when the in-memory service does not know the run`() {
+        // The dashboard's "Erneut starten" right-click on a
+        // historical run (from a previous server session) used
+        // to 404 because the in-memory `runs` map is wiped on
+        // every restart. With the DB-backed fallback the
+        // controller finds the row, deserialises the preserved
+        // [CreateTestRunRequest] and starts a new k6 process.
+        val historicalId = "historical-7ce9"
+        val preservedJson =
+            """
+            {"specification":"openapi document","baseUrl":"https://target.test"}
+            """.trimIndent()
+        val persistedEntity = de.lasttest.domain.TestRunEntity()
+        persistedEntity.id = historicalId
+        persistedEntity.status = de.lasttest.api.TestRunStatus.STOPPED
+        persistedEntity.createdAt = java.time.Instant.parse("2026-08-08T20:00:00Z")
+        persistedEntity.originalRequestJson = preservedJson
+        runRepository.save(persistedEntity)
+        val newRun = TestRun(id = "rerun-historical-new", status = TestRunStatus.QUEUED, createdAt = "2026-08-08T20:30:00Z")
+        service.createdReturn = newRun
+
+        val response = controller.rerun(historicalId)
+
+        assertEquals(202, response.statusCode.value())
+        assertEquals(newRun, response.body)
+        // The replayed request must come from the persisted
+        // JSON, not from anything the client re-sent — the
+        // browser did not have to re-upload the spec.
+        assertNotNull(service.lastCreatedRequest)
+        assertEquals("openapi document", service.lastCreatedRequest?.specification)
+        assertEquals("https://target.test", service.lastCreatedRequest?.baseUrl)
+    }
+
+    @Test
+    fun `rerun returns 409 when the persisted row exists but has no originalRequestJson column`() {
+        // Pre-feature rows that predate the originalRequestJson
+        // column have a `null` payload. The dashboard still
+        // shows them in the timeline tab, but they cannot be
+        // rerun because the request that started them is
+        // gone. The right code is 409 — the resource exists
+        // but cannot do what the user asked.
+        val historicalId = "historical-no-request"
+        val persistedEntity = de.lasttest.domain.TestRunEntity()
+        persistedEntity.id = historicalId
+        persistedEntity.status = de.lasttest.api.TestRunStatus.COMPLETED
+        persistedEntity.createdAt = java.time.Instant.parse("2026-08-08T20:00:00Z")
+        // originalRequestJson deliberately left null.
+        runRepository.save(persistedEntity)
+
+        val response = controller.rerun(historicalId)
+
+        assertEquals(409, response.statusCode.value())
+        // The controller must not start a new run when the
+        // preserved request is missing.
+        assertNull(service.lastCreatedRequest)
+    }
+
+    @Test
+    fun `rerun returns 409 when the persisted originalRequestJson is malformed`() {
+        // A corrupt JSON column must not blow up the
+        // controller with a 500. The defensive
+        // `runCatching` in the lookup treats malformed
+        // payloads the same as missing ones.
+        val historicalId = "historical-malformed"
+        val persistedEntity = de.lasttest.domain.TestRunEntity()
+        persistedEntity.id = historicalId
+        persistedEntity.status = de.lasttest.api.TestRunStatus.COMPLETED
+        persistedEntity.createdAt = java.time.Instant.parse("2026-08-08T20:00:00Z")
+        persistedEntity.originalRequestJson = "{this is not valid JSON"
+        runRepository.save(persistedEntity)
+
+        val response = controller.rerun(historicalId)
+
+        assertEquals(409, response.statusCode.value())
+        assertNull(service.lastCreatedRequest)
     }
 
     private class RecordingTestRunService(
         private val run: TestRun,
         private val additionalRuns: Map<String, TestRun> = emptyMap(),
     ) : TestRunService {
-        var createdRequest: CreateTestRunRequest? = null
+        var lastCreatedRequest: CreateTestRunRequest? = null
+        var createdReturn: TestRun? = null
         var lastCancelId: String? = null
         var lastCancelForce: Boolean? = null
         var cancelReturn: Boolean = true
@@ -336,8 +535,8 @@ class LastTestControllerTest {
         var lastRerunId: String? = null
 
         override fun create(request: CreateTestRunRequest): TestRun {
-            createdRequest = request
-            return run
+            lastCreatedRequest = request
+            return createdReturn ?: run
         }
 
         override fun find(id: String): TestRun? = run.takeIf { id == it.id } ?: additionalRuns[id]

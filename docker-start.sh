@@ -6,7 +6,30 @@ URL="http://localhost:8286/"
 TIMEOUT=300
 
 echo "Starte lasttest via docker compose ..."
+
+# Pre-Pull der Images, die docker compose beim ersten Start ohnehin
+# ziehen würde. Parallel zum Build gestartet, damit der Netzwerk-Pull
+# mit dem Backend-/Frontend-Build überlappt. Pull-Fehler werden
+# ignoriert — docker compose versucht es dann selbst nochmal.
+(
+  for image in \
+    "influxdb:1.11" \
+    "grafana/grafana:11.2.0" \
+    "eclipse-temurin:25-jdk-alpine" \
+    "eclipse-temurin:25-jre-alpine" \
+    "node:22-alpine" \
+    "grafana/k6:latest"; do
+    docker pull "$image" >/dev/null 2>&1 &
+  done
+  wait || true
+) &
+
 docker compose up -d --build
+
+# Hintergrund-Pulls abschließen lassen, bevor das Skript endet.
+# Exit-Code egal — falls ein Pull fehlgeschlagen ist, hat docker
+# compose das bereits selbst nachgeholt.
+wait || true
 
 echo "Warte auf Container-Healthcheck ..."
 

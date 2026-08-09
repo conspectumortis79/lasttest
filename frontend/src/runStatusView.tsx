@@ -78,17 +78,9 @@ function RunProgress({ run, now }: RunProgressProps) {
 type RunSummaryProps = {
   run: TestRun
   lang: SupportedLanguage
-  /**
-   * Render the „Ausführlicher k6-Testbericht" link in the
-   * ResultHeader row (right-aligned, bottom-edge aligned with the
-   * status pill). Only the dashboard in App.tsx needs this — the
-   * full report view in TestRunReport.tsx already lives behind
-   * that link and must not show it again.
-   */
-  showReportButton?: boolean
 }
 
-function RunSummary({ run, lang, showReportButton }: RunSummaryProps) {
+function RunSummary({ run, lang }: RunSummaryProps) {
   const summary = parseK6Summary(run)
   if (!summary) {
     return <div className="run-summary-empty">{translate(lang, 'result.noData')}</div>
@@ -110,7 +102,7 @@ function RunSummary({ run, lang, showReportButton }: RunSummaryProps) {
   const failedNames = threshold.failedMetrics
 
   return <>
-    <ResultHeader passed={passed} run={run} lang={lang} showReportButton={showReportButton} />
+    <ResultHeader passed={passed} run={run} lang={lang} />
     <ThresholdNotice passed={passed} failedMetrics={failedNames} run={run} lang={lang} />
     {noRequests && <div className="run-summary-empty warning">{translate(lang, 'result.noRequests')}</div>}
     <div className="run-summary-cards">
@@ -135,14 +127,6 @@ type ResultHeaderProps = {
   passed: boolean | null
   run: TestRun
   lang: SupportedLanguage
-  /**
-   * When true, render the „Ausführlicher k6-Testbericht" link on
-   * the same row as the status pill. The link is right-aligned via
-   * `margin-left: auto` and its bottom edge is aligned with the
-   * pill's bottom edge via `align-items: flex-end` on
-   * `.run-result-head` (see App.css).
-   */
-  showReportButton?: boolean
 }
 
 function ResultHeader({ passed, run, lang }: ResultHeaderProps) {
@@ -233,15 +217,15 @@ function ThresholdNotice({ passed, failedMetrics, run, lang }: ThresholdNoticePr
 
 // ---- ResultFoot removed ----------------------------------------------------
 //
-// The report button has moved from its own header row into
-// `ResultHeader` (next to the BESTANDEN / ABGEBROCHEN pill) so it
-// sits on the same horizontal line as the status badge and stays
-// right-aligned via `margin-left: auto`. The k6 console output and
-// the k6 JSON raw-data details therefore keep the full card width
-// in `.result-extras`. The button is only rendered when the caller
-// passes `showReportButton` (currently only the dashboard in
-// App.tsx does; the full report view in TestRunReport.tsx leaves
-// it off because the report itself is the link's destination).
+// The k6 report used to have its own "Ausführlicher
+// k6-Testbericht" button in the ResultHeader row. That entry
+// point was removed when the run detail got its own "K6
+// Bericht öffnen" tab — the tab opens the same `/?report=`
+// URL in a new tab and is the single source of truth for
+// the report link. The console output, JSON raw data and
+// generated k6 script are reached via the dashboard's
+// run-detail tabs (console / script), not via the report
+// page itself.
 
 function parseFinishedAt(run: TestRun): number {
   const finished = new Date(run.finishedAt ?? '').getTime()
@@ -285,17 +269,11 @@ type RunFailureProps = {
   run: TestRun
   reason: FailureReason
   lang: SupportedLanguage
-  /**
-   * Forwarded to `ResultHeader` so the dashboard can keep its
-   * „Ausführlicher k6-Testbericht" link visible next to the
-   * FAIL/ABORTED pill; the full report view leaves it off.
-   */
-  showReportButton?: boolean
 }
 
-function RunFailure({ run, reason, lang, showReportButton }: RunFailureProps) {
+function RunFailure({ run, reason, lang }: RunFailureProps) {
   return <>
-    <ResultHeader passed={false} run={run} lang={lang} showReportButton={showReportButton} />
+    <ResultHeader passed={false} run={run} lang={lang} />
     <ThresholdNotice passed={false} failedMetrics={summariseThresholds(run).failedMetrics} run={run} lang={lang} />
     <div className={`run-failure kind-${reason.kind}`} role="alert">
       <div className="run-failure-head">
@@ -337,18 +315,9 @@ type RunStatusViewProps = {
    * site has already preprocessed `run.error` (e.g. to truncate it).
    */
   reasonOverride?: FailureReason
-  /**
-   * Render the „Ausführlicher k6-Testbericht" link in the terminal
-   * ResultHeader row. The dashboard (App.tsx) sets this to true so
-   * the link sits on the same vertical line as the status pill
-   * (BESTANDEN / ABGEBROCHEN / …) and is right-aligned; the full
-   * report view (TestRunReport.tsx) leaves it off because the
-   * report itself is the link's destination.
-   */
-  showReportButton?: boolean
 }
 
-export function RunStatusView({ run, now, reasonOverride, showReportButton }: RunStatusViewProps) {
+export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) {
   // The report reacts to the live language choice. Reading the
   // hook here means the user can flip the language in the
   // settings drawer while looking at a finished run and the
@@ -368,13 +337,13 @@ export function RunStatusView({ run, now, reasonOverride, showReportButton }: Ru
     return <RunProgress run={run} now={now} />
   }
   if (run.status === 'COMPLETED') {
-    return <RunSummary run={run} lang={lang} showReportButton={showReportButton} />
+    return <RunSummary run={run} lang={lang} />
   }
   if (run.status === 'STOPPED') {
     // Graceful stop acknowledged by k6: same shape as COMPLETED
     // but with a STOPPED pill so the user can tell that the run
     // did not run for its planned duration.
-    return <RunSummary run={run} lang={lang} showReportButton={showReportButton} />
+    return <RunSummary run={run} lang={lang} />
   }
   if (run.status === 'ABORTED') {
     // SIGKILL by the user — there are partial metrics at best
@@ -384,14 +353,14 @@ export function RunStatusView({ run, now, reasonOverride, showReportButton }: Ru
     // so the call to RunFailure stays type-safe when no
     // classification was possible (e.g. error text was empty).
     const reason = reasonOverride ?? summariseFailure(run.error)
-    if (reason) return <RunFailure run={run} reason={reason} lang={lang} showReportButton={showReportButton} />
+    if (reason) return <RunFailure run={run} reason={reason} lang={lang} />
     const placeholder = {
       kind: 'process' as const,
       summary: translate(lang, 'summary.runtime') === 'Runtime' ? 'k6 aborted' : 'k6 abgebrochen',
       detail: translate(lang, 'result.aborted.detail'),
       hint: 'Wenn die k6-Ausgabe unvollständig erscheint, ist das erwartet — der Prozess wurde sofort beendet.',
     }
-    return <RunFailure run={run} reason={placeholder} lang={lang} showReportButton={showReportButton} />
+    return <RunFailure run={run} reason={placeholder} lang={lang} />
   }
   if (run.status === 'FAILED') {
     // A FAILED run can have two very different causes:
@@ -410,12 +379,12 @@ export function RunStatusView({ run, now, reasonOverride, showReportButton }: Ru
     // server actually answered, so the threshold metrics are
     // meaningful and should stay visible.
     const hardFailure = reason && HARD_FAILURE_KINDS.has(reason.kind)
-    if (hardFailure) return <RunFailure run={run} reason={reason} lang={lang} showReportButton={showReportButton} />
+    if (hardFailure) return <RunFailure run={run} reason={reason} lang={lang} />
     const threshold = summariseThresholds(run)
     if (threshold.failedMetrics.length > 0) {
-      return <RunSummary run={run} lang={lang} showReportButton={showReportButton} />
+      return <RunSummary run={run} lang={lang} />
     }
-    if (reason) return <RunFailure run={run} reason={reason} lang={lang} showReportButton={showReportButton} />
+    if (reason) return <RunFailure run={run} reason={reason} lang={lang} />
   }
   return null
 }
@@ -436,7 +405,12 @@ type LiveRampChartProps = {
   planned: RampPoint[]
   actual: RampPoint[]
   totalDurationSeconds: number
-  elapsedSeconds: number
+  // Seconds since the run's `startedAt` stamp. `undefined` while
+  // the run is still QUEUED — the parent component keeps the
+  // value undefined so we render the same "–" dash that every
+  // other queued-only surface uses instead of a "00:00" that
+  // flickers with every 500 ms tick.
+  elapsedSeconds: number | undefined
   /**
    * Peak of the planned curve. Drives the y-axis range so the
    * planned line always reaches the top of the chart. The unit
@@ -576,7 +550,7 @@ export function LiveRampChart({ planned, actual, totalDurationSeconds, elapsedSe
 // state at a glance without having to scroll the page.
 type LiveBannerProps = {
   run: TestRun
-  onStop: (force: boolean) => void
+  onStop: (runId: string, force: boolean) => void
   disabled?: boolean
 }
 
@@ -601,7 +575,7 @@ export function LiveBanner({ run, onStop, disabled }: LiveBannerProps) {
       <button
         type="button"
         className="btn-stop"
-        onClick={() => onStop(false)}
+        onClick={() => onStop(run.id, false)}
         disabled={disabled}
         title="k6 freundlich beenden (SIGTERM)"
       >
@@ -610,7 +584,7 @@ export function LiveBanner({ run, onStop, disabled }: LiveBannerProps) {
       <button
         type="button"
         className="btn-abort"
-        onClick={() => onStop(true)}
+        onClick={() => onStop(run.id, true)}
         disabled={disabled}
         title="k6 sofort beenden (SIGKILL)"
       >
@@ -619,28 +593,6 @@ export function LiveBanner({ run, onStop, disabled }: LiveBannerProps) {
     </div>
     <span className="run-list-hint" style={{ display: 'none' }}>{lang}</span>
   </div>
-}
-
-// ---- ReportButton -------------------------------------------------------
-//
-// Prominent violet button to jump from the dashboard to the
-// full k6 report (`/?report=<runId>`). Pairs with the smaller
-// `report-btn` rendered by [ResultHeader] inside the status
-// pill row — this one is bigger and more visible so the user
-// does not miss it. The pulsing dot signals "this button is
-// hot; the report updates live as the run progresses".
-export function ReportButton({ runId }: { runId: string }) {
-  return <a
-    className="btn-report"
-    href={`/?report=${encodeURIComponent(runId)}`}
-    target="_blank"
-    rel="noreferrer"
-    title="Öffnet den ausführlichen k6-Testbericht (mit Ramp-Grafik, Schwellen, Konsole)"
-  >
-    <span className="icon" aria-hidden="true">📄</span>
-    Ausführlicher k6-Testbericht
-    <span className="live-dot" aria-hidden="true" />
-  </a>
 }
 
 // ---- AktionenTab --------------------------------------------------------
@@ -654,15 +606,15 @@ export function ReportButton({ runId }: { runId: string }) {
 // clipboard, or open a new tab.
 type AktionenTabProps = {
   run: TestRun
-  onStop: (force: boolean) => void
-  onRerun: () => void
-  onCopyRunId: () => void
-  onCopyReportLink: () => void
-  onOpenReport: () => void
-  onDownloadScript: () => void
-  onExportMetrics: () => void
-  onRemove: () => void
-  onRemoveAllOtherFailed: () => void
+  onStop: (runId: string, force: boolean) => void
+  onRerun: (runId: string) => void
+  onCopyRunId: (runId: string) => void
+  onCopyReportLink: (runId: string) => void
+  onOpenReport: (runId: string) => void
+  onDownloadScript: (runId: string) => void
+  onExportMetrics: (runId: string) => void
+  onRemove: (runId: string) => void
+  onRemoveAllOtherFailed: (runId: string) => void
 }
 
 export function AktionenTab({
@@ -696,7 +648,7 @@ export function AktionenTab({
         <div className="line" />
       </div>
       <div className="aktionen-grid">
-        <button type="button" className="aktion-card" onClick={() => onStop(false)} disabled={!inFlight}>
+        <button type="button" className="aktion-card" onClick={() => onStop(run.id, false)} disabled={!inFlight}>
           <div className="icon">■</div>
           <div className="body">
             <div className="label">{translate(lang, 'runStatus.actions.controls.stop.label', { shortcut: 'S', state: translate(lang, 'runStatus.actions.controls.stop.state') })}</div>
@@ -704,7 +656,7 @@ export function AktionenTab({
           </div>
           <div className="chev">▸</div>
         </button>
-        <button type="button" className="aktion-card" onClick={() => onStop(true)} disabled={!inFlight}>
+        <button type="button" className="aktion-card" onClick={() => onStop(run.id, true)} disabled={!inFlight}>
           <div className="icon">✕</div>
           <div className="body">
             <div className="label">{translate(lang, 'runStatus.actions.controls.abort.label', { shortcut: '⇧S', state: translate(lang, 'runStatus.actions.controls.abort.state') })}</div>
@@ -712,7 +664,7 @@ export function AktionenTab({
           </div>
           <div className="chev">▸</div>
         </button>
-        <button type="button" className="aktion-card" onClick={onRerun} disabled={!terminal}>
+        <button type="button" className="aktion-card" onClick={() => onRerun(run.id)} disabled={!terminal}>
           <div className="icon">↻</div>
           <div className="body">
             <div className="label">{translate(lang, 'runStatus.actions.controls.rerun.label', { state: inFlight ? translate(lang, 'runStatus.actions.controls.rerun.state') : '' })}</div>
@@ -731,7 +683,7 @@ export function AktionenTab({
         <div className="line" />
       </div>
       <div className="aktionen-grid">
-        <button type="button" className="aktion-card" onClick={onCopyRunId}>
+        <button type="button" className="aktion-card" onClick={() => onCopyRunId(run.id)}>
           <div className="icon">⎘</div>
           <div className="body">
             <div className="label">{translate(lang, 'runStatus.actions.share.runId.label', { shortcut: '⌘C' })}</div>
@@ -739,7 +691,7 @@ export function AktionenTab({
           </div>
           <div className="chev">▸</div>
         </button>
-        <button type="button" className="aktion-card" onClick={onCopyReportLink}>
+        <button type="button" className="aktion-card" onClick={() => onCopyReportLink(run.id)}>
           <div className="icon">🔗</div>
           <div className="body">
             <div className="label">{translate(lang, 'runStatus.actions.share.reportLink.label')}</div>
@@ -747,7 +699,7 @@ export function AktionenTab({
           </div>
           <div className="chev">▸</div>
         </button>
-        <button type="button" className="aktion-card" onClick={onOpenReport}>
+        <button type="button" className="aktion-card" onClick={() => onOpenReport(run.id)}>
           <div className="icon">↗</div>
           <div className="body">
             <div className="label">{translate(lang, 'runStatus.actions.share.openReport.label', { shortcut: '⌘↩' })}</div>
@@ -755,7 +707,7 @@ export function AktionenTab({
           </div>
           <div className="chev">▸</div>
         </button>
-        <button type="button" className="aktion-card" onClick={onDownloadScript} disabled={!terminal}>
+        <button type="button" className="aktion-card" onClick={() => onDownloadScript(run.id)} disabled={!terminal}>
           <div className="icon">{'{}'}</div>
           <div className="body">
             <div className="label">{translate(lang, 'runStatus.actions.share.downloadScript.label', { state: inFlight ? translate(lang, 'runStatus.actions.share.downloadScript.state') : '' })}</div>
@@ -763,7 +715,7 @@ export function AktionenTab({
           </div>
           <div className="chev">▸</div>
         </button>
-        <button type="button" className="aktion-card" onClick={onExportMetrics} disabled={!terminal || !hasSummary}>
+        <button type="button" className="aktion-card" onClick={() => onExportMetrics(run.id)} disabled={!terminal || !hasSummary}>
           <div className="icon">⤓</div>
           <div className="body">
             <div className="label">{translate(lang, 'runStatus.actions.share.exportSummary.label', { state: !hasSummary ? translate(lang, 'runStatus.actions.share.exportSummary.state') : (inFlight ? translate(lang, 'runStatus.actions.share.downloadScript.state') : '') })}</div>
@@ -782,7 +734,7 @@ export function AktionenTab({
         <div className="line" />
       </div>
       <div className="aktionen-grid full">
-        <button type="button" className="aktion-card danger" onClick={onRemove} disabled={inFlight}>
+        <button type="button" className="aktion-card danger" onClick={() => onRemove(run.id)} disabled={inFlight}>
           <div className="icon">🗑</div>
           <div className="body">
             <div className="label">{translate(lang, 'runStatus.actions.cleanup.remove.label', { shortcut: 'Del', state: inFlight ? translate(lang, 'runStatus.actions.cleanup.remove.state') : '' })}</div>
@@ -790,7 +742,7 @@ export function AktionenTab({
           </div>
           <div className="chev">▸</div>
         </button>
-        <button type="button" className="aktion-card danger" onClick={onRemoveAllOtherFailed} disabled={inFlight}>
+        <button type="button" className="aktion-card danger" onClick={() => onRemoveAllOtherFailed(run.id)} disabled={inFlight}>
           <div className="icon">🗑</div>
           <div className="body">
             <div className="label">{translate(lang, 'runStatus.actions.cleanup.removeOthers.label', { state: inFlight ? translate(lang, 'runStatus.actions.cleanup.removeOthers.state') : '' })}</div>

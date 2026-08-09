@@ -943,4 +943,246 @@ class LocalK6TestRunServiceTest {
 
         assertNull(service.rerun(synthetic.id))
     }
+
+    // ---- persistence on create() ---------------------------------------
+    //
+    // Before this contract existed, runs only lived in the
+    // in-memory `runs` map and were dropped on every container
+    // restart. The [LastTestController.rerun] lookup now reads
+    // historical runs from the database, which only works if
+    // [create] actually writes the freshly-queued run to H2.
+    // The tests below pin the contract so a future refactor
+    // cannot drop the persistence call without breaking the
+    // historical-rerun feature.
+
+    @Test
+    fun `create persists a queued entity with the denormalised first-operation columns`() {
+        // Use a dedicated service instance so the test owns the
+        // repository and can assert its contents without
+        // cross-contamination from sibling tests.
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val serviceForCreate =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = Executor { },
+                readerExecutor = Executor { },
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = statistics,
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+
+        val created =
+            serviceForCreate.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+
+        val saved = repository.findById(created.id).orElse(null)
+        assertNotNull(saved, "create() must write the freshly-queued run to the database")
+        assertEquals(created.id, saved.id)
+        assertEquals(TestRunStatus.QUEUED, saved.status)
+        // The first operation in the configuration must be
+        // copied onto the flat columns so the × N badge GROUP
+        // BY can answer without parsing the configuration
+        // JSON. See [TestRunEntity] for the contract.
+        assertEquals("GET", saved.operationMethod)
+        assertEquals("/pets/{id}", saved.operationPath)
+        assertEquals("getPet", saved.operationId)
+    }
+
+    @Test
+    fun `create preserves the originalRequest as JSON so the dashboard can rerun the run without re-uploading the spec`() {
+        // The `originalRequest` field is the entire point of
+        // the persistence: the dashboard's right-click
+        // `Erneut starten` action reads it back from the DB
+        // and replays it. Losing it on save would turn every
+        // historical rerun into a 409.
+        val repository = InMemoryTestRunRepository()
+        val serviceForCreate =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = Executor { },
+                readerExecutor = Executor { },
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+
+        val created =
+            serviceForCreate.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+
+        val saved = repository.findById(created.id).orElse(null)
+        assertNotNull(saved)
+        assertNotNull(
+            saved.originalRequestJson,
+            "create() must serialise the preserved [CreateTestRunRequest] so a future rerun can read it back",
+        )
+    }
+
+    @Test
+    fun `find returns the run from the H2 repository when it is no longer in memory`() {
+        // Simulate a container restart: the in-memory `runs` map
+        // is dropped on JVM shutdown, but the H2 row that
+        // [create] persisted survives. `find` must therefore
+        // resolve the run from the repository so the
+        // `/?report={id}` page keeps working after a restart.
+        // The previous behaviour — `find` only looked at
+        // `runs[id]` — made every historical report link 404
+        // for as long as the backend had been up.
+        val repository = InMemoryTestRunRepository()
+        val serviceForCreate =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = Executor { },
+                readerExecutor = Executor { },
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        val created =
+            serviceForCreate.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+
+        // Fresh service instance with the same repository =
+        // exact same shape as a JVM restart: the in-memory
+        // maps start empty, the H2 row is already there.
+        val serviceAfterRestart =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = Executor { },
+                readerExecutor = Executor { },
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+
+        val resolved = serviceAfterRestart.find(created.id)
+        assertNotNull(resolved, "find() must resolve the run from H2 when it is no longer in memory")
+        assertEquals(created.id, resolved.id)
+        assertEquals(TestRunStatus.QUEUED, resolved.status)
+        assertNull(
+            serviceAfterRestart.find("missing"),
+            "find() must still return null for a completely unknown id",
+        )
+    }
+
+    @Test
+    fun `script regenerates from the persisted original request when the in-memory cache is empty`() {
+        // The k6 script was never persisted to its own column —
+        // we always re-render it from the [CreateTestRunRequest]
+        // that [create] stored as JSON. The generator is
+        // deterministic, so the regenerated script matches the
+        // original byte-for-byte and the dashboard's diff (and
+        // the k6 fingerprint) stays stable across restarts.
+        val repository = InMemoryTestRunRepository()
+        val serviceForCreate =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = Executor { },
+                readerExecutor = Executor { },
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        val created =
+            serviceForCreate.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+
+        val serviceAfterRestart =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = Executor { },
+                readerExecutor = Executor { },
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+
+        assertEquals(
+            "export default function () {}",
+            serviceAfterRestart.script(created.id),
+            "script() must regenerate the k6 script from the persisted [CreateTestRunRequest] after a restart",
+        )
+        assertNull(
+            serviceAfterRestart.script("missing"),
+            "script() must still return null for a completely unknown id",
+        )
+    }
+
+    @Test
+    fun `script returns null after a restart when the run has no preserved request`() {
+        // Defensive: a row inserted directly into the repository
+        // (synthetic fixture, pre-persistence import, …) has no
+        // [originalRequestJson] blob. The service must return
+        // null and the controller turns it into a 404 — not a
+        // 500 from a null-deserialisation crash.
+        val repository = InMemoryTestRunRepository()
+        val entity = TestRunEntity()
+        entity.id = "synthetic"
+        entity.status = TestRunStatus.COMPLETED
+        entity.createdAt = java.time.Instant.now()
+        repository.save(entity)
+
+        val serviceAfterRestart =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = Executor { },
+                readerExecutor = Executor { },
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+
+        assertNull(serviceAfterRestart.script("synthetic"))
+        // find() still works for the same row: the run
+        // snapshot itself is in H2 even when the request blob
+        // is missing. Only the script regeneration path needs
+        // the preserved request.
+        assertNotNull(serviceAfterRestart.find("synthetic"))
+    }
 }

@@ -1,5 +1,6 @@
 package de.lasttest.domain
 
+import de.lasttest.api.TestRun
 import de.lasttest.api.TestRunStatus
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -63,4 +64,44 @@ class OperationStatisticsEntity {
         var method: String = "",
         var path: String = "",
     ) : Serializable
+}
+
+/**
+ * Builds the denormalised [OperationStatisticsEntity] row for a
+ * single (method, path) pair from the [TestRun] that just
+ * terminated. The [TestRunService] upserts this row on every
+ * terminal state transition so the dashboard's × N badge stays in
+ * sync with the actual run count.
+ *
+ * Increments the previous counter by one rather than recomputing
+ * the count from `test_run`: a full COUNT(*) would have to scan
+ * the whole table on every run, which is fine for the current
+ * H2 file mode but would not scale. The entity's
+ * [OperationStatisticsEntity.testCount] is the source of truth
+ * for the counter, not a projection of [TestRunEntity].
+ *
+ * The [previous] parameter lets the caller pass the row that
+ * already exists (looked up via
+ * `OperationStatisticsRepository.findById(Key(method, path))`);
+ * pass `null` for the first run on a fresh endpoint. Tests that
+ * want to assert the upsert behaviour drive both branches.
+ */
+fun operationStatisticsFor(
+    run: TestRun,
+    previous: OperationStatisticsEntity?,
+): OperationStatisticsEntity {
+    val firstOp =
+        run.configuration?.operations?.firstOrNull()
+            ?: error("Cannot build operation statistics for run ${run.id}: no operations in configuration")
+    val entity = previous ?: OperationStatisticsEntity()
+    entity.method = firstOp.method
+    entity.path = firstOp.path
+    entity.testCount = (previous?.testCount ?: 0L) + 1L
+    entity.lastTestAt =
+        run.finishedAt?.let { java.time.Instant.parse(it) }
+            ?: run.startedAt?.let { java.time.Instant.parse(it) }
+            ?: java.time.Instant.parse(run.createdAt)
+    entity.lastStatus = run.status
+    entity.lastRunId = run.id
+    return entity
 }

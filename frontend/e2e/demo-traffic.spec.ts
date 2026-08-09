@@ -297,6 +297,98 @@ test('the demo-traffic API returns the entries we expect after a run', async ({ 
   }
 })
 
+test('the toolbar reset button drops every captured request after a confirm prompt', async ({ page }) => {
+  // The reset button is the headline "as if the demo API was
+  // never started" affordance: drive a request, confirm the
+  // table picks it up, click the reset button, dismiss the
+  // browser-native confirm prompt, and verify the table is
+  // empty again. We register the dialog handler before the
+  // click so the prompt can be auto-accepted; otherwise the
+  // Playwright driver would hang on the modal.
+  await page.goto('/?demo-traffic')
+  await expect(page.locator('.demo-traffic-live-badge.is-live')).toBeVisible({ timeout: 5_000 })
+
+  // Drive a request so the table has at least one row.
+  await page.evaluate(async () => {
+    await fetch('/demo-api/products?reset-fixture=true')
+  })
+  await expect(page.locator('.demo-traffic-row').first()).toBeVisible({ timeout: 5_000 })
+
+  // Auto-accept the native confirm prompt. The test would
+  // hang on the modal otherwise because Playwright does not
+  // know about browser-native dialogs unless we register a
+  // handler first.
+  page.once('dialog', dialog => {
+    void dialog.accept()
+  })
+
+  // Click the reset button. The optimistic local state
+  // update means the table should empty out before the
+  // dashboard's next poll even has a chance to run, so we
+  // assert against the local state rather than waiting for
+  // a network round-trip.
+  await page.locator('[data-testid="demo-traffic-reset"]').click()
+
+  // The table is gone (count === 0) and the empty-state
+  // card is back. The success banner is also visible.
+  await expect(page.locator('.demo-traffic-row')).toHaveCount(0, { timeout: 5_000 })
+  await expect(page.getByText(/Noch keine Anfragen/)).toBeVisible()
+  await expect(page.locator('[data-testid="demo-traffic-reset-banner"]')).toBeVisible()
+  await expect(page.locator('.demo-traffic-banner-ok')).toBeVisible()
+
+  // The reset must have actually reached the backend: a
+  // follow-up GET on the wire format returns the empty
+  // envelope too. Without this, a regression that only
+  // updated the local React state would pass the UI
+  // assertions but leave the server holding the entries.
+  const payload = await page.evaluate(async () => {
+    const response = await fetch('/api/demo-traffic/requests')
+    if (!response.ok) throw new Error(`status ${response.status}`)
+    return await response.json()
+  })
+  expect(payload.count).toBe(0)
+  expect(payload.entries).toEqual([])
+})
+
+test('the toolbar reset button does nothing when the user cancels the confirm prompt', async ({ page }) => {
+  // The reset is destructive, so the confirm prompt is the
+  // last line of defence. A user who clicks "Cancel" must
+  // keep their captured list intact — both locally and on
+  // the server. A regression that auto-clears regardless of
+  // the prompt would force the user to re-drive their load
+  // test.
+  await page.goto('/?demo-traffic')
+  await expect(page.locator('.demo-traffic-live-badge.is-live')).toBeVisible({ timeout: 5_000 })
+
+  // Drive a request so the table has at least one row.
+  await page.evaluate(async () => {
+    await fetch('/demo-api/products?reset-cancel-fixture=true')
+  })
+  await expect(page.locator('.demo-traffic-row').first()).toBeVisible({ timeout: 5_000 })
+  const beforeRowCount = await page.locator('.demo-traffic-row').count()
+
+  // Auto-dismiss the native confirm prompt.
+  page.once('dialog', dialog => {
+    void dialog.dismiss()
+  })
+  await page.locator('[data-testid="demo-traffic-reset"]').click()
+
+  // The table must still hold the row we drove earlier. We
+  // give the polling loop a chance to overwrite the local
+  // state with whatever the server returns; the server
+  // never received a DELETE, so the count must stay the
+  // same.
+  await page.waitForTimeout(1_500)
+  const afterRowCount = await page.locator('.demo-traffic-row').count()
+  expect(afterRowCount).toBe(beforeRowCount)
+  await expect(page.locator('.demo-traffic-row').first()).toBeVisible()
+  // The success banner must not have appeared — a regression
+  // that surfaces a banner even after a cancelled reset
+  // would confuse the user into thinking the click took
+  // effect.
+  await expect(page.locator('[data-testid="demo-traffic-reset-banner"]')).toHaveCount(0)
+})
+
 test('a request that hits the demo API while the dashboard is open shows up without a run id filter', async ({ page }) => {
   // The headline use case: the user opens `/?demo-traffic` in one
   // tab, then drives the demo API from somewhere else (here: a
