@@ -650,10 +650,49 @@ class LocalK6TestRunServiceTest {
     // assertion path fails.
 
     @Test
-    fun `cancel returns false when no process is registered for the run id`() {
-        // Run exists in the map but execute() did not register a
-        // process (the noop executor never ran). From cancel()'s
-        // point of view, no live process means "nothing to cancel".
+    fun `cancel marks a queued run as STOPPED when no process is registered`() {
+        // Regression for the user-reported bug: a run stays QUEUED
+        // while the executor pool is busy with earlier runs
+        // (`MAX_PARALLEL_RUNS = 2`). Without this branch the
+        // [cancel] guard `processes[id] ?: return false` refused
+        // the request — the controller translated the `false` to a
+        // 409 and the frontend swallowed the conflict silently, so
+        // the user could never stop a queued run from the
+        // per-endpoint timeline.
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        // The noop executor never ran, so the run stays QUEUED
+        // and there is no entry in [processes].
+        assertEquals(TestRunStatus.QUEUED, service.find(run.id)?.status)
+        assertNull(service.processes[run.id])
+
+        assertTrue(service.cancel(run.id, force = false))
+
+        val updated = assertNotNull(service.find(run.id))
+        assertEquals(TestRunStatus.STOPPED, updated.status)
+        assertNotNull(updated.cancelledAt)
+        assertEquals(false, updated.cancelledByForce)
+        // `startedAt` is null because k6 never started; the
+        // terminal state has a `finishedAt` so the polling client
+        // can show "stopped before start" instead of an empty
+        // timestamp.
+        assertNull(updated.startedAt)
+        assertNotNull(updated.finishedAt)
+    }
+
+    @Test
+    fun `cancel marks a queued run as ABORTED when force=true and no process is registered`() {
+        // Mirror of the previous test for the force-abort path.
+        // The user-reported bug covers both gestures — right-click
+        // "Abbrechen" (force) and "Stop" (graceful) — on queued
+        // runs, so both branches need coverage.
         val run =
             service.create(
                 CreateTestRunRequest(
@@ -664,15 +703,359 @@ class LocalK6TestRunServiceTest {
                 ),
             )
 
+        assertTrue(service.cancel(run.id, force = true))
+
+        val updated = assertNotNull(service.find(run.id))
+        assertEquals(TestRunStatus.ABORTED, updated.status)
+        assertEquals(true, updated.cancelledByForce)
+        assertNotNull(updated.finishedAt)
+    }
+
+    @Test
+    fun `cancel on a queued run persists the terminal state to the repository`() {
+        // The pre-fix code left the H2 row in QUEUED until the
+        // executor eventually touched it. The per-endpoint timeline
+        // reads from the repository (`/api/operations/runs`), so the
+        // queued-cancelled run would show up as QUEUED forever
+        // after a cancel — see the [cancel marks a queued run as
+        // STOPPED] test above for the wire-level reason this matters.
+        // We assert directly against the repository so the test
+        // does not depend on the dashboard's in-memory map.
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val serviceForPersistence =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = statistics,
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+
+        val run =
+            serviceForPersistence.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+
+        serviceForPersistence.cancel(run.id, force = false)
+
+        val persisted = repository.findById(run.id).orElse(null)
+        assertNotNull(persisted)
+        assertEquals(TestRunStatus.STOPPED, persisted.status)
+        assertNotNull(persisted.finishedAt)
+    }
+
+    @Test
+    fun `cancel on a queued run is idempotent`() {
+        // The frontend retries on 409 and the dashboard polls the
+        // cancel endpoint on tab focus, so [cancel] may be called
+        // multiple times against the same id. The first call moves
+        // the run to STOPPED; subsequent calls must short-circuit
+        // on the [isTerminal] guard instead of trying to flip the
+        // state again or returning 409.
+        val run =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+
+        assertTrue(service.cancel(run.id, force = false))
+        // Second call: the run is already STOPPED, the isTerminal
+        // guard refuses. We document this as `false` so the
+        // controller can answer 409 — the frontend treats a second
+        // 409 as "already cancelled" and stops retrying.
         assertFalse(service.cancel(run.id, force = false))
-        // No cancellation metadata was set on the run either.
-        assertEquals(TestRunStatus.QUEUED, service.find(run.id)?.status)
+        assertEquals(TestRunStatus.STOPPED, service.find(run.id)?.status)
+    }
+
+    @Test
+    fun `recoverOrphanedRuns leaves a clean repository untouched`() {
+        // The recovery hook iterates every persisted row and
+        // marks the non-terminal ones as ABORTED. When the
+        // repository already holds only terminal rows (the
+        // common case — a fresh database, or a JVM that was
+        // shut down cleanly via the @PreDestroy hook), the
+        // hook must be a no-op so we do not stamp spurious
+        // `cancelledAt` timestamps onto historical runs.
+        // We construct a dedicated service instance here
+        // because the test owns its repository — the shared
+        // `service` field above may carry over from sibling
+        // tests.
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val recoveryService =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = statistics,
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        // Two terminal rows, nothing non-terminal.
+        val completedRun =
+            recoveryService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        // Promote the row to COMPLETED so the terminal
+        // branch is exercised — `create()` only ever emits
+        // QUEUED.
+        repository.save(
+            recoveryService
+                .find(completedRun.id)!!
+                .copy(
+                    status = TestRunStatus.COMPLETED,
+                    startedAt = "2026-01-01T00:00:01Z",
+                    finishedAt = "2026-01-01T00:00:05Z",
+                ).toTestRunEntity(),
+        )
+
+        recoveryService.recoverOrphanedRuns()
+
+        val after = repository.findById(completedRun.id).orElse(null)
+        assertNotNull(after)
+        assertEquals(TestRunStatus.COMPLETED, after.status)
+        // `cancelledAt` / `cancelledByForce` must remain
+        // `null` / `null` — the hook did not touch them.
+        assertNull(after.cancelledAt)
+        assertNull(after.cancelledByForce)
+    }
+
+    @Test
+    fun `recoverOrphanedRuns marks every non-terminal persisted row as ABORTED`() {
+        // Regression for the user-reported bug: after a
+        // container restart, the in-memory executor pool is
+        // empty but the persisted QUEUED / RUNNING / STOPPING
+        // rows survive in H2. Nothing re-enqueues them, so
+        // they stay QUEUED forever and the per-endpoint
+        // timeline shows them as "In Warteschlange / läuft …"
+        // indefinitely. The startup hook reaps them by
+        // stamping `cancelledAt` / `cancelledByForce = true` /
+        // `finishedAt` and flipping the status to ABORTED —
+        // same wire shape as a user-initiated force-cancel.
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val recoveryService =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = statistics,
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+
+        val queuedRun =
+            recoveryService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        val runningRun =
+            recoveryService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        val stoppingRun =
+            recoveryService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        val completedRun =
+            recoveryService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+
+        // Promote the non-terminal snapshots to the exact
+        // statuses the hook must catch. `create()` only ever
+        // emits QUEUED; we use reflection on the in-memory
+        // map to set RUNNING / STOPPING without going through
+        // `execute()` (which would need a real k6 process).
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(recoveryService) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+        runsMap[runningRun.id] =
+            runningRun
+                .copy(status = TestRunStatus.RUNNING, startedAt = "2026-01-01T00:00:01Z")
+                .also {
+                    repository.save(it.toTestRunEntity())
+                }
+        runsMap[stoppingRun.id] =
+            stoppingRun
+                .copy(status = TestRunStatus.STOPPING, startedAt = "2026-01-01T00:00:01Z")
+                .also {
+                    repository.save(it.toTestRunEntity())
+                }
+        runsMap[completedRun.id] =
+            completedRun
+                .copy(
+                    status = TestRunStatus.COMPLETED,
+                    startedAt = "2026-01-01T00:00:01Z",
+                    finishedAt = "2026-01-01T00:00:05Z",
+                    exitCode = 0,
+                ).also { repository.save(it.toTestRunEntity()) }
+        // `queuedRun` stays at QUEUED — already in H2 from
+        // `create()`.
+
+        recoveryService.recoverOrphanedRuns()
+
+        // Non-terminal rows: all three flipped to ABORTED
+        // with the cancellation metadata the user-facing
+        // surface expects.
+        for (id in listOf(queuedRun.id, runningRun.id, stoppingRun.id)) {
+            val entity = repository.findById(id).orElse(null)
+            assertNotNull(entity, "expected $id to still be persisted")
+            assertEquals(TestRunStatus.ABORTED, entity.status, "expected $id to be ABORTED")
+            assertNotNull(entity.cancelledAt, "expected $id to carry cancelledAt")
+            assertEquals(true, entity.cancelledByForce, "expected $id to be marked force-cancelled")
+            assertNotNull(entity.finishedAt, "expected $id to carry finishedAt")
+        }
+        // Terminal row: untouched.
+        val completedEntity = repository.findById(completedRun.id).orElse(null)
+        assertNotNull(completedEntity)
+        assertEquals(TestRunStatus.COMPLETED, completedEntity.status)
+        assertNull(completedEntity.cancelledAt)
+        assertNull(completedEntity.cancelledByForce)
+
+        // Idempotent — a second call finds zero non-terminal
+        // rows and does not stamp any further metadata.
+        recoveryService.recoverOrphanedRuns()
+        for (id in listOf(queuedRun.id, runningRun.id, stoppingRun.id)) {
+            val entity = repository.findById(id).orElse(null)
+            assertNotNull(entity)
+            // The cancelledAt from the first call survives;
+            // a second call must not overwrite it with a new
+            // timestamp (which would look like a "second
+            // force-cancel" in the audit trail).
+            assertEquals(entity.cancelledAt, repository.findById(id).orElse(null)?.cancelledAt)
+        }
     }
 
     @Test
     fun `cancel returns false for an unknown run id`() {
         assertFalse(service.cancel("does-not-exist", force = false))
         assertFalse(service.cancel("does-not-exist", force = true))
+    }
+
+    @Test
+    fun `execute bails out when the run was cancelled before the executor pulled the task`() {
+        // Regression for the user-reported bug: the dashboard
+        // submits cancel through the per-endpoint timeline before
+        // the executor has pulled `execute()` off its queue. The
+        // pre-fix code unconditionally flipped the run to RUNNING
+        // at the top of `execute()` and spawned k6, silently
+        // undoing the cancellation. We capture the task with
+        // [CapturingExecutorService] so we can run it after
+        // [cancel] has settled the in-memory map to a terminal
+        // state, then assert that `execute()` returned without
+        // touching the process registry or the H2 row.
+        val pendingTask =
+            java.util.concurrent.atomic
+                .AtomicReference<Runnable?>(null)
+        val capturingExecutor =
+            CapturingExecutorService { task ->
+                pendingTask.set(task)
+            }
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val raceService =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = capturingExecutor,
+                readerExecutor = NoopExecutorService(),
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = statistics,
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+
+        val run =
+            raceService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+
+        // The task is queued but not yet run.
+        assertEquals(TestRunStatus.QUEUED, raceService.find(run.id)?.status)
+        assertNotNull(pendingTask.get())
+        // The repository already has the QUEUED row from
+        // `create()` — that is the row the controller reads
+        // through `/api/operations/runs` to populate the
+        // per-endpoint timeline.
+        assertEquals(TestRunStatus.QUEUED, repository.findById(run.id).orElse(null)?.status)
+
+        // Cancel while the task is still queued. The terminal
+        // state must be persisted to the repository so the
+        // timeline shows the cancellation immediately.
+        assertTrue(raceService.cancel(run.id, force = false))
+        assertEquals(TestRunStatus.STOPPED, raceService.find(run.id)?.status)
+        assertEquals(TestRunStatus.STOPPED, repository.findById(run.id).orElse(null)?.status)
+
+        // Now run the captured execute() task. It must read the
+        // terminal state at the top, return without spawning k6,
+        // and must NOT overwrite the STOPPED status with RUNNING.
+        val task = pendingTask.get()
+        assertNotNull(task)
+        task.run()
+
+        assertEquals(TestRunStatus.STOPPED, raceService.find(run.id)?.status)
+        // The process registry stays empty — k6 was never
+        // started.
+        assertNull(raceService.processes[run.id])
+        // The persisted row stays at STOPPED — the executor did
+        // not write RUNNING on its way out.
+        assertEquals(TestRunStatus.STOPPED, repository.findById(run.id).orElse(null)?.status)
+        // The cancelled run never produced traffic, so the
+        // per-endpoint × N counter must not have been bumped.
+        val key = OperationStatisticsEntity.Key("GET", "/pets/{id}")
+        assertFalse(statistics.findById(key).isPresent)
     }
 
     @Test

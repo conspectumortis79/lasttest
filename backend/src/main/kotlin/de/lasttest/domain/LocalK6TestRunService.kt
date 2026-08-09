@@ -17,7 +17,9 @@ import de.lasttest.api.TestRunOperationConfiguration
 import de.lasttest.api.TestRunStatus
 import de.lasttest.config.AsyncConfiguration
 import de.lasttest.config.InfluxDbProperties
+import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
@@ -115,6 +117,12 @@ class LocalK6TestRunService(
 ) : TestRunService {
     private val runs = ConcurrentHashMap<String, TestRun>()
     private val scripts = ConcurrentHashMap<String, String>()
+
+    // Class-level logger. The startup-recovery hook below uses
+    // it to record how many orphaned runs were reaped on boot;
+    // everything else in this service logs through the existing
+    // [shutdownInFlightRuns] entry point.
+    private val log = LoggerFactory.getLogger(LocalK6TestRunService::class.java)
 
     // Kotlin module is required because [CreateTestRunRequest] is
     // a Kotlin data class — without it Jackson cannot find a
@@ -339,20 +347,143 @@ class LocalK6TestRunService(
         }
     }
 
+    /**
+     * Startup-recovery hook. Walks every persisted [TestRunEntity]
+     * and marks the non-terminal ones as ABORTED.
+     *
+     * Why this exists: [create] persists the freshly-queued run to
+     * H2 AND submits `execute()` to the in-memory [executor] pool
+     * (`runRepository.save(...); executor.execute { execute(...) }`).
+     * When the JVM dies — container restart, OOM kill, manual
+     * stop — the executor pool and every task it was holding are
+     * gone with the process. The H2 row, however, lives on because
+     * it sits in a named Docker volume. The new JVM starts with an
+     * empty pool, no record of the queued `execute()` tasks, and no
+     * reason to look at the persisted QUEUED rows, so they stay
+     * QUEUED forever and the per-endpoint timeline shows them as
+     * "In Warteschlange / läuft …" until the user manually force-
+     * aborts every one of them.
+     *
+     * This hook runs once at bean creation (after Spring finished
+     * dependency injection, before the HTTP server starts accepting
+     * requests). It uses the same `cancelledAt` /
+     * `cancelledByForce = true` / `finishedAt` triple that
+     * [cancel] writes for a force-abort, so the resulting wire
+     * shape is identical to a user-initiated abort — the timeline
+     * and dashboard cannot tell the difference between a run the
+     * user killed and one the JVM took with it.
+     *
+     * Idempotent — a second call against an already-recovered
+     * repository finds zero non-terminal rows and returns without
+     * touching anything.
+     *
+     * Re-enqueuing the orphaned tasks back into the executor would
+     * be the alternative, but it would re-run load tests against
+     * the target API without the user's consent — a worse surprise
+     * than a visible ABORTED status. The dashboard treats ABORTED
+     * as terminal in every surface (badge colour, "läuft …"
+     * label, polling filter), so the user can see exactly what
+     * happened and decide whether to rerun.
+     */
+    @PostConstruct
+    fun recoverOrphanedRuns() {
+        val orphaned = runRepository.findAll().filter { !it.status.isTerminal() }
+        if (orphaned.isEmpty()) return
+        val now = Instant.now().toString()
+        for (entity in orphaned) {
+            // Read through [toTestRun] so the resulting row
+            // round-trips through the same mapper [find] uses;
+            // the deserialised configuration / summary blobs
+            // survive untouched.
+            val recovered =
+                entity.toTestRun(objectMapper).copy(
+                    status = TestRunStatus.ABORTED,
+                    cancelledAt = now,
+                    cancelledByForce = true,
+                    finishedAt = now,
+                )
+            // The in-memory map is empty on a fresh JVM, but we
+            // still update it so a hypothetical caller hitting
+            // [find] right after this hook sees the terminal
+            // state without waiting for the next H2 round-trip.
+            runs[recovered.id] = recovered
+            // Persist before the HTTP server starts accepting
+            // requests — a client that polls `/api/operations/runs`
+            // a few milliseconds after startup must already see
+            // the ABORTED status, not the stale QUEUED row.
+            runRepository.save(recovered.toTestRunEntity())
+        }
+        log.info(
+            "Recovered {} orphaned run(s) from a previous JVM session — marked them as ABORTED.",
+            orphaned.size,
+        )
+    }
+
     override fun cancel(
         id: String,
         force: Boolean,
     ): Boolean {
-        // The presence of a live process is the source of truth for
-        // "the run can still be cancelled" — the run map entry can
-        // be in any pre-terminal state (QUEUED, RUNNING, STOPPING).
-        // Checking the process first also gives us the handle to
-        // send the signal to.
-        val process = processes[id] ?: return false
+        // Run map first — the dashboard and the per-endpoint timeline
+        // both render the run id, and the controller treats "unknown
+        // id" as 404 before it ever reaches the cancel branch.
         val current = runs[id] ?: return false
         if (current.status.isTerminal()) return false
 
         val now = Instant.now().toString()
+        val process = processes[id]
+        if (process == null) {
+            // No live process. The run is in a cancellable state
+            // (QUEUED is the only one reachable here — RUNNING and
+            // STOPPING always have an entry in [processes] because
+            // [execute] registers it in the same window that flips
+            // the status to RUNNING) but k6 has not started yet, so
+            // there is nothing to signal. Flip the in-memory
+            // snapshot straight to the matching terminal state,
+            // stamp the cancellation metadata, and persist the row
+            // so the per-endpoint timeline (`/api/operations/runs`)
+            // reflects the new status immediately instead of staying
+            // on QUEUED until the executor next touches the row.
+            //
+            // The intermediate STOPPING step that the with-process
+            // branch uses does not apply here: STOPPING models "k6
+            // is still running, finishing the current iteration",
+            // which is meaningless when the process never started.
+            // Skipping it keeps the wire contract identical to the
+            // happy-path cancellation (the frontend treats STOPPED
+            // and ABORTED as terminal either way) and avoids a
+            // confusing "QUEUED → STOPPING → STOPPED" trail when
+            // the user just wanted to drop a queued run.
+            //
+            // [execute] picks up the terminal state at the top of
+            // the method and bails out before spawning k6, so the
+            // queued-but-cancelled run never starts a process. We
+            // do NOT touch [cancellationRequested] here — the entry
+            // is read by [execute]'s post-`waitFor` bookkeeping to
+            // decide between STOPPED and ABORTED for in-flight
+            // cancellations, and this run never reaches that code.
+            val terminalStatus = if (force) TestRunStatus.ABORTED else TestRunStatus.STOPPED
+            val finalRun =
+                current.copy(
+                    status = terminalStatus,
+                    cancelledAt = now,
+                    cancelledByForce = force,
+                    finishedAt = now,
+                )
+            runs[id] = finalRun
+            // Persist before returning so a polling client that
+            // fetches /api/operations/runs within the same request
+            // sees the terminal state, not the stale QUEUED row.
+            runRepository.save(finalRun.toTestRunEntity())
+            return true
+        }
+
+        // With-process path: the run is RUNNING (or, in a race
+        // window between the executor flipping the status and
+        // registering the process, STOPPING). Set the intermediate
+        // status, stamp the cancellation metadata, signal the
+        // process, and let [execute]'s post-`waitFor` bookkeeping
+        // settle on STOPPED vs ABORTED based on
+        // [cancellationRequested].
         cancellationRequested[id] = if (force) CancellationMode.FORCE else CancellationMode.GRACEFUL
         runs[id] =
             current.copy(
@@ -555,8 +686,19 @@ class LocalK6TestRunService(
         script: String,
         baseUrl: String,
     ) {
+        // Re-read the run snapshot before touching anything: a
+        // concurrent [cancel] may have flipped the run to a terminal
+        // state between [create] scheduling this task and the
+        // executor pulling it off the queue. Without this guard the
+        // first statement below would overwrite the terminal status
+        // back to RUNNING and spawn k6 for a run the user already
+        // asked to stop. The persisted H2 row already carries the
+        // terminal state from [cancel], so the early return is a
+        // pure no-op on the wire.
+        val current = runs[run.id] ?: run
+        if (current.status.isTerminal()) return
         val started = Instant.now().toString()
-        runs[run.id] = run.copy(status = TestRunStatus.RUNNING, startedAt = started)
+        runs[run.id] = current.copy(status = TestRunStatus.RUNNING, startedAt = started)
         val directory = Files.createTempDirectory("lasttest-${run.id}")
         val totalDurationSeconds = run.configuration?.loadProfile?.durationSeconds ?: 600
         val targetVus = run.configuration?.loadProfile?.virtualUsers ?: 0
