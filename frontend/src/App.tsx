@@ -274,6 +274,17 @@ function LoadTestApp() {
   // switch focus to any other run.
   const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined)
   const run = activeRunId !== undefined ? runs[activeRunId] : undefined
+  // Monotonic counter the parent bumps whenever a new run is
+  // started or re-run. The per-endpoint timeline tab
+  // ([EndpointTimelineTab]) keeps its own local copy of the
+  // run list that is fetched once on mount and again whenever
+  // this counter changes, so a freshly started run shows up
+  // in the Gantt and the list below the chart without waiting
+  // for the user to navigate away from the tab and back. The
+  // counter is a plain number (not a timestamp) because the
+  // tab only needs to know "something changed, please
+  // re-fetch" — equality on the number is sufficient.
+  const [timelineRefreshTick, setTimelineRefreshTick] = useState(0)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [lastFetched, setLastFetched] = useState<FetchedSpecification | undefined>()
@@ -561,6 +572,15 @@ function LoadTestApp() {
       const nextRuns = { ...runs, [data.id]: data }
       setRuns(nextRuns)
       setActiveRunId(pickActiveRunIdAfterStart(nextRuns, data.id, activeRunId))
+      // Signal the per-endpoint timeline tab to re-fetch so
+      // the new run is visible in the Gantt and the list below
+      // the chart without the user having to leave the tab
+      // and come back. The tab's own `runs` state is fetched
+      // once on mount and only refreshed when this counter
+      // changes (or the endpoint changes), so without the
+      // bump a freshly started run would stay invisible
+      // until the next manual navigation.
+      setTimelineRefreshTick(tick => tick + 1)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : translate(language, 'error.startTestFailed'))
     } finally {
@@ -886,6 +906,10 @@ function LoadTestApp() {
         setActiveRunId(pickActiveRunIdAfterStart(next, fresh.id, activeRunId))
         return next
       })
+      // Same rationale as in `startTest` above: the per-endpoint
+      // timeline tab keeps its own copy of the run list and
+      // needs a nudge to pick up the freshly created rerun.
+      setTimelineRefreshTick(tick => tick + 1)
     } catch (cause) {
       setRunActionError(cause instanceof Error ? cause.message : translate(language, 'error.rerunFailedNoStatus'))
     }
@@ -1227,21 +1251,32 @@ function LoadTestApp() {
           })}
       </div>
 
-      {run && <RunDetail run={run} runNow={runNow} handlers={{
-        onStop: async (force) => { await cancelRun(run.id, force) },
-        onRerun: () => rerunRun(run.id),
-        onCopyRunId: () => safeClipboard(run.id),
-        onCopyReportLink: () => safeClipboard(`${window.location.origin}/?report=${encodeURIComponent(run.id)}`),
-        onOpenReport: () => { window.open(`/?report=${encodeURIComponent(run.id)}`, '_blank', 'noopener,noreferrer') },
-        onDownloadScript: () => downloadScript(run),
-        onExportMetrics: () => downloadSummary(run),
-        onRemove: () => handleRemoveRun(run.id),
-        onRemoveAllOtherFailed: () => setRuns(current => {
-          const next = removeAllOtherFailed(current, run.id)
-          setActiveRunId(pickActiveRunId(next, activeRunId))
-          return next
-        }),
-      }} />}
+      {run && <RunDetail
+        run={run}
+        runNow={runNow}
+        handlers={{
+          onStop: async (force) => { await cancelRun(run.id, force) },
+          onRerun: () => rerunRun(run.id),
+          onCopyRunId: () => safeClipboard(run.id),
+          onCopyReportLink: () => safeClipboard(`${window.location.origin}/?report=${encodeURIComponent(run.id)}`),
+          onOpenReport: () => { window.open(`/?report=${encodeURIComponent(run.id)}`, '_blank', 'noopener,noreferrer') },
+          onDownloadScript: () => downloadScript(run),
+          onExportMetrics: () => downloadSummary(run),
+          onRemove: () => handleRemoveRun(run.id),
+          onRemoveAllOtherFailed: () => setRuns(current => {
+            const next = removeAllOtherFailed(current, run.id)
+            setActiveRunId(pickActiveRunId(next, activeRunId))
+            return next
+          }),
+        }}
+        // Forward the parent-owned refresh counter so the
+        // per-endpoint timeline tab inside <RunDetail> can
+        // re-fetch its run list whenever a new run is started
+        // or re-run. See the declaration of
+        // [timelineRefreshTick] in [LoadTestApp] for the
+        // full rationale.
+        timelineRefreshTick={timelineRefreshTick}
+      />}
     </section>}
 
     {runMenu && <RunContextMenu
@@ -1314,7 +1349,7 @@ function LoadTestApp() {
  */
 type DetailTabId = 'overview' | 'ramp' | 'timeline' | 'actions' | 'console' | 'thresholds' | 'config' | 'failure'
 
-function RunDetail({ run, runNow, handlers }: { run: TestRun, runNow: number, handlers: RunActionHandlers }) {
+function RunDetail({ run, runNow, handlers, timelineRefreshTick }: { run: TestRun, runNow: number, handlers: RunActionHandlers, timelineRefreshTick: number }) {
   const { language } = useLanguage()
   const [activeTab, setActiveTab] = useState<DetailTabId>('overview')
   // Wall-clock scroll position the user is reading at, captured
@@ -1523,6 +1558,15 @@ function RunDetail({ run, runNow, handlers }: { run: TestRun, runNow: number, ha
           path={endpoint.path}
           apiTitle={run.configuration?.apiTitle}
           selectedRunId={run.id}
+          // Parent-owned refresh signal: the tab re-fetches its
+          // run list whenever the counter changes so a new
+          // (or re-run) test shows up immediately in the Gantt
+          // and the list below, even while the user is staying
+          // on the Timeline tab. Without this, the tab's
+          // locally fetched snapshot would stay frozen on the
+          // data that was current when the tab was first
+          // opened.
+          refreshTick={timelineRefreshTick}
           // When the parent swaps in a different run, the
           // timeline re-centres on the new run's `createdAt`
           // (via [EndpointTimelineTab]'s internal effect) so
