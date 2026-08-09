@@ -2095,6 +2095,29 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .report-alert, .report-loading { padding: 1rem; border: 1px solid #fedf89; border-radius: 10px; color: #93370d; background: #fffaeb; }
 .report-alert.failure { border-color: #fecdca; color: #b42318; background: #fef3f2; }
 
+/* Demo-Traffic toolbar: the reset button sits next to the
+ * "Print" button. The container groups both so the toolbar's
+ * `justify-content: space-between` keeps the back-link on the
+ * left and the action cluster on the right. */
+.report-toolbar-actions { display: flex; align-items: center; gap: .6rem; }
+/* The reset button uses a neutral outline so it does not
+ * compete with the primary purple "Print" button — the visual
+ * hierarchy is "reset is a secondary action, print is the
+ * primary one". On hover the outline darkens to mirror the
+ * toolbar's other interactive surfaces. */
+.report-toolbar-reset { background: #fff !important; color: #344054 !important; border: 1px solid #d0d5dd; padding: .5rem 1rem; border-radius: 8px; font-weight: 600; cursor: pointer; transition: border-color .15s, color .15s; }
+.report-toolbar-reset:hover:not(:disabled) { border-color: #6941c6; color: #6941c6 !important; }
+.report-toolbar-reset:disabled { opacity: .55; cursor: progress; }
+
+/* In-page banner that surfaces the outcome of the most recent
+ * reset click. Sits between the page header and the table, so
+ * the user notices it without having to scan the toolbar. The
+ * palette mirrors `.report-alert` so the design language is
+ * consistent across the report. */
+.demo-traffic-banner { margin: 0 0 1.5rem; padding: .75rem 1rem; border-radius: 10px; font-weight: 600; }
+.demo-traffic-banner-ok { border: 1px solid #abefc6; color: #054f31; background: #ecfdf3; }
+.demo-traffic-banner-failed { border: 1px solid #fecdca; color: #b42318; background: #fef3f2; }
+
 @media (max-width: 900px) { .report-cards, .report-cards.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }.report-parameter-list { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .grid, .configuration-grid, .report-cards, .report-cards.compact, .report-thresholds, .report-info-grid { grid-template-columns: 1fr; }.configuration-grid { padding-left: .9rem; }.body-box { grid-column: auto; }.operation-heading { grid-template-columns: auto 64px 1fr; }.operation-summary { padding-left: calc(64px + .7rem + 1.55rem); }.actions { flex-direction: column; }.actions > * { text-align: center; }.report-page { width: 100%; margin: 0; padding: 1rem; border-radius: 0; }.report-title-row { align-items: flex-start; flex-direction: column; }.report-toolbar { align-items: stretch; flex-direction: column; }.report-toolbar > * { text-align: center; } }
 @media print { body { background: #fff; }.report-page { width: 100%; margin: 0; padding: 0; box-shadow: none; }.report-toolbar { display: none; }.report-section { break-before: auto; }.report-card, .report-threshold, .report-info, .report-operation, .report-table tr { break-inside: avoid; }.report-raw { break-before: page; }.report-page pre { max-height: none; }.report-operation details, .report-raw details { display: block; }.report-operation details > *, .report-raw details > * { display: block; }.demo-traffic-row { break-inside: avoid; } }

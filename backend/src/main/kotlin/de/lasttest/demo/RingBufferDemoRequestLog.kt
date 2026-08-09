@@ -95,6 +95,18 @@ internal class RingBufferDemoRequestLog(
         synchronized(buffer) {
             buffer.clear()
         }
+        // Drop the persistent copy as well so a container restart
+        // does not resurrect the very entries the dashboard just
+        // asked us to forget. The DELETE is best-effort for the
+        // same reason as `record()`: a transient DB error must
+        // not undo the in-memory clear (which is what the live
+        // dashboard reads from), and a follow-up request will
+        // return an empty snapshot either way.
+        try {
+            repository.deleteAll()
+        } catch (exception: Exception) {
+            log.warn("DemoRequestLogEntity konnte nicht gelöscht werden: {}", exception.message)
+        }
     }
 
     companion object {

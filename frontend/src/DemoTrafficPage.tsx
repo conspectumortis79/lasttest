@@ -15,16 +15,17 @@
 // in one helper so the conditions (no runId vs. terminal run)
 // are colocated and easy to reason about.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   EMPTY_DEMO_TRAFFIC,
+  clearDemoTraffic,
   fetchDemoTraffic,
   formatTrafficTimestamp,
   statusBucket,
   type DemoTrafficEntry,
   type DemoTrafficResponse,
 } from './demoTraffic.ts'
-import { translate } from './i18n.ts'
+import { translate, type SupportedLanguage } from './i18n.ts'
 import { useLanguage } from './languageStorage.ts'
 import { useDemoStatus } from './useDemoStatusState.ts'
 
@@ -41,6 +42,14 @@ type DemoTrafficPageProps = {
 const POLL_INTERVAL_MS: number = 1000
 const TERMINAL_STATUSES: ReadonlyArray<string> = ['COMPLETED', 'FAILED', 'STOPPED', 'ABORTED']
 
+/**
+ * Outcome of the most recent click on the toolbar's "Reset"
+ * button. `null` means the user has not clicked it yet (or the
+ * banner was dismissed). The banner self-clears after a few
+ * seconds so the page does not accumulate stale notifications.
+ */
+type ResetStatus = 'ok' | 'failed' | null
+
 export function DemoTrafficPage({ runId }: DemoTrafficPageProps) {
   const [snapshot, setSnapshot] = useState<DemoTrafficResponse>(EMPTY_DEMO_TRAFFIC)
   const [error, setError] = useState<string>('')
@@ -51,6 +60,11 @@ export function DemoTrafficPage({ runId }: DemoTrafficPageProps) {
   // uses it to render the pulsing "• Live" badge so the user can
   // see at a glance that the stream is open.
   const [isLive, setIsLive] = useState<boolean>(false)
+  // Outcome of the last "Reset" click. Lives in the parent so
+  // the toolbar button and the in-page banner share the same
+  // source of truth. The banner auto-clears via a timeout so the
+  // page does not accumulate stale notifications.
+  const [resetStatus, setResetStatus] = useState<ResetStatus>(null)
   // Stash the latest `runId` in a ref so the polling effect does
   // not need it as a dependency — that way the loop is started
   // exactly once per page mount, and the helper that decides
@@ -63,6 +77,11 @@ export function DemoTrafficPage({ runId }: DemoTrafficPageProps) {
   // unconditionally before any `return` statements — React
   // Hooks must run in the same order on every render.
   const { status: demoStatus } = useDemoStatus()
+  // `useLanguage` is a stable hook (see `languageStorage.ts`);
+  // reading the language here means the toolbar + banner are
+  // both rendered in the user's active locale without each
+  // child having to re-subscribe.
+  const { language } = useLanguage()
 
   useEffect(() => {
     // Reset state when the URL filter changes — switching from
@@ -72,6 +91,7 @@ export function DemoTrafficPage({ runId }: DemoTrafficPageProps) {
     setSnapshot(EMPTY_DEMO_TRAFFIC)
     setError('')
     setIsLive(false)
+    setResetStatus(null)
   }, [runId])
 
   useEffect(() => {
@@ -118,9 +138,39 @@ export function DemoTrafficPage({ runId }: DemoTrafficPageProps) {
     }
   }, [])
 
+  // Reset handler shared by the toolbar button and the banner's
+  // dismiss link. Wrapped in `useCallback` so the button does
+  // not re-render on every parent re-render — the polling loop
+  // updates `snapshot` roughly once a second, and the button is
+  // a leaf component that should stay stable.
+  const handleReset = useCallback(async (): Promise<void> => {
+    const result = await clearDemoTraffic()
+    if (result.kind === 'cleared') {
+      // Adopt the server's empty envelope as the new local
+      // state immediately, so the page is consistent with the
+      // next poll (which would also be empty).
+      setSnapshot(result.response)
+      setResetStatus('ok')
+    } else {
+      // Keep the previous list visible so the user does not
+      // lose context — the server might still hold the
+      // entries.
+      setResetStatus('failed')
+    }
+  }, [])
+
+  // Auto-dismiss the banner after a short delay. The timer is
+  // cancelled on every status change so a rapid second click
+  // does not race against an earlier timer.
+  useEffect(() => {
+    if (resetStatus === null) return
+    const timer = window.setTimeout(() => setResetStatus(null), 4000)
+    return () => window.clearTimeout(timer)
+  }, [resetStatus])
+
   if (error) {
     return (
-      <PageShell>
+      <PageShell language={language} onReset={handleReset}>
         <div className="report-alert failure">{error}</div>
       </PageShell>
     )
@@ -128,16 +178,18 @@ export function DemoTrafficPage({ runId }: DemoTrafficPageProps) {
 
   if (!demoStatus.enabled) {
     return (
-      <PageShell>
+      <PageShell language={language} onReset={handleReset}>
         <PageHeader runId={runId ?? null} snapshot={snapshot} isLive={false} />
+        <ResetBanner status={resetStatus} language={language} />
         <DemoOffHint />
       </PageShell>
     )
   }
 
   return (
-    <PageShell>
+    <PageShell language={language} onReset={handleReset}>
       <PageHeader runId={runId ?? null} snapshot={snapshot} isLive={isLive} />
+      <ResetBanner status={resetStatus} language={language} />
       {snapshot.count === 0
         ? <EmptyState runId={runId ?? null} />
         : <TrafficTable entries={snapshot.entries} />}
@@ -145,18 +197,101 @@ export function DemoTrafficPage({ runId }: DemoTrafficPageProps) {
   )
 }
 
-function PageShell({ children }: { children: ReactNode }): ReactNode {
-  const { language } = useLanguage()
+function PageShell({
+  language,
+  onReset,
+  children,
+}: {
+  language: SupportedLanguage
+  onReset: () => Promise<void>
+  children: ReactNode
+}): ReactNode {
   return (
     <main className="report-page">
       <div className="report-toolbar">
         <a href="/">← {language === 'de' ? 'Zur Anwendung' : 'Back to app'}</a>
-        <button type="button" onClick={() => window.print()}>
-          {translate(language, 'report.print')}
-        </button>
+        <div className="report-toolbar-actions">
+          <ResetButton language={language} onReset={onReset} />
+          <button type="button" onClick={() => window.print()}>
+            {translate(language, 'report.print')}
+          </button>
+        </div>
       </div>
       {children}
     </main>
+  )
+}
+
+/**
+ * Toolbar button that drops every captured demo request so the
+ * dashboard returns to the same "as if the demo API was never
+ * started" state it showed on first load. The click is gated
+ * behind a `window.confirm` so an accidental hit does not wipe a
+ * long-running capture; the actual DELETE call lives in
+ * [clearDemoTraffic] and the result is reported through the
+ * in-page banner owned by [DemoTrafficPage].
+ */
+function ResetButton({
+  language,
+  onReset,
+}: {
+  language: SupportedLanguage
+  onReset: () => Promise<void>
+}): ReactNode {
+  const [busy, setBusy] = useState<boolean>(false)
+  const handleClick = async (): Promise<void> => {
+    // `busy` guards against double-clicks: the `await` in
+    // `onReset` lets React re-render with the disabled button,
+    // but the early return also covers a click that lands
+    // between the user pressing the button and React applying
+    // the disabled attribute.
+    if (busy) return
+    const confirmed = window.confirm(translate(language, 'demoTraffic.reset.confirm'))
+    if (!confirmed) return
+    setBusy(true)
+    try {
+      await onReset()
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      className="report-toolbar-reset"
+      onClick={handleClick}
+      disabled={busy}
+      title={translate(language, 'demoTraffic.reset.title')}
+      data-testid="demo-traffic-reset"
+    >
+      {translate(language, 'demoTraffic.reset')}
+    </button>
+  )
+}
+
+/**
+ * In-page status banner that surfaces the outcome of the most
+ * recent reset click. `null` renders nothing so the layout does
+ * not reserve space for a stale message; `ok` and `failed`
+ * render a coloured card that the [DemoTrafficPage] auto-clears
+ * after a few seconds.
+ */
+function ResetBanner({
+  status,
+  language,
+}: {
+  status: ResetStatus
+  language: SupportedLanguage
+}): ReactNode {
+  if (status === null) return null
+  const isOk = status === 'ok'
+  const className = isOk ? 'demo-traffic-banner demo-traffic-banner-ok' : 'demo-traffic-banner demo-traffic-banner-failed'
+  return (
+    <div className={className} role="status" aria-live="polite" data-testid="demo-traffic-reset-banner">
+      {isOk
+        ? translate(language, 'demoTraffic.reset.done')
+        : translate(language, 'demoTraffic.reset.error')}
+    </div>
   )
 }
 

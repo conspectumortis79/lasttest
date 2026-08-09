@@ -82,6 +82,13 @@ import { DemoCredentialsBanner } from './DemoCredentialsBanner.tsx'
 
 type ImportResponse = ImportedSpecification & { message?: string }
 
+// Polling cadence for the in-flight ramp chart. The time-series
+// endpoint is served from H2 (see [H2TimeSeriesReader] +
+// the seedPlannedRampProfile call in [LocalK6TestRunService]),
+// so the request itself is cheap — 1 s feels close to "live"
+// without doubling backend load across N concurrent runs.
+const RAMP_POLL_INTERVAL_MS = 1000
+
 /**
  * Reads the current browser-level Notification permission. Falls
  * back to `'default'` when `Notification` is not available (SSR,
@@ -1705,11 +1712,12 @@ function OverviewLiveRamp({ run, now }: { run: TestRun, now: number }) {
   const inFlight = isInFlight(run.status)
 
   // Fetch the time-series immediately on mount, then keep
-  // polling every 2s while the run is in flight. The data is
-  // already cached on the backend in H2 (see
-  // [H2TimeSeriesReader] + the seedPlannedRampProfile call in
-  // [LocalK6TestRunService]), so the dashboard never has to
-  // wait for k6 to write a summary to see the planned line.
+  // polling every [RAMP_POLL_INTERVAL_MS] while the run is
+  // in flight. The data is already cached on the backend in
+  // H2 (see [H2TimeSeriesReader] + the seedPlannedRampProfile
+  // call in [LocalK6TestRunService]), so the dashboard never
+  // has to wait for k6 to write a summary to see the planned
+  // line.
   //
   // The effect deliberately depends on `run.id` + the in-flight
   // status only — NOT on `now` (which ticks every 500ms). Listing
@@ -1735,7 +1743,7 @@ function OverviewLiveRamp({ run, now }: { run: TestRun, now: number }) {
     }
     tick()
     if (!inFlight) return () => { cancelled = true }
-    const timer = window.setInterval(tick, 2000)
+    const timer = window.setInterval(tick, RAMP_POLL_INTERVAL_MS)
     return () => { cancelled = true; window.clearInterval(timer) }
   }, [run.id, inFlight])
 

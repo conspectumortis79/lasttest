@@ -630,6 +630,11 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'demoTraffic.col.path': 'Path',
     'demoTraffic.col.status': 'Status',
     'demoTraffic.col.userAgent': 'User-Agent',
+    'demoTraffic.reset': 'Reset',
+    'demoTraffic.reset.title': 'Drop every captured request and start from a clean slate',
+    'demoTraffic.reset.confirm': 'Delete every captured demo request? The list will be empty again, as if the demo API had just been started.',
+    'demoTraffic.reset.done': 'Demo traffic cleared — the list is back to zero.',
+    'demoTraffic.reset.error': 'Could not clear the demo traffic. The list still shows the previous entries.',
 
     // Toolbar — independent link to the demo traffic dashboard
     'toolbar.nav.demoTraffic': 'Demo API',
@@ -1394,6 +1399,11 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'demoTraffic.col.path': 'Pfad',
     'demoTraffic.col.status': 'Status',
     'demoTraffic.col.userAgent': 'User-Agent',
+    'demoTraffic.reset': 'Zurücksetzen',
+    'demoTraffic.reset.title': 'Alle erfassten Anfragen löschen und mit leerer Liste neu starten',
+    'demoTraffic.reset.confirm': 'Alle erfassten Demo-Anfragen löschen? Die Liste ist danach wieder leer, als wäre die Demo-API gerade erst gestartet worden.',
+    'demoTraffic.reset.done': 'Demo-Traffic gelöscht — die Liste ist wieder leer.',
+    'demoTraffic.reset.error': 'Demo-Traffic konnte nicht gelöscht werden. Die Liste zeigt weiterhin die vorherigen Einträge.',
 
     // Toolbar — unabhängiger Link zum Demo-Traffic-Dashboard
     'toolbar.nav.demoTraffic': 'Demo-API',
