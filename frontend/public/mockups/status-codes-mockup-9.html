@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mockup 9 — Status-Codes (Gantt-Balken · 15 % dünner) · lasttest</title>
+<style>
+  /* Resets */
+  *, *::before, *::after { box-sizing: border-box; }
+  body, h1, h2, h3, p, code { margin: 0; padding: 0; }
+  a { color: #7d63ff; text-decoration: none; }
+
+  body {
+    background: #0b1018;
+    color: #e8edf5;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 32px 20px;
+    min-height: 100vh;
+  }
+
+  .chrome {
+    max-width: 760px;
+    margin: 0 auto 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #93a2b8;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .06rem;
+  }
+  .chrome a { color: #93a2b8; }
+  .chrome .sep { color: #3a4a63; }
+
+  .card {
+    max-width: 760px;
+    margin: 0 auto 22px;
+    background: #0a111b;
+    border: 1px solid #293950;
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .card-head {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 8px;
+  }
+  .card-title {
+    color: #93a2b8;
+    font-size: 11.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .06rem;
+    flex: 1;
+  }
+  .card-meta {
+    color: #6b7c95;
+    font-size: 11.5px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+
+  .ramp {
+    background: #0d1322;
+    border: 1px solid #233049;
+    border-radius: 4px;
+    padding: 6px 0;
+    height: 110px;
+    position: relative;
+    overflow: hidden;
+  }
+  .ramp svg { display: block; width: 100%; height: 100%; }
+  .ramp-legend {
+    display: flex; gap: 16px;
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: #93a2b8;
+  }
+  .ramp-legend span::before { content: "■"; margin-right: 6px; }
+  .ramp-legend .l-soll::before { color: #7d63ff; }
+  .ramp-legend .l-ist::before  { color: #f59e0b; }
+
+  /* ========== Mockup 9: Gantt-Balken · 15 % dünner ========== */
+  /* Mockup 8 hatte 18 px hohe Balken. 15 % dünner → 15.3 px,
+     auf 15 px gerundet. Chips und Schrift proportional
+     mitverkleinert, damit die ganze Zeile optisch konsistent
+     bleibt. */
+
+  .gantt {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .gantt-row {
+    display: grid;
+    grid-template-columns: 42px 1fr 60px 60px;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0;
+    border-radius: 4px;
+    transition: background .15s;
+  }
+  .gantt-row:hover { background: #11192a; }
+
+  /* Chip proportional zur neuen Balkenhöhe (15 px) —
+     minimal kleiner als Mockup 8 (44×20), jetzt 36×18. */
+  .gantt-chip {
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    height: 18px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 800;
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+  .gantt-chip.f-2xx { background: #0b3a25; color: #8fe8c1; border: 1px solid #22c55e; }
+  .gantt-chip.f-3xx { background: #0d2a4a; color: #93c5fd; border: 1px solid #3b82f6; }
+  .gantt-chip.f-4xx { background: #3a2a0b; color: #fbbf24; border: 1px solid #fb923c; }
+  .gantt-chip.f-5xx { background: #3a0b0b; color: #ffb5c3; border: 1px solid #ef4444; }
+  .gantt-chip.f-err { background: #2a0b2a; color: #f0abfc; border: 1px solid #c026d3; }
+  .gantt-chip.f-other { background: #1a2638; color: #93a2b8; border: 1px solid #33425b; }
+
+  /* Track auf 15 px geschrumpft — 15 % dünner als Mockup 8 (18 px). */
+  .gantt-track {
+    height: 15px;
+    background: #0d1322;
+    border: 1px solid #1a2638;
+    border-radius: 3px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Same gradient + inset highlight structure as Mockup 8. */
+  .gantt-seg {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+  .gantt-seg.f-2xx   { background: linear-gradient(180deg, #4ade80 0%, #22c55e 100%); }
+  .gantt-seg.f-3xx   { background: linear-gradient(180deg, #60a5fa 0%, #3b82f6 100%); }
+  .gantt-seg.f-4xx   { background: linear-gradient(180deg, #fbbf24 0%, #fb923c 100%); }
+  .gantt-seg.f-5xx   { background: linear-gradient(180deg, #f87171 0%, #ef4444 100%); }
+  .gantt-seg.f-err   { background: linear-gradient(180deg, #e879f9 0%, #c026d3 100%); }
+  .gantt-seg.f-other { background: linear-gradient(180deg, #94a3b8 0%, #475569 100%); }
+
+  /* Schriftgrößen noch eine Stufe kleiner — passend zur
+     kompakteren Zeile. */
+  .gantt-count {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: #dbe5f3;
+    text-align: right;
+  }
+  .gantt-pct {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 10px;
+    color: #93a2b8;
+    text-align: right;
+  }
+
+  .gantt-header {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #1a2638;
+  }
+  .gantt-header-meta {
+    font-size: 11.5px;
+    color: #6b7c95;
+    margin-bottom: 6px;
+  }
+  .gantt-axis {
+    display: grid;
+    grid-template-columns: 42px 1fr 60px 60px;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0 0;
+    font-size: 10px;
+    color: #6b7c95;
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+  .gantt-axis .ticks {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  }
+  .gantt-axis .ticks span:first-child { text-align: left; }
+  .gantt-axis .ticks span:last-child { text-align: right; }
+  .gantt-axis .ticks span { text-align: center; }
+
+  .footnote {
+    max-width: 760px;
+    margin: 6px auto 0;
+    color: #6b7c95;
+    font-size: 11.5px;
+    text-align: center;
+  }
+
+  .reviewer-note {
+    max-width: 760px;
+    margin: 22px auto 0;
+    padding: 10px 14px;
+    background: #11192a;
+    border: 1px dashed #3a4a63;
+    border-radius: 6px;
+    color: #b6c2d4;
+    font-size: 12px;
+  }
+  .reviewer-note strong { color: #79e6c8; }
+  .reviewer-note ul { margin: 6px 0 0 18px; padding: 0; }
+  .reviewer-note li { margin-bottom: 2px; }
+</style>
+</head>
+<body>
+
+  <div class="chrome">
+    <a href="#">Übersicht</a> <span class="sep">·</span>
+    <a href="#">Timeline</a> <span class="sep">·</span>
+    <a href="#">Aktionen</a> <span class="sep">·</span>
+    <a href="#">k6-Konsole</a> <span class="sep">·</span>
+    <a href="#">Schwellen</a> <span class="sep">·</span>
+    <a href="#">Konfig</a> <span class="sep">·</span>
+    <a href="#">Fehler</a> <span class="sep">·</span>
+    <a href="#">k6-Skript</a> <span class="sep">·</span>
+    <a href="#">↗ k6-Bericht</a>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">Auslastung (Soll / Ist)</div>
+      <div class="card-meta">50 VUs · 30 s · Start 14:23:00</div>
+    </div>
+    <div class="ramp">
+      <svg viewBox="0 0 600 110" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="pgrad9" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#7d63ff" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#7d63ff" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d="M 0 90 L 60 90 L 80 80 L 220 80 L 240 60 L 420 60 L 440 36 L 600 36 L 600 110 L 0 110 Z" fill="url(#pgrad9)"/>
+        <polyline points="0,90 60,90 80,80 220,80 240,60 420,60 440,36 600,36" fill="none" stroke="#7d63ff" stroke-width="1.6"/>
+        <polyline points="0,90 60,90 80,82 220,78 240,62 420,62 440,40 600,40" fill="none" stroke="#f59e0b" stroke-width="1.6" stroke-dasharray="3 3"/>
+      </svg>
+    </div>
+    <div class="ramp-legend">
+      <span class="l-soll">Soll (geplant)</span>
+      <span class="l-ist">Ist (gemessen · live)</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">Status-Codes über Zeit</div>
+      <div class="card-meta">12 841 Anfragen · Balken zeigen, wann welcher Code aktiv war</div>
+    </div>
+
+    <div class="gantt">
+
+      <div class="gantt-row">
+        <span class="gantt-chip f-2xx">200</span>
+        <div class="gantt-track">
+          <div class="gantt-seg f-2xx" style="left: 0%;    width: 33.3%;"></div>
+          <div class="gantt-seg f-2xx" style="left: 66.6%; width: 33.4%;"></div>
+        </div>
+        <span class="gantt-count">10 200</span>
+        <span class="gantt-pct">79,49 %</span>
+      </div>
+
+      <div class="gantt-row">
+        <span class="gantt-chip f-4xx">429</span>
+        <div class="gantt-track">
+          <div class="gantt-seg f-4xx" style="left: 33.3%; width: 33.4%;"></div>
+        </div>
+        <span class="gantt-count">2 580</span>
+        <span class="gantt-pct">20,11 %</span>
+      </div>
+
+      <div class="gantt-row">
+        <span class="gantt-chip f-4xx">404</span>
+        <div class="gantt-track">
+          <div class="gantt-seg f-4xx" style="left: 0%; width: 10%;"></div>
+        </div>
+        <span class="gantt-count">60</span>
+        <span class="gantt-pct">0,47 %</span>
+      </div>
+
+      <div class="gantt-row">
+        <span class="gantt-chip f-5xx">502</span>
+        <div class="gantt-track">
+          <div class="gantt-seg f-5xx" style="left: 90%; width: 10%;"></div>
+        </div>
+        <span class="gantt-count">1</span>
+        <span class="gantt-pct">0,01 %</span>
+      </div>
+
+    </div>
+
+    <div class="gantt-header">
+      <div class="gantt-header-meta">Wand-Uhrzeit · X-Achse teilt die Zeitachse mit dem Auslastungs-Graphen oben</div>
+      <div class="gantt-axis">
+        <span></span>
+        <div class="ticks">
+          <span>14:23:00</span>
+          <span>14:23:08</span>
+          <span>14:23:15</span>
+          <span>14:23:23</span>
+          <span>14:23:30</span>
+        </div>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+  </div>
+
+  <p class="footnote">Volle Breite = gesamter Lauf · Farbige Segmente = Zeiträume, in denen der Code aktiv war</p>
+
+  <div class="reviewer-note">
+    <strong>Mockup 9 — Gantt-Balken · 15 % dünner</strong>
+    <ul>
+      <li><strong>Balken-Dicke</strong>: 18 px → <strong>15 px</strong> (15 % dünner, gerundet von 15.3 px).</li>
+      <li><strong>Chip-Größe</strong> proportional mitverkleinert: 44×20 px → <strong>36×18 px</strong>.</li>
+      <li><strong>Schriftgrößen</strong>:
+        <ul>
+          <li>Count: 12 px → 11 px</li>
+          <li>Pct: 11 px → 10 px</li>
+          <li>Chip: 11 px → 10 px</li>
+        </ul>
+      </li>
+      <li><strong>Grid-Spalten</strong> schmaler: 50/70/70 px → <strong>42/60/60 px</strong> — passend zu den schmaleren Chips.</li>
+      <li><strong>Row-Gap</strong> von 4 px auf 3 px reduziert — die Zeilen sitzen enger zusammen.</li>
+      <li>Die Balken sind jetzt <strong>auf gleicher Höhe mit dem Chip</strong> (18/18 px) — wirken als zusammengehörige Einheit statt als zwei konkurrierende Elemente.</li>
+      <li>Die Time-Axis wurde proportional mitverkleinert (Grid-Template 42/1fr/60/60 px) — Ticks bleiben unter den Tracks zentriert.</li>
+      <li>Im direkten Vergleich mit Mockup 8 wirkt die Card etwa <strong>15 % kompakter</strong> in der Höhe, ohne dass die Lesbarkeit leidet.</li>
+    </ul>
+  </div>
+</body>
+</html>

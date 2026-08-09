@@ -259,3 +259,86 @@ class InMemoryDemoRequestLogRepository : DemoRequestLogRepository {
 class InMemoryTimeSeriesWriter(
     private val repository: TimeSeriesRepository = InMemoryTimeSeriesRepository(),
 ) : TimeSeriesWriter(repository)
+
+/**
+ * In-memory `StatusCodeTimeSeriesRepository` for tests that
+ * exercise the status-code time-series path. Same shape as
+ * [InMemoryTimeSeriesRepository] — a fixed-size backing store
+ * keyed by the unique index on `(runId, epochSecond, code)` so
+ * the upsert path in [StatusCodeTimeSeriesWriter] collapses
+ * duplicate stamps onto the same row.
+ */
+class InMemoryStatusCodeTimeSeriesRepository : StatusCodeTimeSeriesRepository {
+    private val store = ConcurrentHashMap<String, StatusCodeTimeSeriesEntity>()
+
+    private fun keyOf(entity: StatusCodeTimeSeriesEntity): String =
+        "${entity.runId}|${entity.epochSecond}|${entity.code}"
+
+    override fun <S : StatusCodeTimeSeriesEntity> save(entity: S): S {
+        store[keyOf(entity)] = entity
+        return entity
+    }
+
+    override fun <S : StatusCodeTimeSeriesEntity> saveAll(entities: Iterable<S>): List<S> =
+        entities.onEach { store[keyOf(it)] = it }.toList()
+
+    override fun findById(id: Long): Optional<StatusCodeTimeSeriesEntity> =
+        store.values.firstOrNull { it.id == id }.let { Optional.ofNullable(it) }
+
+    override fun existsById(id: Long): Boolean = store.values.any { it.id == id }
+
+    override fun findAll(): List<StatusCodeTimeSeriesEntity> = store.values.toList()
+
+    override fun findAllById(ids: Iterable<Long>): List<StatusCodeTimeSeriesEntity> =
+        store.values.filter { entity -> entity.id?.let { it in ids.toList() } == true }
+
+    override fun count(): Long = store.size.toLong()
+
+    override fun deleteById(id: Long) {
+        val it = store.entries.firstOrNull { it.value.id == id } ?: return
+        store.remove(it.key)
+    }
+
+    override fun delete(entity: StatusCodeTimeSeriesEntity) {
+        val id = entity.id ?: return
+        deleteById(id)
+    }
+
+    override fun deleteAll(entities: Iterable<StatusCodeTimeSeriesEntity>) {
+        entities.forEach { delete(it) }
+    }
+
+    override fun deleteAll() {
+        store.clear()
+    }
+
+    override fun deleteAllById(ids: Iterable<Long>) {
+        ids.forEach { id -> deleteById(id) }
+    }
+
+    override fun findAll(pageable: Pageable): org.springframework.data.domain.Page<StatusCodeTimeSeriesEntity> =
+        org.springframework.data.domain.Page.empty(pageable)
+
+    override fun findAll(sort: org.springframework.data.domain.Sort): List<StatusCodeTimeSeriesEntity> =
+        store.values.toList()
+
+    override fun findByRunIdOrderByEpochSecondAscCodeAsc(runId: String): List<StatusCodeTimeSeriesEntity> =
+        store.values
+            .filter { it.runId == runId }
+            .sortedWith(compareBy({ it.epochSecond }, { it.code }))
+}
+
+/**
+ * In-memory `StatusCodeTimeSeriesWriter` — backs onto
+ * [InMemoryStatusCodeTimeSeriesRepository] so tests can inspect
+ * the deduped samples after a run. The upsert-by-(runId,
+ * epochSecond, code) shape matches the H2 prod path so the
+ * test wires up the same insert-vs-update trade-offs.
+ */
+class InMemoryStatusCodeTimeSeriesWriter(
+    private val repository: StatusCodeTimeSeriesRepository = InMemoryStatusCodeTimeSeriesRepository(),
+) : StatusCodeTimeSeriesWriter(repository) {
+    /** Test-only: read every sample back so a test can assert on the writer's output. */
+    fun readBack(runId: String): List<StatusCodeTimeSeriesEntity> =
+        repository.findByRunIdOrderByEpochSecondAscCodeAsc(runId)
+}

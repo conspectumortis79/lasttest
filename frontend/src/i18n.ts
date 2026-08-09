@@ -329,6 +329,16 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'runStatus.live.legend.yAxisVUs': 'Y axis: VUs',
     'runStatus.live.legend.yAxisRps': 'Y axis: requests/s',
 
+    // Status-codes timeline (sparkline list below the ramp chart).
+    // The values are translated here so the component stays a
+    // pure presentation surface; the wall-clock tick labels
+    // (HH:MM:SS) are rendered in the user's local timezone via
+    // native Date, not via these i18n keys.
+    'statusCodes.title': 'Status-Codes over time',
+    'statusCodes.total': '{n} requests',
+    'statusCodes.startedAt': 'Start {time}',
+    'statusCodes.empty': 'No status code data yet — k6 has not written the summary',
+
     // === Live-Banner ===
     'runStatus.liveBanner.label': 'Live · load test in progress',
     'runStatus.liveBanner.profile': 'Load profile',
@@ -1128,6 +1138,15 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'runStatus.live.legend.now': 'Aktueller Messpunkt',
     'runStatus.live.legend.yAxisVUs': 'Y-Achse: VUs',
     'runStatus.live.legend.yAxisRps': 'Y-Achse: Anfragen/s',
+
+    // Status-Codes-Zeitleiste (Sparkline-Liste unter dem Auslastungs-Graphen).
+    // Die Wand-Uhrzeit-Ticklabels (HH:MM:SS) werden über die lokale
+    // Zeitzone des Browsers gerendert (native Date), nicht über
+    // diese i18n-Keys.
+    'statusCodes.title': 'Status-Codes über Zeit',
+    'statusCodes.total': '{n} Anfragen',
+    'statusCodes.startedAt': 'Start {time}',
+    'statusCodes.empty': 'Noch keine Status-Code-Daten — k6 hat die Summary noch nicht geschrieben',
 
     // === Live-Banner ===
     'runStatus.liveBanner.label': 'Live · Lasttest läuft',

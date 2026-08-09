@@ -389,6 +389,30 @@ export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) 
   return null
 }
 
+// ---- formatWallClockTick -----------------------------------------------
+//
+// Formats a tick on the wall-clock x-axis. `startMs` is the epoch
+// millisecond timestamp of the run's startedAt (or null when the
+// run is still QUEUED and has no startedAt yet). `sec` is the
+// offset from startMs in seconds. Returns HH:MM:SS in the
+// browser's local time, or the generic "Xs" ticker when startMs
+// is null / invalid so the chart still has labels.
+//
+// Kept local to [runStatusView] because the only callers are the
+// ramp chart and the status-codes sparkline — both live below the
+// Overview tab. The same formatter is duplicated inside
+// [StatusCodesTimeline] to avoid the cross-module hop.
+function formatWallClockTick(startMs: number | null, sec: number): string {
+  if (startMs == null || !Number.isFinite(startMs)) {
+    return `${Math.round(sec)} s`
+  }
+  const d = new Date(startMs + sec * 1000)
+  const hh = d.getHours().toString().padStart(2, '0')
+  const mm = d.getMinutes().toString().padStart(2, '0')
+  const ss = d.getSeconds().toString().padStart(2, '0')
+  return `${hh}:${mm}:${ss}`
+}
+
 // ---- LiveRampChart ------------------------------------------------------
 //
 // Renders the "Auslastung (Soll vs Ist)" SVG for an in-flight
@@ -433,9 +457,29 @@ type LiveRampChartProps = {
    */
   windowStartMs?: number
   windowEndMs?: number
+  /**
+   * ISO-8601 timestamp of the run's `startedAt`. When set, the
+   * x-axis below the chart renders wall-clock time labels
+   * (HH:MM:SS) instead of the generic "0 s … 30 s" tickers so
+   * the user can cross-reference the chart with logs,
+   * dashboards, or other tools that show the same wall clock.
+   * Falls back to "since run start" when the run is still
+   * QUEUED (no startedAt yet).
+   */
+  startedAtIso?: string | null
 }
 
-export function LiveRampChart({ planned, actual, totalDurationSeconds, elapsedSeconds, targetValue, unit, windowStartMs, windowEndMs }: LiveRampChartProps) {
+export function LiveRampChart({
+  planned,
+  actual,
+  totalDurationSeconds,
+  elapsedSeconds,
+  targetValue,
+  unit,
+  windowStartMs,
+  windowEndMs,
+  startedAtIso,
+}: LiveRampChartProps) {
   const { language: lang } = useLanguage()
   // SVG viewport. The viewBox is fixed so the chart scales with
   // its container while the data points stay in absolute
@@ -524,6 +568,29 @@ export function LiveRampChart({ planned, actual, totalDurationSeconds, elapsedSe
       )}
       <line x1={0} y1={H - padY} x2={W} y2={H - padY} stroke="#293950" />
     </svg>
+    {/*
+      Wall-clock time axis. Five ticks (start, three quarters, end)
+      so the chart stays readable on both 30-second smoke tests
+      and 30-minute soak tests. The first tick is left-aligned,
+      the last is right-aligned, the middle three are evenly
+      spaced — the same layout used by the status-code sparklines
+      below so the two surfaces align visually.
+    */}
+    <div className="ramp-tab-axis">
+      {[
+        { sec: 0, align: 'start' as const },
+        { sec: totalDurationSeconds * 0.25, align: 'center' as const },
+        { sec: totalDurationSeconds * 0.5, align: 'center' as const },
+        { sec: totalDurationSeconds * 0.75, align: 'center' as const },
+        { sec: totalDurationSeconds, align: 'end' as const },
+      ].map(({ sec, align }) => {
+        const startMs = startedAtIso ? Date.parse(startedAtIso) : null
+        const label = formatWallClockTick(startMs, sec)
+        return (
+          <span key={`t-${sec}`} style={{ textAlign: align }}>{label}</span>
+        )
+      })}
+    </div>
     <div className="ramp-tab-legend">
       <span className="l-ist">{translate(lang, 'runStatus.live.legend.actual')}</span>
       <span className="l-soll">{translate(lang, 'runStatus.live.legend.planned')}</span>

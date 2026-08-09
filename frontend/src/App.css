@@ -3245,6 +3245,171 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
   height: 160px;
   display: block;
 }
+/* Wall-clock time axis underneath the ramp chart. Five ticks
+   (start, three quarters, end) so the chart stays readable on
+   both 30-second smoke tests and 30-minute soak tests. The
+   first tick is left-aligned, the last is right-aligned, the
+   middle three are evenly spaced — the same layout the
+   status-codes sparklines use so the two surfaces align
+   visually. */
+.ramp-tab-axis {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  padding: 4px 4px 0;
+  font-size: 10px;
+  color: #6b7c95;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.ramp-tab-axis span:first-child { text-align: left; }
+.ramp-tab-axis span:last-child { text-align: right; }
+
+/* ====================================================================
+   Status-Codes timeline (sparkline list below the ramp chart)
+   ====================================================================
+   Each row is one status code. The chart is a tiny polyline that
+   scales to the run duration; the x-axis below the chart reads
+   wall-clock time in HH:MM:SS so the eye can scroll vertically
+   between this list and the ramp chart above and see immediately
+   whether a code correlates with the load. */
+.status-codes-timeline {
+  background: #0a111b;
+  border: 1px solid #293950;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+.status-codes-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.status-codes-title {
+  color: #93a2b8;
+  font-size: 11.5px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .06rem;
+  flex: 1;
+}
+.status-codes-meta {
+  color: #6b7c95;
+  font-size: 11.5px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.status-codes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.status-codes-row {
+  display: grid;
+  /* Columns match Mockup 9: 42 / 1fr / 60 / 60. The chip column
+     is narrower than the previous version so the chip and the
+     bar form a compact unit. The two right columns stay wide
+     enough for the localised count + percentage. */
+  grid-template-columns: 42px 1fr 60px 60px;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+  border-radius: 4px;
+  transition: background .15s;
+}
+.status-codes-row:hover { background: #11192a; }
+.status-codes-row.is-leader {
+  /* 2xx leader gets the green accent. The 4xx/5xx override
+     highlights failure shapes even when many 2xx rows sit
+     above them in the count-sorted list. */
+  border-color: #22c55e;
+}
+.status-codes-row.family-4xx.is-leader { border-color: #a06a14; }
+.status-codes-row.family-5xx.is-leader { border-color: #7a1c2c; }
+.status-codes-row.family-err.is-leader { border-color: #590e6e; }
+
+.status-codes-chip {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 18px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.status-codes-chip.family-2xx { background: #0b3a25; color: #8fe8c1; border: 1px solid #22c55e; }
+.status-codes-chip.family-3xx { background: #0d2a4a; color: #93c5fd; border: 1px solid #3b82f6; }
+.status-codes-chip.family-4xx { background: #3a2a0b; color: #fbbf24; border: 1px solid #fb923c; }
+.status-codes-chip.family-5xx { background: #3a0b0b; color: #ffb5c3; border: 1px solid #ef4444; }
+.status-codes-chip.family-err { background: #2a0b2a; color: #f0abfc; border: 1px solid #c026d3; }
+.status-codes-chip.family-other { background: #1a2638; color: #93a2b8; border: 1px solid #33425b; }
+
+.status-codes-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Gantt track — the background of the bar. The actual segments
+   are absolutely positioned inside it and inherit the family
+   colour through the `family-*` class. 15 px tall to match
+   the Mockup 9 "15 % dünner" refinement. The border is
+   intentionally subtle so the empty space reads as "no data"
+   rather than "container". */
+.status-codes-gantt {
+  position: relative;
+  width: 100%;
+  height: 15px;
+  background: #0d1322;
+  border: 1px solid #1a2638;
+  border-radius: 3px;
+  overflow: hidden;
+}
+/* Segment — one per active interval. The gradient plus inset
+   highlight give the filled portion a subtle "raised" feel
+   that matches the chip styling. The `is-summary` modifier
+   slightly fades the segment so the user can see the data
+   came from the k6 summary (no per-second timing) rather than
+   the live stream (real timing). */
+.status-codes-gantt-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.status-codes-gantt-seg.family-2xx   { background: linear-gradient(180deg, #4ade80 0%, #22c55e 100%); }
+.status-codes-gantt-seg.family-3xx   { background: linear-gradient(180deg, #60a5fa 0%, #3b82f6 100%); }
+.status-codes-gantt-seg.family-4xx   { background: linear-gradient(180deg, #fbbf24 0%, #fb923c 100%); }
+.status-codes-gantt-seg.family-5xx   { background: linear-gradient(180deg, #f87171 0%, #ef4444 100%); }
+.status-codes-gantt-seg.family-err   { background: linear-gradient(180deg, #e879f9 0%, #c026d3 100%); }
+.status-codes-gantt-seg.family-other { background: linear-gradient(180deg, #94a3b8 0%, #475569 100%); }
+.status-codes-gantt-seg.is-summary { opacity: 0.7; }
+
+.status-codes-axis {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  padding: 0 4px;
+  font-size: 10px;
+  color: #6b7c95;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.status-codes-axis span:first-child { text-align: left; }
+.status-codes-axis span:last-child { text-align: right; }
+.status-codes-axis span { text-align: center; }
+
+.status-codes-count {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #dbe5f3;
+  text-align: right;
+}
+.status-codes-pct {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  color: #93a2b8;
+  text-align: right;
+}
 .ramp-tab-legend {
   display: flex; gap: 16px;
   margin-top: 4px;

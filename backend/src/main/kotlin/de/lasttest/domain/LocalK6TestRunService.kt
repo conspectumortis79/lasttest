@@ -114,6 +114,7 @@ class LocalK6TestRunService(
     private val runRepository: TestRunRepository,
     private val statisticsRepository: OperationStatisticsRepository,
     private val timeSeriesWriter: TimeSeriesWriter,
+    private val statusCodeTimeSeriesWriter: StatusCodeTimeSeriesWriter,
 ) : TestRunService {
     private val runs = ConcurrentHashMap<String, TestRun>()
     private val scripts = ConcurrentHashMap<String, String>()
@@ -702,6 +703,21 @@ class LocalK6TestRunService(
         val directory = Files.createTempDirectory("lasttest-${run.id}")
         val totalDurationSeconds = run.configuration?.loadProfile?.durationSeconds ?: 600
         val targetVus = run.configuration?.loadProfile?.virtualUsers ?: 0
+        // Capture the wall-clock time *before* the k6 process is
+        // spawned. The k6 script's STAMP carries `Math.floor(Date.now()/1000)`
+        // which is the same epoch, so this value is the correct
+        // zero-point for the run-relative second calculation.
+        // Reading the time inside the reader executor (as the old
+        // code did) was a race: the reader task can be queued for
+        // tens of milliseconds before it runs, during which k6 has
+        // already emitted one or more STAMPs. The first STAMPs then
+        // carry a `now` that EQUALS or PREDATES the reader's start,
+        // so `runRelativeSecond = stampEpochSeconds - runStartSeconds`
+        // ends up at 0 or negative, and the `if (runRelativeSecond < 0) return`
+        // guard discards them. The dashboard then sees the data only
+        // after the FIRST second has elapsed — exactly the symptom
+        // we are chasing.
+        val processStartMs = System.currentTimeMillis()
         try {
             val scriptFile = directory.resolve("test.js")
             val summaryFile = directory.resolve("summary.json")
@@ -724,7 +740,13 @@ class LocalK6TestRunService(
             // captured output matches what k6 actually wrote
             // (including the final newline, if any).
             val output = java.io.ByteArrayOutputStream()
-            val runStartMs = System.currentTimeMillis()
+            // Use the wall-clock time captured BEFORE the k6 process
+            // started (processStartMs) as the run-relative zero
+            // point. The k6 script's STAMP carries `Math.floor(Date.now()/1000)`
+            // which is the same epoch, so this keeps the timestamp
+            // math race-free even when the reader task is queued
+            // for tens of milliseconds before its first read.
+            val runStartMs = processStartMs
             // Live-tail throttle: every k6 line that contains a
             // status heartbeat (or any other line the user might
             // want to see in the k6-Konsole tab) costs us one
@@ -751,6 +773,25 @@ class LocalK6TestRunService(
                         // second time (k6 only writes to stdout once).
                         val lineBuffer = java.io.ByteArrayOutputStream()
                         val vuPattern = Regex("""running\s+\([^)]+\),\s*(\d+)/(\d+)\s*VUs""")
+                        // STAMP:<epoch_second>|<json> lines emitted by
+                        // the k6 script's `__lt_status_stamp` helper.
+                        // The regex captures the wall-clock second and
+                        // the JSON payload; the per-code counts are
+                        // parsed again below via the inline decoder.
+                        // STAMP:<epoch_second>|<json> lines emitted by
+                        // the k6 script's `__lt_status_stamp` helper.
+                        // The regex captures the JSON object only — the
+                        // closing `}` is the first character that ends
+                        // the JSON, so the non-greedy `.*?` stops there
+                        // and the trailing k6 log suffix ` source=console`
+                        // (which k6 appends to every console.log line) is
+                        // NOT captured. The previous greedy `(.+)$`
+                        // captured the suffix too, which then failed the
+                        // `endsWith("}")` check in the parser and made
+                        // every STAMP silently rejected. The dashboard
+                        // then kept showing an empty bar until the k6
+                        // summary was written at the end of the run.
+                        val stampPattern = Regex("""STAMP:(\d+)\|(\{.*?\})""")
                         val buf = ByteArray(1)
                         while (true) {
                             val n = stream.read(buf)
@@ -783,22 +824,41 @@ class LocalK6TestRunService(
                                         }
                                     }
                                 }
-                                val match = vuPattern.find(line) ?: continue
-                                val activeVUs = match.groupValues[1].toIntOrNull() ?: continue
-                                val elapsedSec = ((System.currentTimeMillis() - runStartMs) / 1000L).toInt().coerceAtLeast(0)
-                                val plannedVus =
-                                    if (totalDurationSeconds > 0) {
-                                        (elapsedSec.toDouble() / totalDurationSeconds * targetVus).coerceAtMost(targetVus.toDouble())
-                                    } else {
-                                        targetVus.toDouble()
+                                // STAMP<second>|<json> lines: the k6 script
+                                // emits one per wall-clock second so the
+                                // dashboard can render the cumulative
+                                // status-code sparkline list in real
+                                // time. The decoder stores the run-relative
+                                // second + the per-code cumulative count.
+                                // Lines that don't match the stamp shape
+                                // (the heartbeat, k6's progress lines,
+                                // free-form k6 output) fall through to the
+                                // existing VU pattern check.
+                                val stampMatch = stampPattern.find(line)
+                                if (stampMatch != null) {
+                                    val stampEpoch = stampMatch.groupValues[1].toLongOrNull()
+                                    val stampJson = stampMatch.groupValues[2]
+                                    if (stampEpoch != null) {
+                                        recordStatusCodeStamp(run.id, runStartMs, stampEpoch, stampJson)
                                     }
-                                timeSeriesWriter.record(
-                                    runId = run.id,
-                                    timestampSeconds = (runStartMs / 1000L) + elapsedSec,
-                                    plannedVus = plannedVus,
-                                    actualVus = activeVUs.toDouble(),
-                                    actualRps = 0.0,
-                                )
+                                } else {
+                                    val match = vuPattern.find(line) ?: continue
+                                    val activeVUs = match.groupValues[1].toIntOrNull() ?: continue
+                                    val elapsedSec = ((System.currentTimeMillis() - runStartMs) / 1000L).toInt().coerceAtLeast(0)
+                                    val plannedVus =
+                                        if (totalDurationSeconds > 0) {
+                                            (elapsedSec.toDouble() / totalDurationSeconds * targetVus).coerceAtMost(targetVus.toDouble())
+                                        } else {
+                                            targetVus.toDouble()
+                                        }
+                                    timeSeriesWriter.record(
+                                        runId = run.id,
+                                        timestampSeconds = (runStartMs / 1000L) + elapsedSec,
+                                        plannedVus = plannedVus,
+                                        actualVus = activeVUs.toDouble(),
+                                        actualRps = 0.0,
+                                    )
+                                }
                             } else {
                                 lineBuffer.write(byte.toInt())
                             }
@@ -969,6 +1029,78 @@ class LocalK6TestRunService(
             output
         } else {
             "…[${output.length - MAX_ERROR_LENGTH} Zeichen übersprungen]…\n" + output.takeLast(MAX_ERROR_LENGTH)
+        }
+    }
+
+    /**
+     * Decodes a single `STAMP:<second>|<json>` line emitted by the
+     * k6 script and writes one row per status code to the H2
+     * status-code time-series table. The wire format is the same
+     * shape the k6 script generates:
+     *
+     *   STAMP:1715278434|{"200":12783,"404":34,"429":20,"502":1}
+     *
+     * We parse the JSON inline (no jackson pulled into the hot
+     * stdout-reader thread) so the per-line cost is one regex
+     * match + one short string scan. The counts are cumulative
+     * (the k6 script reads `counter.count` directly), so the
+     * writer's upsert-on-(runId, second, code) keeps the latest
+     * value when parallel VUs emit the same stamp twice.
+     *
+     * Called from the stdout reader thread; all errors are
+     * swallowed so a malformed line never kills the reader
+     * (which would deprive the dashboard of the rest of the
+     * run's status-code stream).
+     */
+    private fun recordStatusCodeStamp(
+        runId: String,
+        runStartMs: Long,
+        stampEpochSeconds: Long,
+        stampJson: String,
+    ) {
+        try {
+            // Translate the wall-clock second from the script into
+            // a run-relative second so the table is portable across
+            // runs that started at different times. The integer
+            // division matches the script's `Math.floor(Date.now()/1000)`.
+            val runStartSeconds = runStartMs / 1000L
+            val runRelativeSecond = stampEpochSeconds - runStartSeconds
+            if (runRelativeSecond < 0) return // stamp arrived before the run started; ignore
+            // Walk the JSON by hand so we don't pull a parser into the
+            // hot path. The expected shape is
+            //   {"200":12783,"404":34,"429":20,"err":3,"other":0,...}
+            // where every value is a non-negative integer. Any
+            // deviation (missing braces, fractional values, extra
+            // whitespace) is skipped silently.
+            val trimmed = stampJson.trim()
+            if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return
+            val body = trimmed.substring(1, trimmed.length - 1)
+            if (body.isEmpty()) return
+            // Split on `,` then on `:`. k6 wraps the console.log
+            // message in `msg="..."` for its own log format, so the
+            // JSON quotes inside the message come through escaped as
+            // `\"200\"`. The raw JSON has no backslashes (k6's
+            // JSON.stringify produces plain quotes), so they are
+            // purely an artifact of k6's log framing. Unescape
+            // both halves of the pair before tokenising so the
+            // code key comes out as `200`, not `\"200\"`.
+            val unescapedBody = body.replace("\\\"", "\"").replace("\\\\", "\\")
+            for (pair in unescapedBody.split(",")) {
+                val colon = pair.indexOf(':')
+                if (colon <= 0) continue
+                val code = pair.substring(0, colon).trim().trim('"')
+                val countStr = pair.substring(colon + 1).trim()
+                val count = countStr.toLongOrNull() ?: continue
+                if (code.isEmpty() || count < 0) continue
+                statusCodeTimeSeriesWriter.record(
+                    runId = runId,
+                    epochSecond = runRelativeSecond,
+                    code = code,
+                    count = count,
+                )
+            }
+        } catch (_: NumberFormatException) {
+            // Malformed line — ignore. The rest of the stream keeps flowing.
         }
     }
 

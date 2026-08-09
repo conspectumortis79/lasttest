@@ -251,6 +251,7 @@ class LocalK6TestRunExecutionTest {
                 runRepository = InMemoryTestRunRepository(),
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         try {
@@ -567,5 +568,6 @@ class LocalK6TestRunExecutionTest {
             runRepository = repository,
             statisticsRepository = statistics,
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
         )
 }

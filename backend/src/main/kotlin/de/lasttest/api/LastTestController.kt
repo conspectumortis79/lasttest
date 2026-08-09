@@ -7,6 +7,7 @@ import de.lasttest.domain.InvalidSpecificationException
 import de.lasttest.domain.OperationStatisticsRepository
 import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
+import de.lasttest.domain.StatusCodeTimeSeriesReader
 import de.lasttest.domain.TestRunEntity
 import de.lasttest.domain.TestRunRepository
 import de.lasttest.domain.TestRunService
@@ -37,6 +38,7 @@ class LastTestController(
     private val demoSpecificationProvider: DemoSpecificationProvider,
     private val remoteFetcher: RemoteSpecificationFetcher,
     private val timeSeriesReader: TimeSeriesReader,
+    private val statusCodeTimeSeriesReader: StatusCodeTimeSeriesReader,
     private val statisticsRepository: OperationStatisticsRepository,
     private val runRepository: TestRunRepository,
     // Shared mapper for deserialising `originalRequestJson` from
@@ -158,6 +160,46 @@ class LastTestController(
                 resolutionSeconds = 1,
                 vus = vus,
                 requestsPerSecond = rps,
+            ),
+        )
+    }
+
+    /**
+     * Returns the per-second status-code timeline for the run.
+     * Read by the dashboard's "Status-Codes über Zeit" sparkline
+     * list so the user sees the cumulative code counts *during*
+     * the run, not just after k6 writes the summary at the end.
+     *
+     * The endpoint is `200 OK` even when the run is still QUEUED
+     * (no stamps yet) or has no samples yet — the dashboard
+     * polls the same URL throughout the run's lifetime and a
+     * 404 would be louder than a useful empty array. The only
+     * 404 is when the run id is unknown to both the in-memory
+     * map and the H2 table.
+     *
+     * The reader is intentionally separate from the time-series
+     * reader so the two endpoints can stay loosely coupled: the
+     * ramp chart polls VUs/RPS, the sparkline list polls
+     * status-codes, and a slow status-code table does not slow
+     * down the ramp chart's polling cadence.
+     */
+    @GetMapping("/test-runs/{id}/status-code-timeline")
+    fun statusCodeTimeline(
+        @PathVariable id: String,
+    ): ResponseEntity<StatusCodeTimelineResponse> {
+        val run = testRuns.find(id) ?: return ResponseEntity.notFound().build()
+        val samples = if (run.startedAt == null) {
+            emptyList()
+        } else {
+            statusCodeTimeSeriesReader
+                .readStatusCodesOverTime(id)
+                .map { StatusCodeTimelinePoint(epochSecond = it.epochSecond, code = it.code, count = it.count) }
+        }
+        return ResponseEntity.ok(
+            StatusCodeTimelineResponse(
+                runId = id,
+                resolutionSeconds = 1,
+                samples = samples,
             ),
         )
     }

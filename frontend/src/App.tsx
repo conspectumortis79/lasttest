@@ -44,6 +44,7 @@ import { LanguageProvider } from './useLanguage.tsx'
 import { useLanguage } from './languageStorage.ts'
 import { translate, formatters, type SupportedLanguage } from './i18n.ts'
 import { RunStatusView, LiveBanner, AktionenTab, LiveRampChart } from './runStatusView.tsx'
+import { StatusCodesTimeline } from './StatusCodesTimeline.tsx'
 import { vuSamplesToEpochSeconds } from './timeSeries.ts'
 import { computeRampChartParams } from './liveRampChartLayout.ts'
 import { ConsoleTab, ThresholdsTab, ConfigTab, FailureTab, K6ScriptTab } from './runDetailTabs.tsx'
@@ -89,7 +90,11 @@ type ImportResponse = ImportedSpecification & { message?: string }
 // the seedPlannedRampProfile call in [LocalK6TestRunService]),
 // so the request itself is cheap — 1 s feels close to "live"
 // without doubling backend load across N concurrent runs.
-const RAMP_POLL_INTERVAL_MS = 1000
+//
+// Exported so the live status-code timeline in
+// [StatusCodesTimeline.tsx] can poll at the same cadence so
+// the Gantt bars move in lock-step with the ramp chart above.
+export const RAMP_POLL_INTERVAL_MS = 1000
 
 /**
  * Reads the current browser-level Notification permission. Falls
@@ -1816,18 +1821,33 @@ function OverviewLiveRamp({ run, now }: { run: TestRun, now: number }) {
       .filter(p => p.t >= -1 && p.t <= chartParams.totalDuration + 1)
   const windowStart = startedAtMs ?? now
   const windowEnd = windowStart + chartParams.totalDuration * 1000
-  return <div style={{ marginTop: 14 }}>
-    <LiveRampChart
-      planned={chartParams.planned}
-      actual={actualInWindow}
-      totalDurationSeconds={chartParams.totalDuration}
-      elapsedSeconds={startedAtMs == null ? undefined : (now - startedAtMs) / 1000}
-      targetValue={chartParams.targetValue}
-      unit={chartParams.unit}
-      windowStartMs={windowStart}
-      windowEndMs={windowEnd}
-    />
-  </div>
+  return <>
+    <div style={{ marginTop: 14 }}>
+      <LiveRampChart
+        planned={chartParams.planned}
+        actual={actualInWindow}
+        totalDurationSeconds={chartParams.totalDuration}
+        elapsedSeconds={startedAtMs == null ? undefined : (now - startedAtMs) / 1000}
+        targetValue={chartParams.targetValue}
+        unit={chartParams.unit}
+        windowStartMs={windowStart}
+        windowEndMs={windowEnd}
+        startedAtIso={run.startedAt}
+      />
+    </div>
+    {/*
+      Status-codes timeline — sits directly below the ramp chart
+      so the two surfaces share a wall-clock time axis. The
+      component derives per-code counts from the k6 summary's
+      `lt_status_<code>_<opId>` counters, so the data is only
+      useful after k6 has written the summary (i.e. after the
+      run terminates). For in-flight runs the component renders
+      the empty placeholder. The [startedAtMs] reference is the
+      same value the ramp chart above uses so the two x-axes
+      stay aligned to the same wall clock.
+    */}
+    <StatusCodesTimeline run={run} startedAtMs={startedAtMs} />
+  </>
 }
 
 type TestRunSummaryProps = {

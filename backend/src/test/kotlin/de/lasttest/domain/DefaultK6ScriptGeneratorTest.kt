@@ -798,14 +798,17 @@ class DefaultK6ScriptGeneratorTest {
 
         // The status dispatch must be a switch so the generated code
         // stays linear in the number of codes and so the k6 engine can
-        // fast-path consecutive identical status values.
+        // fast-path consecutive identical status values. Each branch
+        // bumps both the k6 Counter (for the summary at the end of
+        // the run) and the JS-side `__lt_status_counts` mirror (for
+        // the live STAMP the script emits once per wall-clock second).
         assertContains(script, "switch (response.status) {")
-        assertContains(script, "  case 0: lt_status_err_getPet.add(1); break;")
-        assertContains(script, "  case 200: lt_status_200_getPet.add(1); break;")
-        assertContains(script, "  case 401: lt_status_401_getPet.add(1); break;")
-        assertContains(script, "  case 429: lt_status_429_getPet.add(1); break;")
-        assertContains(script, "  case 504: lt_status_504_getPet.add(1); break;")
-        assertContains(script, "  default: lt_status_other_getPet.add(1);")
+        assertContains(script, "  case 0: lt_status_err_getPet.add(1); __lt_status_increment('err'); break;")
+        assertContains(script, "  case 200: lt_status_200_getPet.add(1); __lt_status_increment('200'); break;")
+        assertContains(script, "  case 401: lt_status_401_getPet.add(1); __lt_status_increment('401'); break;")
+        assertContains(script, "  case 429: lt_status_429_getPet.add(1); __lt_status_increment('429'); break;")
+        assertContains(script, "  case 504: lt_status_504_getPet.add(1); __lt_status_increment('504'); break;")
+        assertContains(script, "  default: lt_status_other_getPet.add(1); __lt_status_increment('other');")
     }
 
     @Test
@@ -1556,5 +1559,62 @@ class DefaultK6ScriptGeneratorTest {
         // Two payloads → two request blocks → two header occurrences.
         val matches = Regex("\"X-Lasttest-Run-Id\":\"run-x\"").findAll(script).count()
         assertEquals(2, matches, "every payload branch must carry the run id")
+    }
+
+    @Test
+    fun `status-code stamp fires after the requests so the first stamp carries counts`() {
+        // The dashboard relies on the first STAMP being emitted
+        // as soon as the first request completes, so the user sees
+        // the first Gantt segment within ~1 second of starting the
+        // run. If the stamp were at the start of the iteration the
+        // first stamp would always carry counts=0 (no requests yet)
+        // and the dashboard would lag behind by one full iteration.
+        val configuration =
+            OperationConfiguration(
+                operationId = "getPet",
+                payloads = listOf(OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42")))),
+            )
+        val profile =
+            LoadProfile(
+                type = LoadProfileType.CONSTANT_VUS,
+                virtualUsers = 1,
+                durationSeconds = 10,
+            )
+        val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
+
+        // Stamp helper is present with the expected surface.
+        // The counts are tracked in a plain JS object (not the
+        // k6 Counter) because k6's Counter does NOT expose its
+        // `.count` value to JS — only `name` and `add`. Trying
+        // to read `counter.count` from the STAMP helper would
+        // return `undefined` and leave the dashboard seeing
+        // zeros for the entire run.
+        assertContains(script, "const __lt_status_codes = [")
+        assertContains(script, "const __lt_status_counts = {}")
+        assertContains(script, "function __lt_status_increment(code)")
+        assertContains(script, "function __lt_status_totals()")
+        assertContains(script, "function __lt_status_stamp()")
+        // Initialise the throttle to -1 so the first stamp at
+        // now=0 is emitted (with `0 > -1`). `0` would skip the
+        // first wall-clock second and delay the first stamp by
+        // one iteration.
+        assertContains(script, "let __lt_last_stamp_second = -1;")
+        assertContains(script, "Math.floor(Date.now() / 1000)")
+        assertContains(script, "console.log('STAMP:' + now + '|' + JSON.stringify(__lt_status_totals()))")
+
+        // Default function fires the stamp AFTER the requests.
+        // The signature is `<dispatch> __lt_status_stamp(); sleep(1);`
+        // — the stamp sits between the HTTP calls and the sleep.
+        val functionStart = script.indexOf("export default function ()")
+        require(functionStart >= 0) { "default function not found in generated script" }
+        val functionBody = script.substring(functionStart)
+        val stampIdx = functionBody.indexOf("__lt_status_stamp()")
+        val sleepIdx = functionBody.indexOf("sleep(1);")
+        val httpIdx = functionBody.indexOf("http.get")
+        require(stampIdx > 0) { "stamp call not found in default function" }
+        require(sleepIdx > 0) { "sleep(1) not found in default function" }
+        require(httpIdx > 0) { "http.get not found in default function" }
+        assertTrue(stampIdx > httpIdx, "stamp must fire AFTER the requests so counts are > 0")
+        assertTrue(stampIdx < sleepIdx, "stamp must fire BEFORE sleep(1) so the cadence stays 1 Hz")
     }
 }

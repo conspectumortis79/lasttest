@@ -115,6 +115,7 @@ class LocalK6TestRunServiceCoverageTest {
             runRepository = InMemoryTestRunRepository(),
             statisticsRepository = InMemoryOperationStatisticsRepository(),
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
         )
 
     // ------------------------------------------------------------------
@@ -767,6 +768,7 @@ class LocalK6TestRunServiceCoverageTest {
                     runRepository = InMemoryTestRunRepository(),
                     statisticsRepository = InMemoryOperationStatisticsRepository(),
                     timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
                 )
             val run =
                 svc.create(
@@ -1005,6 +1007,7 @@ class LocalK6TestRunServiceCoverageTest {
             runRepository = InMemoryTestRunRepository(),
             statisticsRepository = InMemoryOperationStatisticsRepository(),
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
         )
 
     @Test
@@ -1286,6 +1289,7 @@ class LocalK6TestRunServiceCoverageTest {
                     runRepository = InMemoryTestRunRepository(),
                     statisticsRepository = InMemoryOperationStatisticsRepository(),
                     timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
                 )
             val run =
                 svc.create(
@@ -1894,6 +1898,7 @@ class LocalK6TestRunServiceCoverageTest {
                     runRepository = InMemoryTestRunRepository(),
                     statisticsRepository = InMemoryOperationStatisticsRepository(),
                     timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
                 )
             val run =
                 svc.create(

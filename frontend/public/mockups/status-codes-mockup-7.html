@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mockup 7 — Status-Codes (Gantt-Balken) · lasttest</title>
+<style>
+  /* Resets */
+  *, *::before, *::after { box-sizing: border-box; }
+  body, h1, h2, h3, p, code { margin: 0; padding: 0; }
+  a { color: #7d63ff; text-decoration: none; }
+
+  body {
+    /* Same lasttest dark theme as the rest of the mockups */
+    background: #0b1018;
+    color: #e8edf5;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 32px 20px;
+    min-height: 100vh;
+  }
+
+  /* Top header chrome — mirror the existing run-detail chrome
+     so the mockup feels like a real surface, not a sketch. */
+  .chrome {
+    max-width: 760px;
+    margin: 0 auto 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #93a2b8;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .06rem;
+  }
+  .chrome a { color: #93a2b8; }
+  .chrome .sep { color: #3a4a63; }
+
+  /* Card frame — same as .ramp-tab in App.css */
+  .card {
+    max-width: 760px;
+    margin: 0 auto 22px;
+    background: #0a111b;
+    border: 1px solid #293950;
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .card-head {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 8px;
+  }
+  .card-title {
+    color: #93a2b8;
+    font-size: 11.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .06rem;
+    flex: 1;
+  }
+  .card-meta {
+    color: #6b7c95;
+    font-size: 11.5px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+
+  /* Mini ramp chart — preserved from the existing Overview tab
+     so the new component is visibly mounted BELOW it. */
+  .ramp {
+    background: #0d1322;
+    border: 1px solid #233049;
+    border-radius: 4px;
+    padding: 6px 0;
+    height: 110px;
+    position: relative;
+    overflow: hidden;
+  }
+  .ramp svg { display: block; width: 100%; height: 100%; }
+  .ramp-legend {
+    display: flex; gap: 16px;
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: #93a2b8;
+  }
+  .ramp-legend span::before { content: "■"; margin-right: 6px; }
+  .ramp-legend .l-soll::before { color: #7d63ff; }
+  .ramp-legend .l-ist::before  { color: #f59e0b; }
+
+  /* Time axis used by both the ramp chart and the status-code
+     Gantt bars below. Five ticks (start, three quarters, end)
+     so the layout stays consistent across the two surfaces. */
+  .x-axis {
+    display: grid;
+    grid-template-columns: 60px 1fr 80px 80px;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0 0;
+    font-size: 10px;
+    color: #6b7c95;
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+  .x-axis .ticks {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  }
+  .x-axis .ticks span:first-child { text-align: left; }
+  .x-axis .ticks span:last-child { text-align: right; }
+  .x-axis .ticks span { text-align: center; }
+
+  /* ========== Mockup 7: Gantt-style status-code bars ========== */
+  /* Each status code is one row. The horizontal bar is full
+     width and gets divided into coloured segments where the
+     code was active. The empty segments are pure background
+     colour so the user sees at a glance WHEN each code was
+     firing during the run. The wall-clock time axis below
+     the bars shows the same timestamps as the ramp chart
+     above so the two surfaces align visually. */
+
+  .gantt {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .gantt-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 80px 80px;
+    align-items: center;
+    gap: 10px;
+  }
+
+  /* Code chip — same shape as the LastRunsPanel method chip */
+  .gantt-chip {
+    display: inline-grid;
+    place-items: center;
+    width: 52px;
+    height: 22px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 800;
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+  .gantt-chip.f-2xx { background: #0b3a25; color: #8fe8c1; border: 1px solid #22c55e; }
+  .gantt-chip.f-3xx { background: #0d2a4a; color: #93c5fd; border: 1px solid #3b82f6; }
+  .gantt-chip.f-4xx { background: #3a2a0b; color: #fbbf24; border: 1px solid #fb923c; }
+  .gantt-chip.f-5xx { background: #3a0b0b; color: #ffb5c3; border: 1px solid #ef4444; }
+  .gantt-chip.f-err { background: #2a0b2a; color: #f0abfc; border: 1px solid #c026d3; }
+  .gantt-chip.f-other { background: #1a2638; color: #93a2b8; border: 1px solid #33425b; }
+
+  /* Track wrapper — gives the bar a stable height and a
+     subtle background so the empty segments read as "no
+     activity" rather than "missing data". */
+  .gantt-track {
+    height: 22px;
+    background: #0d1322;
+    border: 1px solid #233049;
+    border-radius: 5px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Each segment is an absolute-positioned div whose left
+     edge and width are computed from the active interval.
+     The colour matches the family's palette. The opacity
+     sits at full strength — the user wants a saturated
+     segment, not a soft tint. */
+  .gantt-seg {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 3px;
+  }
+  .gantt-seg.f-2xx   { background: linear-gradient(180deg, #5fcb95 0%, #22c55e 100%); border: 1px solid #22c55e; }
+  .gantt-seg.f-3xx   { background: linear-gradient(180deg, #93c5fd 0%, #3b82f6 100%); border: 1px solid #3b82f6; }
+  .gantt-seg.f-4xx   { background: linear-gradient(180deg, #fbbf24 0%, #fb923c 100%); border: 1px solid #fb923c; }
+  .gantt-seg.f-5xx   { background: linear-gradient(180deg, #f87171 0%, #ef4444 100%); border: 1px solid #ef4444; }
+  .gantt-seg.f-err   { background: linear-gradient(180deg, #f0abfc 0%, #c026d3 100%); border: 1px solid #c026d3; }
+  .gantt-seg.f-other { background: linear-gradient(180deg, #94a3b8 0%, #475569 100%); border: 1px solid #475569; }
+
+  /* Count + percentage on the right */
+  .gantt-count {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: #dbe5f3;
+    text-align: right;
+  }
+  .gantt-pct {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 12px;
+    color: #93a2b8;
+    text-align: right;
+  }
+
+  /* The header row shows the legend hint and the time axis
+     below the bars — same five ticks as the ramp chart so the
+     eye can scan from one to the other. */
+  .gantt-header {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #1a2638;
+  }
+  .gantt-header-meta {
+    font-size: 11.5px;
+    color: #6b7c95;
+    margin-bottom: 6px;
+  }
+  .gantt-axis {
+    display: grid;
+    grid-template-columns: 60px 1fr 80px 80px;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0 0;
+    font-size: 10px;
+    color: #6b7c95;
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+  .gantt-axis .ticks {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  }
+  .gantt-axis .ticks span:first-child { text-align: left; }
+  .gantt-axis .ticks span:last-child { text-align: right; }
+  .gantt-axis .ticks span { text-align: center; }
+
+  /* Footer note */
+  .footnote {
+    max-width: 760px;
+    margin: 6px auto 0;
+    color: #6b7c95;
+    font-size: 11.5px;
+    text-align: center;
+  }
+
+  /* Reviewer note */
+  .reviewer-note {
+    max-width: 760px;
+    margin: 22px auto 0;
+    padding: 10px 14px;
+    background: #11192a;
+    border: 1px dashed #3a4a63;
+    border-radius: 6px;
+    color: #b6c2d4;
+    font-size: 12px;
+  }
+  .reviewer-note strong { color: #79e6c8; }
+  .reviewer-note ul { margin: 6px 0 0 18px; padding: 0; }
+  .reviewer-note li { margin-bottom: 2px; }
+</style>
+</head>
+<body>
+
+  <!-- Chrome above the run detail — only here to ground the
+       mockup in the real product. Not part of the design. -->
+  <div class="chrome">
+    <a href="#">Übersicht</a> <span class="sep">·</span>
+    <a href="#">Timeline</a> <span class="sep">·</span>
+    <a href="#">Aktionen</a> <span class="sep">·</span>
+    <a href="#">k6-Konsole</a> <span class="sep">·</span>
+    <a href="#">Schwellen</a> <span class="sep">·</span>
+    <a href="#">Konfig</a> <span class="sep">·</span>
+    <a href="#">Fehler</a> <span class="sep">·</span>
+    <a href="#">k6-Skript</a> <span class="sep">·</span>
+    <a href="#">↗ k6-Bericht</a>
+  </div>
+
+  <!-- Existing ramp chart — kept verbatim so the new component
+       is visibly mounted BELOW it. The x-axis shows wall-clock
+       time so the new Gantt bars line up visually with the
+       load curve above. -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">Auslastung (Soll / Ist)</div>
+      <div class="card-meta">50 VUs · 30 s · Start 14:23:00</div>
+    </div>
+    <div class="ramp">
+      <svg viewBox="0 0 600 110" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="pgrad7" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#7d63ff" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#7d63ff" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d="M 0 90 L 60 90 L 80 80 L 220 80 L 240 60 L 420 60 L 440 36 L 600 36 L 600 110 L 0 110 Z" fill="url(#pgrad7)"/>
+        <polyline points="0,90 60,90 80,80 220,80 240,60 420,60 440,36 600,36" fill="none" stroke="#7d63ff" stroke-width="1.6"/>
+        <polyline points="0,90 60,90 80,82 220,78 240,62 420,62 440,40 600,40" fill="none" stroke="#f59e0b" stroke-width="1.6" stroke-dasharray="3 3"/>
+      </svg>
+    </div>
+    <div class="ramp-legend">
+      <span class="l-soll">Soll (geplant)</span>
+      <span class="l-ist">Ist (gemessen · live)</span>
+    </div>
+  </div>
+
+  <!-- ============== NEU: Mockup 7 — Gantt-Balken ============== -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">Status-Codes über Zeit</div>
+      <div class="card-meta">12 841 Anfragen · Balken zeigen, wann welcher Code aktiv war</div>
+    </div>
+
+    <div class="gantt">
+
+      <!-- Code 200 — leader. Active in two blocks: 0-10s and 20-30s.
+           The 10s-20s gap matches the 429 spike in the bars below. -->
+      <div class="gantt-row">
+        <span class="gantt-chip f-2xx">200</span>
+        <div class="gantt-track">
+          <div class="gantt-seg f-2xx" style="left: 0%;    width: 33.3%;"></div>
+          <div class="gantt-seg f-2xx" style="left: 66.6%; width: 33.4%;"></div>
+        </div>
+        <span class="gantt-count">10 200</span>
+        <span class="gantt-pct">79,49 %</span>
+      </div>
+
+      <!-- Code 429 — middle block. Active only during 10-20s. The
+           empty space on either side makes the rate-limit spike
+           obvious at a glance. -->
+      <div class="gantt-row">
+        <span class="gantt-chip f-4xx">429</span>
+        <div class="gantt-track">
+          <div class="gantt-seg f-4xx" style="left: 33.3%; width: 33.4%;"></div>
+        </div>
+        <span class="gantt-count">2 580</span>
+        <span class="gantt-pct">20,11 %</span>
+      </div>
+
+      <!-- Code 404 — single brief burst at the start. Spans
+           0-3s only, so the segment is a thin slice at the left
+           edge. -->
+      <div class="gantt-row">
+        <span class="gantt-chip f-4xx">404</span>
+        <div class="gantt-track">
+          <div class="gantt-seg f-4xx" style="left: 0%; width: 10%;"></div>
+        </div>
+        <span class="gantt-count">60</span>
+        <span class="gantt-pct">0,47 %</span>
+      </div>
+
+      <!-- Code 502 — single brief appearance at the very end.
+           Thin slice at the right edge — the segment is barely
+           visible but reads as "the system broke at the end". -->
+      <div class="gantt-row">
+        <span class="gantt-chip f-5xx">502</span>
+        <div class="gantt-track">
+          <div class="gantt-seg f-5xx" style="left: 90%; width: 10%;"></div>
+        </div>
+        <span class="gantt-count">1</span>
+        <span class="gantt-pct">0,01 %</span>
+      </div>
+
+    </div>
+
+    <!-- Time axis — same five ticks as the ramp chart so the
+         eye can scan vertically between the two surfaces. -->
+    <div class="gantt-header">
+      <div class="gantt-header-meta">Wand-Uhrzeit · X-Achse teilt die Zeitachse mit dem Auslastungs-Graphen oben</div>
+      <div class="gantt-axis">
+        <span></span>
+        <div class="ticks">
+          <span>14:23:00</span>
+          <span>14:23:08</span>
+          <span>14:23:15</span>
+          <span>14:23:23</span>
+          <span>14:23:30</span>
+        </div>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+  </div>
+
+  <p class="footnote">Volle Breite = gesamter Lauf · Farbige Segmente = Zeiträume, in denen der Code mindestens einmal gefeuert hat</p>
+
+  <!-- Reviewer note -->
+  <div class="reviewer-note">
+    <strong>Mockup 7 — Gantt-Balken</strong>
+    <ul>
+      <li>Jede Zeile ist ein Status-Code. Die Zeile hat <strong>volle Breite</strong> und repräsentiert die gesamte Laufzeit.</li>
+      <li>Die Zeile ist in <strong>farbige Segmente</strong> (Family-Farbe) und farblose Lücken aufgeteilt. Ein farbiges Segment = "der Code hat während dieses Zeitraums mindestens einmal gefeuert". Eine Lücke = "der Code war inaktiv".</li>
+      <li>Konkrete Beispiel-Daten:
+        <ul>
+          <li><strong>200</strong>: 0–10s aktiv, 10–20s inaktiv, 20–30s aktiv (zwei grüne Blöcke)</li>
+          <li><strong>429</strong>: 10–20s aktiv (Rate-Limit-Spike während der Ramp-Up-Phase)</li>
+          <li><strong>404</strong>: 0–3s aktiv (Endpunkt nicht gefunden, vermutlich Warm-up)</li>
+          <li><strong>502</strong>: 27–30s aktiv (Timeout beim Plateau)</li>
+        </ul>
+      </li>
+      <li>Die <strong>Wand-Uhrzeit-X-Achse</strong> unter den Balken ist deckungsgleich mit dem Auslastungs-Graphen oben — wenn ein 5xx-Block genau in der Last-Spitze landet, sieht man das auf einen Blick.</li>
+      <li>Sortierung: nach Anzahl absteigend (200 zuerst). Optional: nach Erscheinen sortieren (welcher Code tauchte zuerst auf).</li>
+      <li>Bei einem Code, der nur einmal gefeuert hat, ist das Segment eine dünne vertikale Linie an der entsprechenden Position.</li>
+      <li>Live-Variante: die Segmente wachsen während des Laufs von links nach rechts — was sich nicht geändert hat, bleibt eingefroren.</li>
+    </ul>
+  </div>
+</body>
+</html>

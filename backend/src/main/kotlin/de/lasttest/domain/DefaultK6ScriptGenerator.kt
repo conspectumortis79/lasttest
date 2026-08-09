@@ -106,6 +106,21 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                         } ?: ""
                     listOf(tracked, fallback, payloadCounters).filter { it.isNotEmpty() }.joinToString("\n")
                 }
+        // Per-second status-code stamp — emits a `STAMP:<second>|<json>`
+        // line to stdout at most once per run-second from inside the
+        // default function. The backend reads these lines from the
+        // k6 stdout reader and stores one row per (code, second) in
+        // the H2 status-code time-series table. The dashboard reads
+        // the table to render the "Status-Codes über Zeit" sparkline
+        // list in real time, instead of waiting for the k6 summary
+        // (which only lands at the end of the run).
+        //
+        // Why emit the cumulative count, not the delta? The k6
+        // Counter's `.count` is the running total, so the stamp
+        // carries the same shape the dashboard wants to see. The
+        // writer is upsert-on-(runId, second, code) so duplicate
+        // stamps from parallel VUs collapse onto the same row.
+        val stampHelper = renderStatusCodeStampHelper(selected)
         // k6 v1+ removed the top-level `gracefulStop` option; graceful stop
         // is now a scenario-level setting. The `vus` and `duration`/`iterations`
         // top-level shortcuts still work for backward compatibility, but
@@ -121,6 +136,8 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
             import { Counter } from 'k6/metrics';
 
             $counterDeclarations
+
+            $stampHelper
 
             export const options = {
               scenarios: {
@@ -140,8 +157,87 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
             $poolSelectors
 
             export default function () {
-            $calls
+              $calls
+              // Stamp fires AFTER the requests so the counts in
+              // the stamp are already > 0 from the requests
+              // above. The stamp sits right before sleep(1) so
+              // the 1-Hz cadence aligns with the wall-clock
+              // second of the iteration, not the start of the
+              // next iteration. Without this ordering the dash-
+              // board's first stamp would always be empty
+              // (counts=0) and the second stamp would be the
+              // first one with data — a 1-second delay.
+              __lt_status_stamp();
               sleep(1);
+            }
+            """.trimIndent()
+    }
+
+    /**
+     * Renders the per-second status-code stamp helper. The helper
+     * is composed of three pieces:
+     *
+     *   1. A flat array of status codes — the order matches
+     *      [TRACKED_STATUS_CODES] followed by the fallback
+     *      buckets `err` and `other`. The backend uses the
+     *      same order to render the JSON object.
+     *   2. A map of code -> per-operation Counter references.
+     *      At run time the helper sums the counters for each
+     *      code across all operations — the dashboard sees
+     *      one cumulative line per code, not one per
+     *      `(operation, code)` pair.
+     *   3. A small `__lt_status_stamp()` function that emits
+     *      the `STAMP:<second>|<json>` line at most once per
+     *      wall-clock second. The throttle is a single `>` check
+     *      against the previous second so the cost is one
+     *      comparison per iteration.
+     *
+     * The helper is referenced by the default function (the
+     * `__lt_status_stamp()` call sits right after the HTTP
+     * requests and before `sleep(1)`) so the stamp carries
+     * counts that are already > 0 from the requests above. If
+     * the call were at the start of the iteration, the first
+     * stamp would always carry counts=0 (no requests yet) and
+     * the dashboard would not see the first bar until the second
+     * iteration completes — a one-second delay. The dashboard
+     * uses the resulting table to render the Gantt bars in
+     * real time.
+     */
+    private fun renderStatusCodeStampHelper(operations: List<ApiOperation>): String {
+        val codes = TRACKED_STATUS_CODES.map { it.toString() } + listOf("err", "other")
+        val codesArray = codes.joinToString(", ") { "'$it'" }
+        // k6's `Counter` does NOT expose its `.count` value to JS (only
+        // `name` and `add` are reflected). We track the cumulative counts
+        // in a plain JS object instead. The object is per-VU (each VU
+        // has its own module scope), so the backend sums the stamps
+        // from every VU per (runId, second, code) — see
+        // [StatusCodeTimeSeriesWriter.record] which now ADDs to the
+        // existing count instead of overwriting.
+        return """
+            // lasttest status-code stamp — emits one STAMP line per
+            // wall-clock second so the dashboard can render the
+            // "Status-Codes über Zeit" Gantt-bar list in real time.
+            // The backend sums the counts across all VUs per
+            // (runId, second, code) so the cumulative total is correct
+            // even with multiple parallel VUs.
+            const __lt_status_codes = [$codesArray];
+            const __lt_status_counts = {};
+            for (const code of __lt_status_codes) __lt_status_counts[code] = 0;
+            function __lt_status_increment(code) {
+              if (code in __lt_status_counts) __lt_status_counts[code] += 1;
+              else if (code === 'err') __lt_status_counts['err'] += 1;
+              else if (code === 'other') __lt_status_counts['other'] += 1;
+            }
+            function __lt_status_totals() {
+              return __lt_status_counts;
+            }
+            let __lt_last_stamp_second = -1;
+            function __lt_status_stamp() {
+              const now = Math.floor(Date.now() / 1000);
+              if (now > __lt_last_stamp_second) {
+                __lt_last_stamp_second = now;
+                console.log('STAMP:' + now + '|' + JSON.stringify(__lt_status_totals()));
+              }
             }
             """.trimIndent()
     }
@@ -408,14 +504,21 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                 "DELETE" -> "http.del(BASE_URL + ${toJson(url)}, null, ${toJson(requestOptions)})"
                 else -> "http.request(${toJson(operation.method)}, BASE_URL + ${toJson(url)}, ${requestBody?.let { "JSON.stringify(${toJson(it)})" } ?: "null"}, ${toJson(requestOptions)})"
             }
+        // The increment runs both the k6 Counter (so the
+        // summary at the end of the run still shows the totals) and
+        // the JS-side `__lt_status_counts` (so the per-iteration
+        // stamp we emit to the dashboard sees the current value).
+        // k6's Counter does NOT expose its `.count` to JS, so we
+        // MUST maintain a JS-side mirror — the Counter alone is
+        // not enough for the live stamp.
         val statusIncrement =
             buildString {
                 appendLine("switch (response.status) {")
-                appendLine("  case 0: lt_status_err_$safe.add(1); break;")
+                appendLine("  case 0: lt_status_err_$safe.add(1); __lt_status_increment('err'); break;")
                 for (code in TRACKED_STATUS_CODES) {
-                    appendLine("  case $code: lt_status_${code}_$safe.add(1); break;")
+                    appendLine("  case $code: lt_status_${code}_$safe.add(1); __lt_status_increment('$code'); break;")
                 }
-                appendLine("  default: lt_status_other_$safe.add(1);")
+                appendLine("  default: lt_status_other_$safe.add(1); __lt_status_increment('other');")
                 append("}")
             }
         return "{ const response = $request; $statusIncrement check(response, { ${toJson("${operation.operationId} succeeds")}: (r) => r.status >= 200 && r.status < 400 }); }"

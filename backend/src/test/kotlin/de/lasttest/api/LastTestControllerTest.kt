@@ -3,6 +3,8 @@ package de.lasttest.api
 import de.lasttest.demo.DemoSpecificationProvider
 import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
+import de.lasttest.domain.StatusCodeTimeSeriesPoint
+import de.lasttest.domain.StatusCodeTimeSeriesReader
 import de.lasttest.domain.TestRunService
 import de.lasttest.domain.TimeSeriesPoint
 import de.lasttest.domain.TimeSeriesReader
@@ -70,6 +72,7 @@ class LastTestControllerTest {
     private val demoSpecificationProvider = DemoSpecificationProvider(resourceName = "/demo/recorded.yaml")
     private val remoteFetcher = RecordingRemoteSpecificationFetcher()
     private val timeSeriesReader = RecordingTimeSeriesReader()
+    private val statusCodeTimeSeriesReader = RecordingStatusCodeTimeSeriesReader()
     private val statisticsRepository = de.lasttest.domain.InMemoryOperationStatisticsRepository()
     private val runRepository = de.lasttest.domain.InMemoryTestRunRepository()
     private val controller =
@@ -82,6 +85,7 @@ class LastTestControllerTest {
             demoSpecificationProvider = demoSpecificationProvider,
             remoteFetcher = remoteFetcher,
             timeSeriesReader = timeSeriesReader,
+                statusCodeTimeSeriesReader = statusCodeTimeSeriesReader,
             statisticsRepository = statisticsRepository,
             runRepository = runRepository,
         )
@@ -131,6 +135,7 @@ class LastTestControllerTest {
                 demoSpecificationProvider = demoSpecificationProvider,
                 remoteFetcher = remoteFetcher,
                 timeSeriesReader = timeSeriesReader,
+                statusCodeTimeSeriesReader = statusCodeTimeSeriesReader,
                 statisticsRepository = statisticsRepository,
                 runRepository = runRepository,
             )
@@ -339,6 +344,7 @@ class LastTestControllerTest {
                 demoSpecificationProvider = demoSpecificationProvider,
                 remoteFetcher = remoteFetcher,
                 timeSeriesReader = timeSeriesReader,
+                statusCodeTimeSeriesReader = statusCodeTimeSeriesReader,
                 statisticsRepository = statisticsRepository,
                 runRepository = runRepository,
             )
@@ -431,6 +437,7 @@ class LastTestControllerTest {
                 demoSpecificationProvider = demoSpecificationProvider,
                 remoteFetcher = remoteFetcher,
                 timeSeriesReader = timeSeriesReader,
+                statusCodeTimeSeriesReader = statusCodeTimeSeriesReader,
                 statisticsRepository = statisticsRepository,
                 runRepository = runRepository,
             )
@@ -591,5 +598,13 @@ class LastTestControllerTest {
             startedAt: String,
             finishedAt: String,
         ): List<TimeSeriesPoint> = points[runId] ?: emptyList()
+    }
+
+    private class RecordingStatusCodeTimeSeriesReader : StatusCodeTimeSeriesReader {
+        var samples: MutableMap<String, List<StatusCodeTimelinePoint>> = mutableMapOf()
+
+        override fun readStatusCodesOverTime(runId: String): List<StatusCodeTimeSeriesPoint> =
+            samples[runId]?.map { StatusCodeTimeSeriesPoint(epochSecond = it.epochSecond, code = it.code, count = it.count) }
+                ?: emptyList()
     }
 }

@@ -86,6 +86,7 @@ class LocalK6TestRunServiceTest {
             runRepository = InMemoryTestRunRepository(),
             statisticsRepository = InMemoryOperationStatisticsRepository(),
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
         )
 
     @Test
@@ -361,6 +362,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = InMemoryTestRunRepository(),
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         recordingService.create(
@@ -399,6 +401,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = InMemoryTestRunRepository(),
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
         val disabledService =
             LocalK6TestRunService(
@@ -414,6 +417,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = InMemoryTestRunRepository(),
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         // Both services must be able to create a run without errors.
@@ -734,6 +738,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = statistics,
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         val run =
@@ -807,6 +812,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = statistics,
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
         // Two terminal rows, nothing non-terminal.
         val completedRun =
@@ -867,6 +873,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = statistics,
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         val queuedRun =
@@ -1010,6 +1017,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = statistics,
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         val run =
@@ -1190,6 +1198,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = InMemoryTestRunRepository(),
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
         val run =
             runService.create(
@@ -1241,6 +1250,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = InMemoryTestRunRepository(),
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
         val run =
             runService.create(
@@ -1355,6 +1365,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = statistics,
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         val created =
@@ -1399,6 +1410,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         val created =
@@ -1441,6 +1453,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
         val created =
             serviceForCreate.create(
@@ -1466,6 +1479,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         val resolved = serviceAfterRestart.find(created.id)
@@ -1498,6 +1512,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
         val created =
             serviceForCreate.create(
@@ -1520,6 +1535,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         assertEquals(
@@ -1558,6 +1574,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = repository,
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
 
         assertNull(serviceAfterRestart.script("synthetic"))
@@ -1605,6 +1622,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = InMemoryTestRunRepository(),
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
         val deadline = System.currentTimeMillis() + 1_000
         runService.shutdownInFlightRuns()
@@ -1647,6 +1665,7 @@ class LocalK6TestRunServiceTest {
                 runRepository = InMemoryTestRunRepository(),
                 statisticsRepository = InMemoryOperationStatisticsRepository(),
                 timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
             )
         val runA =
             runService.create(
@@ -1751,6 +1770,7 @@ class LocalK6TestRunServiceTest {
                     runRepository = InMemoryTestRunRepository(),
                     statisticsRepository = InMemoryOperationStatisticsRepository(),
                     timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                statusCodeTimeSeriesWriter = InMemoryStatusCodeTimeSeriesWriter(),
                 )
             val stub = ProcessBuilder("sleep", "10").start()
             val run =
