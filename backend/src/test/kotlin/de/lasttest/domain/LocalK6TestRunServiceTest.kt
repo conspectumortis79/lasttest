@@ -81,8 +81,12 @@ class LocalK6TestRunServiceTest {
             importer = noopImporter,
             generator = successfulGenerator,
             executor = Executor { },
+            readerExecutor = Executor { },
             k6Command = "k6",
             influxDbProperties = influxDb,
+            runRepository = InMemoryTestRunRepository(),
+            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            timeSeriesWriter = InMemoryTimeSeriesWriter(),
         )
 
     @Test
@@ -352,8 +356,12 @@ class LocalK6TestRunServiceTest {
                     },
                 generator = recordingGenerator,
                 executor = Executor { },
+                readerExecutor = Executor { },
                 k6Command = "k6",
                 influxDbProperties = InfluxDbProperties(enabled = true),
+                    runRepository = InMemoryTestRunRepository(),
+                    statisticsRepository = InMemoryOperationStatisticsRepository(),
+                    timeSeriesWriter = InMemoryTimeSeriesWriter(),
             )
 
         recordingService.create(
@@ -386,8 +394,12 @@ class LocalK6TestRunServiceTest {
                     },
                 generator = SuccessfulGenerator(),
                 executor = Executor { },
+                readerExecutor = Executor { },
                 k6Command = "k6",
                 influxDbProperties = InfluxDbProperties(enabled = true),
+                    runRepository = InMemoryTestRunRepository(),
+                    statisticsRepository = InMemoryOperationStatisticsRepository(),
+                    timeSeriesWriter = InMemoryTimeSeriesWriter(),
             )
         val disabledService =
             LocalK6TestRunService(
@@ -397,8 +409,12 @@ class LocalK6TestRunServiceTest {
                     },
                 generator = SuccessfulGenerator(),
                 executor = Executor { },
+                readerExecutor = Executor { },
                 k6Command = "k6",
                 influxDbProperties = InfluxDbProperties(enabled = false),
+                    runRepository = InMemoryTestRunRepository(),
+                    statisticsRepository = InMemoryOperationStatisticsRepository(),
+                    timeSeriesWriter = InMemoryTimeSeriesWriter(),
             )
 
         // Both services must be able to create a run without errors.
@@ -786,8 +802,12 @@ class LocalK6TestRunServiceTest {
                 importer = noopImporter,
                 generator = successfulGenerator,
                 executor = syncExecutor,
+                readerExecutor = syncExecutor,
                 k6Command = "k6",
                 influxDbProperties = influxDb,
+                runRepository = InMemoryTestRunRepository(),
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
             )
         val run =
             runService.create(
@@ -833,8 +853,12 @@ class LocalK6TestRunServiceTest {
                 importer = noopImporter,
                 generator = successfulGenerator,
                 executor = syncExecutor,
+                readerExecutor = syncExecutor,
                 k6Command = "k6",
                 influxDbProperties = influxDb,
+                runRepository = InMemoryTestRunRepository(),
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
             )
         val run =
             runService.create(

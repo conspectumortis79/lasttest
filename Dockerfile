@@ -65,6 +65,17 @@ COPY --from=k6 /usr/bin/k6 /usr/local/bin/k6
 COPY --from=backend-build /workspace/build/libs/*.jar /app/app.jar
 COPY --from=frontend-build /workspace/dist /app/static
 ENV LASTTEST_FRONTEND_PATH=/app/static
+
+# ---- H2 persistent storage --------------------------------------------
+# The H2 file lives under /data, which docker-compose.yml mounts as a
+# named volume so the database survives container restarts. We create
+# the directory in the image so the volume is writable the first
+# time the container starts. LASTTEST_DATA_DIR can be overridden at
+# run time to relocate the database; the default (/data) matches
+# the volume in docker-compose.yml.
+RUN mkdir -p /data
+ENV LASTTEST_DATA_DIR=/data
+
 EXPOSE 8286
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
     CMD ["curl", "--fail", "--silent", "http://127.0.0.1:8286/"]

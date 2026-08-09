@@ -9,6 +9,12 @@ services:
       # Place your company's internal root CA at this path before starting
       # the container; the file itself is .gitignore'd.
       - ./certs/custom-ca.pem:/etc/lasttest/custom-ca.pem:ro
+      # H2 embedded database — the named volume persists test runs,
+      # operation statistics (× N), ramp-chart time series, and the
+      # demo request log across container restarts. The default
+      # data dir is /data, set by the Dockerfile via LASTTEST_DATA_DIR.
+      # Override LASTTEST_DATA_DIR if you want to relocate it.
+      - h2-data:/data
     environment:
       LASTTEST_PUBLIC_URL: http://localhost:8286/
       # TrustStore for the target API's TLS certificate. Leave PASSWORD
@@ -99,3 +105,4 @@ services:
 volumes:
   influxdb-data:
   grafana-data:
+  h2-data:

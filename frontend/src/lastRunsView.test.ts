@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   durationFor,
   metaLineFor,
+  operationMethodAndPath,
   relativeWhenFor,
   runDisplayName,
   statusBadgeClass,
@@ -122,6 +123,20 @@ test('runDisplayName joins multiple operation paths with a comma', () => {
   equal(runDisplayName(run), 'GET /a, /b')
 })
 
+test('runDisplayName falls back to a dash when the first operation has no method', () => {
+  // The wire model allows for synthetic fixtures where the
+  // first operation's method is empty. The label must surface
+  // the dash rather than rendering an ugly `undefined /path`.
+  // We rebuild a config with a blanked-out method to avoid
+  // having to construct a full ReportOperation literal.
+  const base = configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 30 }, ['/api/orders'])
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: { ...base, operations: [{ ...base.operations[0], method: '' }] },
+  })
+  equal(runDisplayName(run), '– /api/orders')
+})
+
 test('metaLineFor renders VUs and duration in seconds for short runs', () => {
   const run = runWith({
     status: 'COMPLETED',
@@ -155,6 +170,17 @@ test('metaLineFor sums stage durations for ramping-vus runs', () => {
   })
   // 30 + 60 + 30 = 120 s = 2 min.
   equal(metaLineFor(run, 'en'), '50 VUs · 2 min')
+})
+
+test('metaLineFor formats hour-only durations without a trailing minutes segment', () => {
+  // 3 600 s = exactly 1 h. The helper must surface the
+  // hour-only label rather than rendering the redundant
+  // "1 h 0 min" pair.
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: configWith({ type: 'constant-vus', virtualUsers: 50, durationSeconds: 3600 }),
+  })
+  equal(metaLineFor(run, 'en'), '50 VUs · 1 h')
 })
 
 test('metaLineFor adds a status suffix for RUNNING, FAILED and QUEUED', () => {
@@ -591,3 +617,59 @@ test('durationFor falls back to elapsed only for in-flight runs without a config
     '1:30',
   )
 })
+
+test('durationFor shows just the elapsed when the profile has no predictable planned duration', () => {
+  // shared-iterations runs (and any other open-ended profile)
+  // have no planned total, so the "<elapsed> / ~<planned>"
+  // template is replaced by the bare elapsed clock.
+  const run = runWith({
+    status: 'RUNNING',
+    startedAt: '2026-01-01T00:00:00Z',
+    configuration: configWith(
+      { type: 'shared-iterations', virtualUsers: 50, iterations: 1000 },
+      ['/api/orders'],
+    ),
+  })
+  equal(durationFor(run, 90, 'en'), '1:30')
+})
+
+test('operationMethodAndPath returns the primary endpoints method and path', () => {
+  // The per-endpoint × N badge in the run list uses this
+  // helper to look up the counter for the (method, path)
+  // pair. The dashboard shows the badge for the run's primary
+  // operation (the first one in the configuration's
+  // operations array); secondary operations are deliberately
+  // ignored so the counter matches what the user is looking at.
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: configWith(
+      { type: 'constant-vus', virtualUsers: 10, durationSeconds: 30 },
+      ['/api/orders'],
+    ),
+  })
+  deepEqual(operationMethodAndPath(run), { method: 'GET', path: '/api/orders' })
+})
+
+test('operationMethodAndPath returns empty strings when the run has no configuration', () => {
+  // Synthetic / unknown runs (e.g. legacy fixtures) carry no
+  // configuration. The caller treats the empty strings as
+  // "no lookup key" and falls back to the "neu" badge. The
+  // helper must not crash on the missing operations array.
+  const run = runWith({ status: 'COMPLETED' })
+  deepEqual(operationMethodAndPath(run), { method: '', path: '' })
+})
+
+test('operationMethodAndPath returns empty strings when the configuration has no operations', () => {
+  // Edge case the dashboard occasionally sees when a malformed
+  // payload arrives: configuration present, operations array
+  // empty. The helper must surface the same "no lookup key"
+  // signal rather than crash. We strip the operations from a
+  // full config rather than building the literal by hand.
+  const base = configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 30 }, ['/x'])
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: { ...base, operations: [] },
+  })
+  deepEqual(operationMethodAndPath(run), { method: '', path: '' })
+})
+

@@ -19,6 +19,7 @@ import {
 } from './k6Report.ts'
 import { translate, type SupportedLanguage } from './i18n.ts'
 import { useLanguage } from './useLanguage.tsx'
+import { xForSeconds } from './liveRampChartLayout.ts'
 
 // Imports from React are bundled below so the file stays compact
 // and does not get mixed up with the exported type block.
@@ -143,7 +144,7 @@ type ResultHeaderProps = {
   showReportButton?: boolean
 }
 
-function ResultHeader({ passed, run, lang, showReportButton }: ResultHeaderProps) {
+function ResultHeader({ passed, run, lang }: ResultHeaderProps) {
   const pill =
     run.status === 'STOPPED'
       ? { className: 'is-stopped', text: translate(lang, 'status.STOPPED') }
@@ -161,9 +162,6 @@ function ResultHeader({ passed, run, lang, showReportButton }: ResultHeaderProps
         : translate(lang, 'status.cancelled.sigterm', { time: formatTimestamp(run.cancelledAt) })
       }
     </span>}
-    {showReportButton && (
-      <a className="report-btn" href={`/?report=${encodeURIComponent(run.id)}`} target="_blank" rel="noreferrer">{translate(lang, 'report.open')}</a>
-    )}
   </div>
 }
 
@@ -419,4 +417,534 @@ export function RunStatusView({ run, now, reasonOverride, showReportButton }: Ru
     if (reason) return <RunFailure run={run} reason={reason} lang={lang} showReportButton={showReportButton} />
   }
   return null
+}
+
+// ---- LiveRampChart ------------------------------------------------------
+//
+// Renders the "Auslastung (Soll vs Ist)" SVG for an in-flight
+// run. The planned VU curve is interpolated linearly from the
+// load profile (constant-vus = flat line at the target; ramping
+// = a smooth ramp; shared-iterations = no planned line). The
+// "Ist" polyline is composed of the most recent VU samples
+// reported by the polling loop in [useRunClock]; the yellow
+// cursor is the last sample position. When the run is too
+// short to have a sample yet, the chart still renders the
+// planned line so the user sees the target up front.
+type RampPoint = {
+  /** Seconds since the run started, fractional. */
+  t: number
+  /** Planned VU count at this instant (linear interpolation). */
+  planned: number
+  /** Actual VU count at this instant, NaN if not yet sampled. */
+  actual: number
+}
+
+type LiveRampChartProps = {
+  planned: RampPoint[]
+  actual: RampPoint[]
+  totalDurationSeconds: number
+  elapsedSeconds: number
+  /**
+   * Peak of the planned curve. Drives the y-axis range so the
+   * planned line always reaches the top of the chart. The unit
+   * (VUs or RPS) is declared separately via [unit] — the same
+   * numeric value with `unit = 'rate'` scales a 50-req/s line
+   * the same way it would scale a 50-VU line.
+   */
+  targetValue: number
+  /**
+   * What the y-axis is showing. Picked by the parent's
+   * [computeRampChartParams] from the executor type. Drives the
+   * legend label so a 50-req/s arrival-rate test no longer
+   * shows up as "VUs" on the dashboard.
+   */
+  unit: 'vus' | 'rate' | 'none'
+  /**
+   * Optional absolute timestamps used to keep the SVG x-axis
+   * aligned to the wall clock even when the run was started
+   * minutes ago. Defaults to "since run start" when omitted.
+   */
+  windowStartMs?: number
+  windowEndMs?: number
+}
+
+export function LiveRampChart({ planned, actual, totalDurationSeconds, elapsedSeconds, targetValue, unit, windowStartMs, windowEndMs }: LiveRampChartProps) {
+  // SVG viewport. The viewBox is fixed so the chart scales with
+  // its container while the data points stay in absolute
+  // coordinates (0 = start, 600 = end of run).
+  const W = 600
+  const H = 140
+  const padX = 0
+  const padY = 10
+  // Map a data value to the chart's y axis. Clamp to the target
+  // so a runaway measured value still produces a visible curve
+  // (the polyline will just touch the top edge).
+  const yMax = Math.max(targetValue, 1)
+  const yFor = (vus: number): number => {
+    const clamped = Math.max(0, Math.min(yMax, vus))
+    return padY + (1 - clamped / yMax) * (H - padY * 2)
+  }
+  // Project a "seconds since run start" value onto the SVG x
+  // axis. The pure helper in [liveRampChartLayout.ts] handles
+  // the window-start / window-end / total-duration logic and
+  // the [0, 1] clamping; this component only owns the
+  // viewport dimensions. `p.t` is documented in [RampPoint] as
+  // "seconds since the run started", so we pass it through
+  // unchanged (the previous `p.t * 1000` combined two
+  // different unit bugs that collapsed every polyline onto
+  // x = padX — see the test in `liveRampChartLayout.test.ts`).
+  const xFor = (sec: number): number => xForSeconds(sec, {
+    W,
+    padX,
+    windowStartMs,
+    windowEndMs,
+    totalDurationSeconds,
+  })
+  // Build the polyline strings. Empty arrays render an empty
+  // path so the SVG stays valid.
+  const plannedPoints = planned
+    .map(p => `${xFor(p.t)},${yFor(p.planned)}`)
+    .join(' ')
+  const actualSamples = actual.filter(p => Number.isFinite(p.actual))
+  const actualPoints = actualSamples
+    .map(p => `${xFor(p.t)},${yFor(p.actual)}`)
+    .join(' ')
+  const lastActual = actualSamples[actualSamples.length - 1]
+  const cursorX = lastActual ? xFor(lastActual.t) : null
+  const cursorY = lastActual ? yFor(lastActual.actual) : null
+  // Grid lines at 25 / 50 / 75 / 100 % of the y range.
+  const grid = [0.25, 0.5, 0.75, 1].map(f => (
+    <line key={f} x1={0} x2={W} y1={padY + f * (H - padY * 2)} y2={padY + f * (H - padY * 2)} stroke="#1a2435" strokeWidth={1} />
+  ))
+  // Y axis labels at the same four levels. The previous
+  // version drove the y-position with the same fraction `f`
+  // it used for the value, so the top label (f = 1) landed at
+  // y = H - padY (the bottom of the chart) and the bottom
+  // label (f = 0) landed at y = padY (the top of the chart) —
+  // i.e. the y-axis was upside-down. SVG y grows downward, so
+  // a high data value (f = 1) must sit at a *small* y, not a
+  // large one. The fix is to invert the position fraction
+  // while keeping the value fraction unchanged, which gives a
+  // monotonically-decreasing y across a monotonically-increasing
+  // value (0 at the bottom, yMax at the top). The same
+  // orientation also matches [buildRampPlot] in `k6Report.ts`
+  // so the live tab and the report render the same chart.
+  const yLabels = [1, 0.75, 0.5, 0.25, 0].map(f => {
+    const v = Math.round(yMax * f)
+    const y = padY + (1 - f) * (H - padY * 2) + 3
+    return <text key={f} x={4} y={y} fill="#4f6179" fontSize="9" fontFamily='"SFMono-Regular", Consolas, monospace'>{v}</text>
+  })
+  const elapsedLabel = formatDurationSeconds(elapsedSeconds)
+  return <div className="ramp-tab">
+    <div className="ramp-tab-head">
+      <div className="ramp-tab-title">Auslastung (Soll vs Ist)</div>
+      <div className="ramp-tab-meta">
+        läuft seit <strong style={{ color: '#dbe5f3' }}>{elapsedLabel}</strong>
+        {' · '}
+        {actualSamples.length > 0
+          ? `${actualSamples.length} Messpunkte`
+          : 'noch keine Messpunkte'}
+      </div>
+    </div>
+    <svg className="ramp-tab-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      {grid}
+      {yLabels}
+      {plannedPoints && <polyline fill="none" stroke="#5fcb95" strokeWidth={2} points={plannedPoints} />}
+      {actualPoints && <polyline fill="none" stroke="#4f8bff" strokeWidth={2} points={actualPoints} />}
+      {cursorX != null && cursorY != null && (
+        <circle cx={cursorX} cy={cursorY} r={4} fill="#fbbf24" stroke="#0c131e" strokeWidth={2} />
+      )}
+      <line x1={0} y1={H - padY} x2={W} y2={H - padY} stroke="#293950" />
+    </svg>
+    <div className="ramp-tab-legend">
+      <span className="l-ist">Ist (gemessen · live)</span>
+      <span className="l-soll">Soll (geplant)</span>
+      {cursorX != null && <span className="l-now">Aktueller Messpunkt</span>}
+      {/* The y-axis unit label is rendered on the right of the
+          legend so the user always knows whether the curve is
+          showing VUs (constant-vus / ramping-vus /
+          shared-iterations) or requests per second
+          (constant-arrival-rate / ramping-arrival-rate, which
+          covers the lead-stress, spike and soak presets). The
+          label is hidden when the executor has no planned
+          line to scale to. */}
+      {unit !== 'none' && <span className="l-unit">Y-Achse: {unit === 'rate' ? 'Anfragen/s' : 'VUs'}</span>}
+    </div>
+  </div>
+}
+
+/**
+ * Builds the planned (green) line for the ramp chart from a
+ * load profile. Constant-vus = flat line at the target;
+ * ramping-vus = linear ramp from 0 to target over
+ * `durationSeconds`; shared-iterations / constant-arrival-rate
+ * = no planned line (the helper returns an empty array so the
+ * caller renders only the measured line). The function is
+ * exposed so tests can assert the interpolation.
+ */
+export function plannedRampPoints(
+  profile: {
+    type: string
+    virtualUsers?: number | null
+    durationSeconds?: number | null
+    stages?: { target: number, durationSeconds: number }[] | null
+    rate?: number | null
+    startRate?: number | null
+  } | null,
+  totalDurationSeconds: number,
+  stepSeconds = 30,
+): RampPoint[] {
+  if (!profile) return []
+  if (profile.type === 'constant-vus') {
+    const vus = profile.virtualUsers ?? 0
+    if (vus <= 0) return []
+    const points: RampPoint[] = []
+    for (let t = 0; t <= totalDurationSeconds; t += stepSeconds) {
+      points.push({ t, planned: vus, actual: NaN })
+    }
+    return points
+  }
+  if (profile.type === 'shared-iterations') {
+    // No meaningful target line because the duration is not predictable.
+    return []
+  }
+  if (profile.type === 'ramping-vus') {
+    const points: RampPoint[] = []
+    if (profile.stages && profile.stages.length > 0) {
+      // Stage-driven ramp: walk the stages and emit a point at
+      // each stage boundary. The interpolation between stages is
+      // linear.
+      let offset = 0
+      let current = profile.virtualUsers ? 0 : 0
+      for (const stage of profile.stages) {
+        const target = stage.target
+        const stepCount = Math.max(1, Math.floor(stage.durationSeconds / stepSeconds))
+        for (let i = 0; i < stepCount; i++) {
+          const f = (i + 1) / stepCount
+          points.push({ t: offset + (i + 1) * (stage.durationSeconds / stepCount), planned: current + (target - current) * f, actual: NaN })
+        }
+        offset += stage.durationSeconds
+        current = target
+      }
+      return points
+    }
+    // No stages: linear ramp from 0 to target across the
+    // profile's planned duration.
+    const target = profile.virtualUsers ?? 0
+    const dur = profile.durationSeconds ?? totalDurationSeconds
+    if (target <= 0 || dur <= 0) return []
+    for (let t = 0; t <= dur; t += stepSeconds) {
+      points.push({ t, planned: Math.min(target, (t / dur) * target), actual: NaN })
+    }
+    return points
+  }
+  if (profile.type === 'constant-arrival-rate') {
+    // The user picked arrival-rate because they want to see
+    // RPS, not VUs. The ramp chart therefore plots the target
+    // `rate` as a horizontal line so the live "Ist (RPS)" and
+    // the planned "Soll (rate)" are directly comparable.
+    const rate = profile.rate ?? 0
+    if (rate <= 0) return []
+    const points: RampPoint[] = []
+    for (let t = 0; t <= totalDurationSeconds; t += stepSeconds) {
+      points.push({ t, planned: rate, actual: NaN })
+    }
+    return points
+  }
+  if (profile.type === 'ramping-arrival-rate') {
+    // Same as `ramping-vus` but the y-axis unit is RPS. Used by
+    // the lead-stress / spike / soak presets.
+    const points: RampPoint[] = []
+    if (profile.stages && profile.stages.length > 0) {
+      let offset = 0
+      let current = profile.startRate ?? 0
+      for (const stage of profile.stages) {
+        const target = stage.target
+        const stepCount = Math.max(1, Math.floor(stage.durationSeconds / stepSeconds))
+        for (let i = 0; i < stepCount; i++) {
+          const f = (i + 1) / stepCount
+          points.push({ t: offset + (i + 1) * (stage.durationSeconds / stepCount), planned: current + (target - current) * f, actual: NaN })
+        }
+        offset += stage.durationSeconds
+        current = target
+      }
+      return points
+    }
+    const target = profile.rate ?? 0
+    const dur = profile.durationSeconds ?? totalDurationSeconds
+    if (target <= 0 || dur <= 0) return []
+    for (let t = 0; t <= dur; t += stepSeconds) {
+      points.push({ t, planned: Math.min(target, (t / dur) * target), actual: NaN })
+    }
+    return points
+  }
+  return []
+}
+
+/**
+ * Pulls the actual VU samples out of the run's most recent
+ * summary. k6 writes per-second `vus` values into the summary
+ * JSON; the helper plucks the array. Returns an empty array
+ * when the run has not produced a summary yet (still in
+ * flight with no iterations completed).
+ */
+export function actualVusSamples(run: TestRun): RampPoint[] {
+  const raw = run.summary?.raw
+  if (typeof raw !== 'string' || raw.length === 0) return []
+  let summary: { metrics?: { vus?: { values?: Record<string, number> } } }
+  try {
+    summary = JSON.parse(raw) as { metrics?: { vus?: { values?: Record<string, number> } } }
+  } catch {
+    return []
+  }
+  const values = summary.metrics?.vus?.values
+  if (!values) return []
+  // k6 encodes the time series as `{ "<timestamp>": value }`. The
+  // keys are monotonic, so we sort numerically and turn them
+  // into seconds-since-epoch pairs. Anything that does not
+  // parse is skipped to keep the chart resilient against
+  // partial summaries.
+  const points: RampPoint[] = []
+  for (const [k, v] of Object.entries(values)) {
+    const ts = Number.parseFloat(k)
+    if (!Number.isFinite(ts) || !Number.isFinite(v)) continue
+    points.push({ t: ts, planned: NaN, actual: v })
+  }
+  points.sort((a, b) => a.t - b.t)
+  return points
+}
+
+// ---- LiveBanner ---------------------------------------------------------
+//
+// Sits above the RunProgress grid while a run is in flight. Shows
+// the method+path being tested, the load profile, a pulsing dot
+// and the Stop / Abort (SIGKILL) buttons. Matches the mockup's
+// "Live · Lasttest läuft" header — the user should see the run
+// state at a glance without having to scroll the page.
+type LiveBannerProps = {
+  run: TestRun
+  onStop: (force: boolean) => void
+  disabled?: boolean
+}
+
+export function LiveBanner({ run, onStop, disabled }: LiveBannerProps) {
+  const { language: lang } = useLanguage()
+  const method = run.configuration?.operations?.[0]?.method ?? '–'
+  const path = run.configuration?.operations?.[0]?.path ?? '–'
+  const profile = run.configuration?.loadProfile
+  return <div className="live-banner" role="status" aria-live="polite">
+    <span className="live-dot" aria-hidden="true" />
+    <div>
+      <div className="live-label">Live · Lasttest läuft</div>
+      <div className="live-op">{method} {path}</div>
+    </div>
+    <div className="live-meta">
+      Load-Profil <strong style={{ color: '#dbe5f3' }}>{profile?.type ?? '–'} · {profile?.virtualUsers ?? '–'} VUs · {profile?.durationSeconds ?? '–'}s</strong><br />
+      <span style={{ color: '#6b7c95', fontFamily: '"SFMono-Regular", Consolas, monospace' }}>
+        http_req_duration p(95) aktualisiert sich alle 2 s
+      </span>
+    </div>
+    <div className="live-actions">
+      <button
+        type="button"
+        className="btn-stop"
+        onClick={() => onStop(false)}
+        disabled={disabled}
+        title="k6 freundlich beenden (SIGTERM)"
+      >
+        <span className="icon">■</span>Stoppen
+      </button>
+      <button
+        type="button"
+        className="btn-abort"
+        onClick={() => onStop(true)}
+        disabled={disabled}
+        title="k6 sofort beenden (SIGKILL)"
+      >
+        Abbrechen
+      </button>
+    </div>
+    <span className="run-list-hint" style={{ display: 'none' }}>{lang}</span>
+  </div>
+}
+
+// ---- ReportButton -------------------------------------------------------
+//
+// Prominent violet button to jump from the dashboard to the
+// full k6 report (`/?report=<runId>`). Pairs with the smaller
+// `report-btn` rendered by [ResultHeader] inside the status
+// pill row — this one is bigger and more visible so the user
+// does not miss it. The pulsing dot signals "this button is
+// hot; the report updates live as the run progresses".
+export function ReportButton({ runId }: { runId: string }) {
+  return <a
+    className="btn-report"
+    href={`/?report=${encodeURIComponent(runId)}`}
+    target="_blank"
+    rel="noreferrer"
+    title="Öffnet den ausführlichen k6-Testbericht (mit Ramp-Grafik, Schwellen, Konsole)"
+  >
+    <span className="icon" aria-hidden="true">📄</span>
+    Ausführlicher k6-Testbericht
+    <span className="live-dot" aria-hidden="true" />
+  </a>
+}
+
+// ---- AktionenTab --------------------------------------------------------
+//
+// Renders the right-click menu items as full-width cards so the
+// user does not have to remember the right-click gesture to find
+// the actions. The cards are grouped by category (Steuern / Teilen
+// & Export / Bereinigen) and a small badge explains why an action
+// is disabled. Each card wires directly to a callback so the
+// caller can decide whether to issue the API call, copy to the
+// clipboard, or open a new tab.
+type AktionenTabProps = {
+  run: TestRun
+  onStop: (force: boolean) => void
+  onRerun: () => void
+  onCopyRunId: () => void
+  onCopyReportLink: () => void
+  onOpenReport: () => void
+  onDownloadScript: () => void
+  onExportMetrics: () => void
+  onRemove: () => void
+  onRemoveAllOtherFailed: () => void
+}
+
+export function AktionenTab({
+  run,
+  onStop,
+  onRerun,
+  onCopyRunId,
+  onCopyReportLink,
+  onOpenReport,
+  onDownloadScript,
+  onExportMetrics,
+  onRemove,
+  onRemoveAllOtherFailed,
+}: AktionenTabProps) {
+  // The disabled flags mirror the conditions the right-click
+  // popup used to enforce. The mockup re-uses the same logic so
+  // the two UIs stay in lockstep; the only place that can
+  // diverge is the i18n key for the "why is this disabled?"
+  // reason, which is rendered as a small state badge.
+  const inFlight = run.status === 'RUNNING' || run.status === 'STOPPING' || run.status === 'QUEUED'
+  const terminal = !inFlight
+  const hasSummary = typeof run.summary?.raw === 'string' && run.summary.raw.length > 0
+  const reportUrl = `/?report=${encodeURIComponent(run.id)}`
+  return <div className="aktionen">
+    {/* Steuern: in-flight Aktionen (nur verfügbar solange der Lauf läuft) */}
+    <div className="aktionen-group">
+      <div className="aktionen-group-head">
+        <div className="title">Steuern</div>
+        <div className="sub">· in-flight Aktionen (nur verfügbar solange der Lauf läuft)</div>
+        <div className="line" />
+      </div>
+      <div className="aktionen-grid">
+        <button type="button" className="aktion-card" onClick={() => onStop(false)} disabled={!inFlight}>
+          <div className="icon">■</div>
+          <div className="body">
+            <div className="label">Stoppen <span className="shortcut">S</span> <span className="state-badge">graceful</span></div>
+            <div className="desc">k6 beendet die laufenden Iterationen sauber (SIGTERM) und schreibt eine vollständige Zusammenfassung. Bis zu 30 s Wartezeit.</div>
+          </div>
+          <div className="chev">▸</div>
+        </button>
+        <button type="button" className="aktion-card" onClick={() => onStop(true)} disabled={!inFlight}>
+          <div className="icon">✕</div>
+          <div className="body">
+            <div className="label">Abbrechen <span className="shortcut">⇧S</span> <span className="state-badge danger">SIGKILL</span></div>
+            <div className="desc">k6 wird sofort beendet. Die Zusammenfassung ist unvollständig; Iterationen in Flug werden als „interrupted" markiert.</div>
+          </div>
+          <div className="chev">▸</div>
+        </button>
+        <button type="button" className="aktion-card" onClick={onRerun} disabled={!terminal}>
+          <div className="icon">↻</div>
+          <div className="body">
+            <div className="label">Erneut starten {inFlight && <span className="state-badge disabled">warten auf Abschluss</span>}</div>
+            <div className="desc">Startet den gleichen Lauf mit der gleichen Konfiguration erneut. Im Live-Zustand deaktiviert, weil der Backend-Status sich gerade ändert.</div>
+          </div>
+          <div className="chev">▸</div>
+        </button>
+      </div>
+    </div>
+
+    {/* Teilen & Export */}
+    <div className="aktionen-group">
+      <div className="aktionen-group-head">
+        <div className="title">Teilen &amp; Export</div>
+        <div className="sub">· Bericht, Rohdaten, Skript herunterladen</div>
+        <div className="line" />
+      </div>
+      <div className="aktionen-grid">
+        <button type="button" className="aktion-card" onClick={onCopyRunId}>
+          <div className="icon">⎘</div>
+          <div className="body">
+            <div className="label">Run-ID kopieren <span className="shortcut">⌘C</span></div>
+            <div className="desc">Kopiert <code>{run.id.slice(0, 12)}…</code> in die Zwischenablage — z. B. für Slack oder ein Ticket.</div>
+          </div>
+          <div className="chev">▸</div>
+        </button>
+        <button type="button" className="aktion-card" onClick={onCopyReportLink}>
+          <div className="icon">🔗</div>
+          <div className="body">
+            <div className="label">Report-Link kopieren</div>
+            <div className="desc">Kopiert die URL <code>{reportUrl}</code> — inkl. Auth-Token, also mit Vorsicht teilen.</div>
+          </div>
+          <div className="chev">▸</div>
+        </button>
+        <button type="button" className="aktion-card" onClick={onOpenReport}>
+          <div className="icon">↗</div>
+          <div className="body">
+            <div className="label">Im neuen Tab öffnen <span className="shortcut">⌘↩</span></div>
+            <div className="desc">Öffnet den vollständigen k6-Bericht in einem neuen Browser-Tab. Nützlich zum Vergleichen mehrerer Läufe.</div>
+          </div>
+          <div className="chev">▸</div>
+        </button>
+        <button type="button" className="aktion-card" onClick={onDownloadScript} disabled={!terminal}>
+          <div className="icon">{'{}'}</div>
+          <div className="body">
+            <div className="label">k6-Skript herunterladen {inFlight && <span className="state-badge disabled">nach Abschluss</span>}</div>
+            <div className="desc">Lädt das generierte k6-Skript (<code>run-{run.id.slice(0, 8)}.js</code>) als <code>.js</code>-Datei. Während der Lauf läuft ist es noch nicht final.</div>
+          </div>
+          <div className="chev">▸</div>
+        </button>
+        <button type="button" className="aktion-card" onClick={onExportMetrics} disabled={!terminal || !hasSummary}>
+          <div className="icon">⤓</div>
+          <div className="body">
+            <div className="label">Roh-Zusammenfassung exportieren {!hasSummary && <span className="state-badge disabled">keine Daten</span>}{hasSummary && inFlight && <span className="state-badge disabled">nach Abschluss</span>}</div>
+            <div className="desc">Exportiert die k6-JSON-Summary unverändert (<code>summary-{run.id.slice(0, 8)}.json</code>) für CI / Archivierung.</div>
+          </div>
+          <div className="chev">▸</div>
+        </button>
+      </div>
+    </div>
+
+    {/* Bereinigen */}
+    <div className="aktionen-group">
+      <div className="aktionen-group-head">
+        <div className="title">Bereinigen</div>
+        <div className="sub">· Badge aus dem Dashboard entfernen (Daten bleiben im Backend erhalten)</div>
+        <div className="line" />
+      </div>
+      <div className="aktionen-grid full">
+        <button type="button" className="aktion-card danger" onClick={onRemove} disabled={inFlight}>
+          <div className="icon">🗑</div>
+          <div className="body">
+            <div className="label">Aus Dashboard entfernen <span className="shortcut">Del</span> {inFlight && <span className="state-badge disabled">in-flight</span>}</div>
+            <div className="desc">Entfernt das Badge aus der aktuellen Ansicht. Solange der Lauf noch läuft, ist die Aktion deaktiviert — erst nach Abschluss (COMPLETED/FAILED/STOPPED/ABORTED) sinnvoll.</div>
+          </div>
+          <div className="chev">▸</div>
+        </button>
+        <button type="button" className="aktion-card danger" onClick={onRemoveAllOtherFailed} disabled={inFlight}>
+          <div className="icon">🗑</div>
+          <div className="body">
+            <div className="label">Alle anderen fehlgeschlagenen entfernen {inFlight && <span className="state-badge disabled">in-flight</span>}</div>
+            <div className="desc">Entfernt alle anderen FAILED-Badges aus dem Dashboard, behält aber das hier markierte. Sinnvoll nach einem auffälligen Tag. Im Live-Zustand deaktiviert, da das Backend-Set sich gerade ändert.</div>
+          </div>
+          <div className="chev">▸</div>
+        </button>
+      </div>
+    </div>
+  </div>
 }

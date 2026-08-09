@@ -1,6 +1,6 @@
 import { deepEqual, equal, ok } from 'node:assert/strict'
 import { test } from 'node:test'
-import { EMPTY_TIME_SERIES, fetchTimeSeries } from './timeSeries.ts'
+import { EMPTY_TIME_SERIES, fetchTimeSeries, vuSamplesToEpochSeconds } from './timeSeries.ts'
 
 type FetchCall = { url: string; init: RequestInit | undefined }
 
@@ -161,4 +161,80 @@ test('fetchTimeSeries rejects nothing and always resolves to a TimeSeriesRespons
   } finally {
     globalThis.fetch = original
   }
+})
+
+// ---- vuSamplesToEpochSeconds --------------------------------------------
+//
+// The backend returns ISO-8601 timestamps in [TimeSeriesPoint.time];
+// the ramp chart needs `t` as a plain number of epoch *seconds*. A
+// previous version of `OverviewLiveRamp` used `Number(p.time)` inline,
+// which silently turned every timestamp into `NaN` and left the
+// polyline empty while the run was still in flight. The helper below
+// is the single place that handles the conversion and is exercised
+// here so that regression cannot slip back in.
+
+test('vuSamplesToEpochSeconds returns an empty array for an empty input', () => {
+  deepEqual(vuSamplesToEpochSeconds([]), [])
+})
+
+test('vuSamplesToEpochSeconds converts ISO-8601 timestamps to epoch seconds', () => {
+  const points = [
+    { time: '2026-08-08T21:44:26Z', value: 5 },
+    { time: '2026-08-08T21:44:27Z', value: 7 },
+    { time: '2026-08-08T21:44:28Z', value: 9 },
+  ]
+  const converted = vuSamplesToEpochSeconds(points)
+  equal(converted.length, 3)
+  // Seconds must be strictly monotonic and match the ISO timestamps
+  // to the nearest whole second (no fractional drift).
+  equal(converted[1].t - converted[0].t, 1)
+  equal(converted[2].t - converted[1].t, 1)
+  equal(converted[0].value, 5)
+  equal(converted[1].value, 7)
+  equal(converted[2].value, 9)
+  // The conversion must produce finite numbers — the bug we are
+  // guarding against was that `Number(p.time)` returned `NaN` for
+  // ISO strings, which made the ramp chart render zero samples.
+  for (const p of converted) {
+    ok(Number.isFinite(p.t), `t must be finite, got ${p.t}`)
+    ok(Number.isFinite(p.value), `value must be finite, got ${p.value}`)
+  }
+})
+
+test('vuSamplesToEpochSeconds drops points with an unparseable timestamp', () => {
+  const points = [
+    { time: 'not-a-timestamp', value: 5 },
+    { time: '2026-08-08T21:44:27Z', value: 7 },
+  ]
+  const converted = vuSamplesToEpochSeconds(points)
+  // Only the well-formed entry survives; the malformed one would
+  // otherwise yield a `NaN` x-coordinate that hides the polyline.
+  equal(converted.length, 1)
+  equal(converted[0].value, 7)
+  ok(Number.isFinite(converted[0].t))
+})
+
+test('vuSamplesToEpochSeconds drops points whose value is not finite', () => {
+  const points = [
+    { time: '2026-08-08T21:44:26Z', value: Number.NaN },
+    { time: '2026-08-08T21:44:27Z', value: Number.POSITIVE_INFINITY },
+    { time: '2026-08-08T21:44:28Z', value: 4 },
+  ]
+  const converted = vuSamplesToEpochSeconds(points)
+  equal(converted.length, 1)
+  equal(converted[0].value, 4)
+})
+
+test('vuSamplesToEpochSeconds preserves order and does not mutate the input', () => {
+  const points = [
+    { time: '2026-08-08T21:44:26Z', value: 1 },
+    { time: '2026-08-08T21:44:27Z', value: 2 },
+  ]
+  const snapshot = JSON.parse(JSON.stringify(points))
+  const converted = vuSamplesToEpochSeconds(points)
+  // Input must be untouched — the helper must be referentially
+  // transparent so React state setters can rely on it.
+  deepEqual(points, snapshot)
+  equal(converted[0].value, 1)
+  equal(converted[1].value, 2)
 })

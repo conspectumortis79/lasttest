@@ -1,8 +1,10 @@
 package de.lasttest.api
 
 import de.lasttest.demo.DemoSpecificationProvider
+import de.lasttest.domain.OperationStatisticsRepository
 import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
+import de.lasttest.domain.TestRunRepository
 import de.lasttest.domain.TestRunService
 import de.lasttest.domain.TimeSeriesPoint
 import de.lasttest.domain.TimeSeriesReader
@@ -43,6 +45,8 @@ class LastTestControllerTest {
     private val demoSpecificationProvider = DemoSpecificationProvider(resourceName = "/demo/recorded.yaml")
     private val remoteFetcher = RecordingRemoteSpecificationFetcher()
     private val timeSeriesReader = RecordingTimeSeriesReader()
+    private val statisticsRepository = de.lasttest.domain.InMemoryOperationStatisticsRepository()
+    private val runRepository = de.lasttest.domain.InMemoryTestRunRepository()
     private val controller =
         LastTestController(
             importer =
@@ -53,6 +57,8 @@ class LastTestControllerTest {
             demoSpecificationProvider = demoSpecificationProvider,
             remoteFetcher = remoteFetcher,
             timeSeriesReader = timeSeriesReader,
+            statisticsRepository = statisticsRepository,
+            runRepository = runRepository,
         )
 
     @Test
@@ -100,6 +106,8 @@ class LastTestControllerTest {
                 demoSpecificationProvider = demoSpecificationProvider,
                 remoteFetcher = remoteFetcher,
                 timeSeriesReader = timeSeriesReader,
+                statisticsRepository = statisticsRepository,
+                runRepository = runRepository,
             )
 
         val response = listController.list()
@@ -162,9 +170,16 @@ class LastTestControllerTest {
     }
 
     @Test
-    fun `returns 404 when the run has not finished yet`() {
+    fun `returns 200 with a live window when the run is still running`() {
+        // A still-running run has `startedAt` but no
+        // `finishedAt` yet. The ramp chart on the dashboard
+        // polls this endpoint every 2 s while the run is in
+        // flight, so we must NOT 404 here — instead we fall back
+        // to "now" for the window end so the chart keeps
+        // ticking. Only a never-started run (startedAt still
+        // null) yields 404.
         val response = controller.timeSeries(runningRun.id)
-        assertEquals(404, response.statusCode.value())
+        assertEquals(200, response.statusCode.value())
     }
 
     @Test
@@ -231,6 +246,8 @@ class LastTestControllerTest {
                 demoSpecificationProvider = demoSpecificationProvider,
                 remoteFetcher = remoteFetcher,
                 timeSeriesReader = timeSeriesReader,
+                statisticsRepository = statisticsRepository,
+                runRepository = runRepository,
             )
 
         val response = cancelController.cancel(cancellableRun.id, force = false)

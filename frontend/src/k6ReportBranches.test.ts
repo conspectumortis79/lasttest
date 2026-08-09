@@ -107,6 +107,37 @@ test('buildSollPoints returns empty array for unknown type via buildRampPlot', (
   deepEqual(buildIstPath(plot), '')
 })
 
+test('buildSollPoints emits RPS stages for ramping-arrival-rate', () => {
+  // The lead-stress / spike / soak presets use the
+  // `ramping-arrival-rate` executor. Before this branch was
+  // added, the report dropped the planned line for those
+  // profiles and rendered an empty SVG path — making the
+  // Soll/Ist comparison impossible for the exact presets the
+  // user reaches for when testing capacity.
+  const profile: ReportLoadProfile = {
+    type: 'RAMPING_ARRIVAL_RATE',
+    startRate: 0,
+    stages: [
+      { target: 0, durationSeconds: 10 },
+      { target: 200, durationSeconds: 10 },
+      { target: 200, durationSeconds: 30 },
+      { target: 0, durationSeconds: 30 },
+    ],
+  }
+  const plot = buildRampPlot(profile, [])
+  // The planned line must hit the 200-RPS plateau (one of the
+  // stage endpoints) and the last point must be back at 0.
+  equal(plot.sollPoints.some(p => p.value === 200), true)
+  equal(plot.sollPoints[plot.sollPoints.length - 1].value, 0)
+  // The x-axis total comes from the sum of stage durations, not
+  // a top-level `durationSeconds` field.
+  equal(plot.maxSeconds, 80)
+  // `maxValue` is the peak stage target; the 10 % headroom is
+  // already baked in by `buildRampPlot` so the curve does not
+  // touch the top edge.
+  equal(plot.maxValue >= 200, true)
+})
+
 // ---- formatNumber branches ----
 
 test('formatNumber returns dash for undefined and non-finite values', () => {

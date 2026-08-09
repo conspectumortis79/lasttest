@@ -88,7 +88,7 @@ class LocalK6TestRunServiceCoverageTest {
                 ),
         )
 
-    private fun service(executor: Executor = Executor { }): LocalK6TestRunService =
+    private fun service(executor: Executor = Executor { }, readerExecutor: Executor = executor): LocalK6TestRunService =
         LocalK6TestRunService(
             importer =
                 object : SpecificationImporter {
@@ -106,8 +106,12 @@ class LocalK6TestRunServiceCoverageTest {
                     ): String = "export default function () {}"
                 },
             executor = executor,
+            readerExecutor = readerExecutor,
             k6Command = "k6",
             influxDbProperties = InfluxDbProperties(enabled = false),
+            runRepository = InMemoryTestRunRepository(),
+            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            timeSeriesWriter = InMemoryTimeSeriesWriter(),
         )
 
     // ------------------------------------------------------------------
@@ -749,8 +753,12 @@ class LocalK6TestRunServiceCoverageTest {
                             ): String = "export default function () {}"
                         },
                     executor = syncExecutor,
+                    readerExecutor = syncExecutor,
                     k6Command = "python3",
                     influxDbProperties = InfluxDbProperties(enabled = false),
+            runRepository = InMemoryTestRunRepository(),
+            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            timeSeriesWriter = InMemoryTimeSeriesWriter(),
                 )
             val run =
                 svc.create(
@@ -983,8 +991,12 @@ class LocalK6TestRunServiceCoverageTest {
                     ): String = "export default function () {}"
                 },
             executor = executor,
+            readerExecutor = executor,
             k6Command = command,
             influxDbProperties = InfluxDbProperties(enabled = false),
+            runRepository = InMemoryTestRunRepository(),
+            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            timeSeriesWriter = InMemoryTimeSeriesWriter(),
         )
 
     @Test
@@ -1260,8 +1272,12 @@ class LocalK6TestRunServiceCoverageTest {
                             ): String = "export default function () {}"
                         },
                     executor = capturingExecutor,
+                    readerExecutor = capturingExecutor,
                     k6Command = scriptFile.absolutePath,
                     influxDbProperties = InfluxDbProperties(enabled = false),
+            runRepository = InMemoryTestRunRepository(),
+            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            timeSeriesWriter = InMemoryTimeSeriesWriter(),
                 )
             val run =
                 svc.create(
@@ -1864,8 +1880,12 @@ class LocalK6TestRunServiceCoverageTest {
                             ): String = "export default function () {}"
                         },
                     executor = asyncExecutor,
+                    readerExecutor = asyncExecutor,
                     k6Command = scriptFile.absolutePath,
                     influxDbProperties = InfluxDbProperties(enabled = false),
+            runRepository = InMemoryTestRunRepository(),
+            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            timeSeriesWriter = InMemoryTimeSeriesWriter(),
                 )
             val run =
                 svc.create(

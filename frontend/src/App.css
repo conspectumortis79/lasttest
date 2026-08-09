@@ -2168,5 +2168,1114 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .demo-traffic-empty-curl code { color: #101828; font-size: .82rem; word-break: break-all; }
 .demo-traffic-empty-hint { margin: 0; color: #667085; font-size: .82rem; font-style: italic; }
 
+/* ====================================================================
+   Run-list "× N" test-count badge (per-operation statistics).
+   Shown next to the run identifier in each row of the
+   LastRunsPanel. Color depends on the row state: muted for
+   default, purple for the active row, amber for the running row.
+   "neu" (untested) is shown with a dashed border.
+   ==================================================================== */
+.run-list-test-count {
+  display: inline-flex; align-items: center; gap: 2px;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #111b29;
+  border: 1px solid #293950;
+  color: #93a2b8;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.run-list-test-count.untested {
+  color: #4f6179;
+  background: transparent;
+  border-style: dashed;
+  font-weight: 400;
+}
+.run-badge.active .run-list-test-count {
+  background: #1a1730;
+  border-color: #5a4293;
+  color: #c5b8ff;
+}
+.run-badge.is-in-flight .run-list-test-count {
+  background: #3a2f15;
+  border-color: #d4a72c;
+  color: #fbbf24;
+}
+
+/* ====================================================================
+   Live-banner above RunProgress for in-flight runs. Shows the
+   method+path, the load profile, a pulsing dot and the Stop /
+   Abort (SIGKILL) buttons. The banner sits between the
+   run-list-title row and the RunProgress grid.
+   ==================================================================== */
+.live-banner {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 16px;
+  background: linear-gradient(180deg, #2c2410 0%, #1f1a0c 100%);
+  border: 1px solid #3a2f15;
+  border-radius: 8px;
+  margin: 8px 0 0;
+}
+.live-banner .live-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #d4a72c;
+  box-shadow: 0 0 0 4px rgba(212, 167, 44, .18);
+  animation: lasttest-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.live-banner .live-label {
+  color: #fbbf24;
+  font-weight: 800;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04rem;
+}
+.live-banner .live-op {
+  color: #dbe5f3;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  margin-top: 2px;
+}
+.live-banner .live-meta {
+  color: #93a2b8;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.live-banner .live-actions {
+  margin-left: auto;
+  display: flex; gap: 8px;
+}
+.btn-stop {
+  background: #4a2a30;
+  border: 1px solid #c25b5b;
+  color: #ff8a8a;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.btn-stop:hover { background: #5a3037; }
+.btn-stop:disabled { opacity: .4; cursor: not-allowed; }
+.btn-abort {
+  background: transparent;
+  border: 1px solid #793b4b;
+  color: #ff8a8a;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font: inherit; font-size: 12.5px;
+  cursor: pointer;
+}
+.btn-abort:hover { background: rgba(194, 91, 91, .12); }
+.btn-abort:disabled { opacity: .4; cursor: not-allowed; }
+
+@keyframes lasttest-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* ====================================================================
+   Tab navigation in the run detail card. Replaces the previous
+   "stack everything" layout with a horizontal tab strip similar
+   to the mockup. Tabs: Übersicht · Timeline · Aktionen ·
+   k6-Konsole · Schwellen · Konfiguration · Fehler-Diagnose.
+   ==================================================================== */
+.run-detail-tabs {
+  display: flex;
+  background: #0f1722;
+  border-bottom: 1px solid #1a2435;
+  padding: 0 14px;
+  gap: 2px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+  /* Sticky positioning is part of the tab-scroll bug fix
+     ([RunDetail] in App.tsx). The user agent scrolls the
+     activated tab button into view as a click-event default;
+     by pinning the tab strip to the top of the viewport we
+     remove the geometric reason for that scroll in the first
+     place. The strip is also a navigation surface, so keeping
+     it visible while the user reads a long tab body is a
+     small UX win on its own. `top` is `0` because the parent
+     `<main>` is the document scroll container — we do not
+     need to clear the brand toolbar, which is its own
+     sticky element at the top of `<body>`. */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.run-detail-tab {
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: #93a2b8;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  font-family: inherit;
+}
+.run-detail-tab:hover { color: #dbe5f3; }
+.run-detail-tab.active {
+  color: #fff;
+  border-bottom-color: #7d63ff;
+  font-weight: 700;
+}
+.run-detail-tab .badge {
+  background: #1a2638; color: #93a2b8;
+  padding: 0 6px; border-radius: 10px;
+  font-size: 11px; margin-left: 4px;
+}
+.run-detail-tab .badge.alert { background: #4a2a30; color: #ff8a8a; }
+.run-detail-tab .badge.actions-badge { background: #1a1730; color: #c5b8ff; }
+
+/* External tab — opens the k6 report in a new browser tab. The
+   tab itself stays on the dashboard; clicking it spawns the
+   report. Visually distinct from the in-place tabs so the user
+   does not expect a body to appear below it. */
+.run-detail-tab-external {
+  margin-left: auto;
+  color: #c5b8ff;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.run-detail-tab-external:hover {
+  color: #fff;
+  background: #1a1730;
+  border-bottom-color: #5a4293;
+}
+.run-detail-tab-external .external-icon {
+  font-size: 13px;
+  line-height: 1;
+  color: #7d63ff;
+  font-weight: 700;
+  transform: translateY(-1px);
+  display: inline-block;
+}
+.run-detail-tab-external:hover .external-icon {
+  color: #c5b8ff;
+}
+
+/* ====================================================================
+   "Ausführlicher k6-Testbericht" button. Prominent violet
+   gradient button next to "Im neuen Tab öffnen" in the
+   detail-head row. Includes a small pulsing live dot.
+   ==================================================================== */
+.btn-report {
+  background: linear-gradient(180deg, #1a2440 0%, #131c30 100%);
+  border: 1px solid #3a4d8a;
+  color: #c5b8ff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font: inherit; font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  text-decoration: none;
+}
+.btn-report:hover { background: #1f2c4a; border-color: #5a4293; }
+.btn-report .icon { font-size: 12px; }
+.btn-report .live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #7d63ff;
+  animation: lasttest-pulse 1.4s ease-in-out infinite;
+}
+
+/* ====================================================================
+   Aktionen tab content: cards grouped by category. The cards
+   represent the right-click menu items as full-width tiles,
+   each with an icon, label, description, and a status badge
+   explaining why the action is enabled/disabled.
+   ==================================================================== */
+.aktionen-group {
+  margin-bottom: 18px;
+}
+.aktionen-group-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+}
+.aktionen-group-head .title {
+  color: #fff; font-weight: 700; font-size: 14px;
+}
+.aktionen-group-head .sub {
+  color: #93a2b8; font-size: 12.5px;
+}
+.aktionen-group-head .line {
+  flex: 1; height: 1px; background: #1a2435;
+}
+.aktionen-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.aktionen-grid.full { grid-template-columns: 1fr; }
+.aktion-card {
+  display: flex; align-items: flex-start; gap: 12px;
+  background: #0f1722;
+  border: 1px solid #202d40;
+  border-radius: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  position: relative;
+  transition: border-color .15s ease, background-color .15s ease;
+  color: #dbe5f3;
+  text-align: left;
+  font: inherit;
+  width: 100%;
+}
+.aktion-card:hover:not(:disabled) {
+  background: #131c2a;
+  border-color: #3a4d6b;
+}
+.aktion-card:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+.aktion-card.danger:hover:not(:disabled) {
+  background: #1a0e10;
+  border-color: #793b4b;
+}
+.aktion-card .icon {
+  width: 32px; height: 32px;
+  background: #111b29;
+  border: 1px solid #293950;
+  border-radius: 6px;
+  display: grid; place-items: center;
+  color: #93a2b8;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.aktion-card.danger .icon {
+  background: #1f1217;
+  border-color: #4a2a30;
+  color: #ff8a8a;
+}
+.aktion-card .body { flex: 1; min-width: 0; }
+.aktion-card .label {
+  color: #fff; font-weight: 700; font-size: 13px;
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap;
+}
+.aktion-card .label .shortcut {
+  color: #4f6179;
+  font-size: 11px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-weight: 400;
+  border: 1px solid #293950;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.aktion-card .label .state-badge {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #3a2f15;
+  color: #fbbf24;
+}
+.aktion-card .label .state-badge.danger { background: #4a2a30; color: #ff8a8a; }
+.aktion-card .label .state-badge.disabled { background: #111b29; color: #4f6179; }
+.aktion-card .desc {
+  color: #93a2b8;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.aktion-card .desc code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #c5b8ff;
+  background: #111b29;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.aktion-card .chev {
+  color: #4f6179;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 14px;
+  align-self: center;
+}
+
+/* ====================================================================
+   Per-endpoint Timeline tab content. Heatmap (7 days, colour =
+   day's outcome) and a single-row Gantt of every run for the
+   selected endpoint. The data comes from
+   `/api/operations/{method}/{path:.*}/runs` so the user sees
+   only the runs that targeted THIS endpoint.
+   ==================================================================== */
+.timeline-tab {
+  padding-top: 4px;
+}
+.timeline-tab-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.timeline-tab-endpoint-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: #111b29;
+  border: 1px solid #293950;
+  color: #dbe5f3;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.timeline-tab-endpoint-chip .lbl {
+  color: #6b7c95; font-size: 11.5px;
+}
+.timeline-tab-endpoint-chip .method {
+  display: inline-grid; place-items: center;
+  padding: 2px 7px; border-radius: 4px;
+  font-weight: 800; font-size: 11px;
+  color: #fff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.timeline-tab-endpoint-chip .method.method-get    { background: #266a59; }
+.timeline-tab-endpoint-chip .method.method-post   { background: #765924; }
+.timeline-tab-endpoint-chip .method.method-put,
+.timeline-tab-endpoint-chip .method.method-patch  { background: #315a83; }
+.timeline-tab-endpoint-chip .method.method-delete { background: #793b4b; }
+.timeline-tab-endpoint-chip code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #c5b8ff;
+}
+
+/* "↺ Auf jetzt zurücksetzen" button — appears in the toolbar
+   only when the user has focused on a specific run, so the
+   default toolbar layout stays compact. */
+.timeline-tab-reset {
+  background: #1a1730;
+  border: 1px solid #5a4293;
+  color: #c5b8ff;
+  padding: 5px 11px;
+  border-radius: 6px;
+  font: inherit; font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.timeline-tab-reset:hover { background: #22193d; border-color: #7d63ff; }
+
+/* Caption next to the reset button — tells the user *where*
+   the timeline is centred right now so they understand why the
+   heatmap/gantt shifted around. */
+.timeline-tab-focus-label {
+  color: #93a2b8;
+  font-size: 12.5px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.timeline-tab-focus-label strong { color: #c5b8ff; font-weight: 700; }
+.timeline-tab-seg {
+  display: inline-flex;
+  background: #0a111b;
+  border: 1px solid #293950;
+  border-radius: 6px;
+  padding: 2px;
+}
+.timeline-tab-seg button {
+  background: transparent; border: 0;
+  color: #93a2b8;
+  padding: 5px 11px;
+  border-radius: 4px;
+  font: inherit; font-size: 12.5px;
+  cursor: pointer;
+}
+.timeline-tab-seg button:hover { color: #dbe5f3; }
+.timeline-tab-seg button.active { background: #2a3a52; color: #fff; }
+
+.timeline-tab-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.timeline-tab-stat {
+  background: #0f1722;
+  border: 1px solid #202d40;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.timeline-tab-stat .label {
+  color: #93a2b8;
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06rem;
+}
+.timeline-tab-stat .value {
+  color: #fff;
+  font-size: 20px; font-weight: 700;
+  margin-top: 2px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.timeline-tab-stat .sub {
+  color: #93a2b8;
+  font-size: 11.5px;
+  margin-top: 2px;
+}
+.timeline-tab-stat.good .value  { color: #5fcb95; }
+.timeline-tab-stat.bad .value   { color: #ff8a8a; }
+.timeline-tab-stat.warn .value  { color: #fbbf24; }
+
+.timeline-tab-heatmap {
+  background: #0a111b;
+  border: 1px solid #293950;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.timeline-tab-heatmap-title {
+  color: #93a2b8;
+  font-size: 11.5px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .06rem;
+  margin: 0 0 10px;
+}
+.timeline-tab-heatmap-bars {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.timeline-tab-day { text-align: center; }
+.timeline-tab-day .bar {
+  height: 60px;
+  background: #131c2a;
+  border-radius: 4px 4px 0 0;
+  position: relative;
+  border-top: 3px solid transparent;
+}
+.timeline-tab-day .bar.green  { border-top-color: #5fcb95; }
+.timeline-tab-day .bar.yellow { border-top-color: #d4a72c; }
+.timeline-tab-day .bar.red    { border-top-color: #ff8a8a; }
+.timeline-tab-day .bar.today  { background: rgba(125, 99, 255, .10); }
+.timeline-tab-day .bar .count {
+  position: absolute;
+  top: 8px; left: 0; right: 0;
+  text-align: center;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #fff;
+  font-size: 13px; font-weight: 700;
+}
+.timeline-tab-day .bar .issue {
+  position: absolute;
+  bottom: 6px; left: 0; right: 0;
+  text-align: center;
+  font-size: 10px;
+  color: #ff8a8a;
+  font-weight: 700;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.timeline-tab-day .bar .issue.warn { color: #fbbf24; }
+.timeline-tab-day .lbl {
+  color: #6b7c95;
+  font-size: 10.5px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  margin-top: 6px;
+}
+.timeline-tab-day .lbl.today { color: #c5b8ff; font-weight: 700; }
+
+.timeline-tab-canvas {
+  background: #0a111b;
+  border: 1px solid #293950;
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.timeline-tab-canvas .axis {
+  position: relative;
+  height: 30px;
+  border-bottom: 1px solid #293950;
+}
+.timeline-tab-canvas .axis .tick {
+  position: absolute; top: 0; bottom: 0; width: 0;
+  border-left: 1px solid #1a2435;
+}
+.timeline-tab-canvas .axis .tick.major { border-left-color: #293950; }
+.timeline-tab-canvas .axis .tick span {
+  position: absolute;
+  bottom: 6px;
+  transform: translateX(-50%);
+  color: #6b7c95;
+  font-size: 10.5px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  white-space: nowrap;
+}
+.timeline-tab-canvas .axis .tick.major span { color: #93a2b8; font-weight: 700; }
+.timeline-tab-canvas .day-sep {
+  position: absolute;
+  top: 30px; bottom: 30px;
+  width: 0;
+  border-left: 1px dashed #1a2435;
+  z-index: 1;
+}
+.timeline-tab-canvas .lane {
+  position: relative;
+  height: 56px;
+}
+.timeline-tab-canvas .lane-label {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 100px;
+  padding: 8px 10px;
+  background: rgba(10, 17, 27, .92);
+  border-right: 1px solid #293950;
+  color: #93a2b8;
+  font-size: 11.5px;
+  font-weight: 700;
+  z-index: 2;
+}
+.timeline-tab-canvas .lane-track {
+  position: absolute;
+  left: 100px; right: 0; top: 0; bottom: 0;
+}
+.timeline-tab-canvas .now-line {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 0;
+  border-left: 1px dashed #ff8a8a;
+  z-index: 3;
+}
+.timeline-tab-canvas .now-label {
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+  background: #4a2a30;
+  color: #ff8a8a;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  z-index: 4;
+  white-space: nowrap;
+}
+.timeline-tab-bar {
+  position: absolute;
+  top: 10px; bottom: 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: #1f3a2d;
+  color: #8fe8c1;
+  border-color: #2d6a4f;
+}
+.timeline-tab-bar.completed { background: #1f3a2d; color: #8fe8c1; border-color: #2d6a4f; }
+.timeline-tab-bar.failed,
+.timeline-tab-bar.aborted  { background: #4a2a30; color: #ff8a8a; border-color: #c25b5b; }
+.timeline-tab-bar.stopped  { background: #2e2548; color: #c5b8ff; border-color: #5a4293; }
+.timeline-tab-bar:hover { filter: brightness(1.18); border-color: #fff; }
+.timeline-tab-bar.is-selected {
+  background: #2a1f4a;
+  color: #fff;
+  border: 2px solid #7d63ff;
+  z-index: 5;
+  box-shadow: 0 0 0 3px rgba(125, 99, 255, .25);
+}
+.timeline-tab-legend {
+  display: flex; gap: 16px; flex-wrap: wrap;
+  padding: 10px 14px;
+  color: #93a2b8;
+  font-size: 12px;
+  border-top: 1px solid #1a2435;
+}
+.timeline-tab-legend span::before { content: "■"; margin-right: 6px; }
+.timeline-tab-legend .l-pass::before     { color: #8fe8c1; }
+.timeline-tab-legend .l-failed::before   { color: #ff8a8a; }
+.timeline-tab-legend .l-stopped::before  { color: #c5b8ff; }
+.timeline-tab-legend .l-selected::before { color: #7d63ff; }
+
+.timeline-tab-list-head {
+  color: #fff; font-weight: 700; font-size: 14px;
+  margin: 8px 0;
+}
+.timeline-tab-list-head .sub {
+  color: #93a2b8; font-size: 12.5px; font-weight: 400;
+  margin-left: 4px;
+}
+.timeline-tab-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.timeline-tab-list-item {
+  background: #0f1722;
+  border: 1px solid #202d40;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  position: relative;
+}
+.timeline-tab-list-item:hover { background: #131c2a; border-color: #3a4d6b; }
+.timeline-tab-list-item.is-selected {
+  border-color: #7d63ff;
+  background: #1a1730;
+}
+.timeline-tab-list-item .top {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px;
+}
+.timeline-tab-list-item .when {
+  color: #93a2b8;
+  font-size: 11.5px;
+  margin-left: auto;
+  text-align: right;
+}
+.timeline-tab-list-item .when .rel { color: #dbe5f3; }
+.timeline-tab-list-item .when .abs { color: #6b7c95; font-size: 10.5px; }
+.timeline-tab-list-item .bot {
+  margin-top: 4px;
+  display: flex; align-items: center; gap: 10px;
+  color: #93a2b8;
+  font-size: 11.5px;
+}
+.timeline-tab-list-item .vulist { font-family: "SFMono-Regular", Consolas, monospace; }
+.timeline-tab-list-item .rid {
+  color: #6b7c95;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  margin-left: auto;
+}
+.timeline-tab-list-item .pin {
+  position: absolute;
+  top: 6px; right: 8px;
+  color: #7d63ff;
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* ====================================================================
+   k6-Konsole tab content. Wraps the raw console output in a
+   scrollable pre with a small header.
+   ==================================================================== */
+.console-tab {
+  background: #0a111b;
+  border: 1px solid #293950;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.console-tab-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  background: #111b29;
+  border-bottom: 1px solid #1a2435;
+}
+.console-tab-label {
+  color: #93a2b8;
+  font-size: 11.5px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .06rem;
+}
+.console-tab-meta {
+  color: #6b7c95;
+  font-size: 11.5px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.console-tab-output {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #dbe5f3;
+  background: #060a10;
+  max-height: 480px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ====================================================================
+   Schwellen tab content. Table of every configured threshold
+   with measured value + pass/fail pill.
+   ==================================================================== */
+.thresholds-tab {
+  background: #0a111b;
+  border: 1px solid #293950;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.thresholds-tab-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  background: #111b29;
+  border-bottom: 1px solid #1a2435;
+}
+.thresholds-tab-title {
+  color: #fff; font-weight: 700; font-size: 14px;
+}
+.thresholds-pill {
+  font-size: 11.5px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .04rem;
+  padding: 2px 8px; border-radius: 4px;
+}
+.thresholds-pill.is-pass { background: #1f3a2d; color: #8fe8c1; }
+.thresholds-pill.is-fail { background: #4a2a30; color: #ff8a8a; }
+.thresholds-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.thresholds-table th, .thresholds-table td {
+  padding: 9px 14px;
+  text-align: left;
+  border-bottom: 1px solid #1a2435;
+}
+.thresholds-table th {
+  background: #111b29;
+  color: #93a2b8;
+  font-size: 11px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .04rem;
+}
+.thresholds-table td.mono code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #dbe5f3;
+}
+.thresholds-table tr:last-child td { border-bottom: 0; }
+.thresholds-table tr.is-pass { background: rgba(95, 203, 149, .04); }
+.thresholds-table tr.is-fail { background: rgba(255, 138, 138, .06); }
+.thresholds-status-pill {
+  display: inline-block;
+  font-size: 11px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .04rem;
+  padding: 2px 8px; border-radius: 4px;
+}
+.thresholds-status-pill.is-pass    { background: #1f3a2d; color: #8fe8c1; }
+.thresholds-status-pill.is-fail    { background: #4a2a30; color: #ff8a8a; }
+.thresholds-status-pill.is-pending { background: #3a2f15; color: #fbbf24; }
+
+/* ====================================================================
+   Konfiguration tab content. Cards with key-value rows for
+   API, Last-Profil and Operations.
+   ==================================================================== */
+.config-tab { display: flex; flex-direction: column; gap: 14px; }
+.config-section {
+  background: #0f1722;
+  border: 1px solid #202d40;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.config-section-title {
+  color: #fff; font-weight: 700; font-size: 14px;
+  margin-bottom: 10px;
+}
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+}
+.config-row {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px dashed #1a2435;
+  font-size: 12.5px;
+}
+.config-row:last-child { border-bottom: 0; }
+.config-row-k {
+  color: #93a2b8;
+  font-weight: 600;
+  flex: 0 0 110px;
+  font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: .04rem;
+}
+.config-row-v { color: #dbe5f3; flex: 1; min-width: 0; word-break: break-word; }
+.config-row-v.is-mono {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #c5b8ff;
+}
+.config-operations { display: flex; flex-direction: column; gap: 8px; }
+.config-operation {
+  background: #0a111b;
+  border: 1px solid #293950;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.config-operation-head {
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.config-operation-method {
+  display: inline-grid; place-items: center;
+  padding: 2px 7px; border-radius: 4px;
+  font-weight: 800; font-size: 11px;
+  color: #fff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.config-operation-method.method-get    { background: #266a59; }
+.config-operation-method.method-post   { background: #765924; }
+.config-operation-method.method-put,
+.config-operation-method.method-patch  { background: #315a83; }
+.config-operation-method.method-delete { background: #793b4b; }
+.config-operation-path {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #c5b8ff;
+  font-size: 12.5px;
+}
+.config-operation-id {
+  color: #6b7c95;
+  font-size: 11px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  padding: 1px 6px;
+  background: #111b29;
+  border: 1px solid #293950;
+  border-radius: 3px;
+}
+.config-operation-payloads {
+  color: #93a2b8; font-size: 11.5px;
+  margin-left: auto;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.config-operation-summary {
+  margin-top: 4px;
+  color: #93a2b8;
+  font-size: 12px;
+  font-style: italic;
+}
+.config-operation-flags {
+  margin-top: 6px;
+  display: flex; gap: 4px; flex-wrap: wrap;
+}
+.config-flag {
+  display: inline-block;
+  font-size: 10.5px; font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #111b29;
+  color: #4f6179;
+  border: 1px solid #293950;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.config-flag.is-on {
+  background: #1a2440;
+  color: #c5b8ff;
+  border-color: #3a4d8a;
+}
+.config-section-hint {
+  color: #6b7c95; font-size: 12px;
+  padding: 4px 4px 0;
+}
+.config-section-hint code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #c5b8ff;
+}
+
+/* ====================================================================
+   Fehler-Diagnose tab content. One card per failure category.
+   ==================================================================== */
+.failure-tab { display: flex; flex-direction: column; gap: 12px; }
+.failure-tab-card {
+  background: #1f1217;
+  border: 1px solid #793b4b;
+  border-radius: 8px;
+  padding: 14px 16px;
+  position: relative;
+}
+.failure-tab-card.kind-tls,
+.failure-tab-card.kind-connection-refused,
+.failure-tab-card.kind-connection-timeout,
+.failure-tab-card.kind-dns,
+.failure-tab-card.kind-script,
+.failure-tab-card.kind-k6-missing {
+  background: #1a0e10;
+  border-color: #793b4b;
+}
+.failure-tab-card.kind-threshold-latency,
+.failure-tab-card.kind-threshold-failure-rate,
+.failure-tab-card.kind-server5xx {
+  background: #2a1f0c;
+  border-color: #d4a72c;
+}
+.failure-tab-head {
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap;
+}
+.failure-tab-label {
+  font-size: 11px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .04rem;
+  padding: 2px 8px; border-radius: 4px;
+  background: #4a2a30;
+  color: #ff8a8a;
+}
+.failure-tab-label.kind-tls,
+.failure-tab-label.kind-connection-refused,
+.failure-tab-label.kind-connection-timeout,
+.failure-tab-label.kind-dns,
+.failure-tab-label.kind-script,
+.failure-tab-label.kind-k6-missing { background: #4a2a30; color: #ff8a8a; }
+.failure-tab-label.kind-threshold-latency,
+.failure-tab-label.kind-threshold-failure-rate,
+.failure-tab-label.kind-server5xx { background: #3a2f15; color: #fbbf24; }
+.failure-tab-summary {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+}
+.failure-tab-detail {
+  margin: 8px 0 0;
+  color: #dbe5f3;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12.5px;
+  padding: 8px 10px;
+  background: #120a0e;
+  border-radius: 5px;
+  border-left: 3px solid #ff8a8a;
+  word-break: break-word;
+}
+.failure-tab-card.kind-threshold-latency .failure-tab-detail,
+.failure-tab-card.kind-threshold-failure-rate .failure-tab-detail,
+.failure-tab-card.kind-server5xx .failure-tab-detail {
+  background: #1a1308;
+  border-left-color: #d4a72c;
+}
+.failure-tab-reasons {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  color: #c5b8ff;
+  font-size: 12.5px;
+}
+.failure-tab-reasons li { margin-bottom: 4px; }
+.failure-tab-error {
+  background: #0a111b;
+  border: 1px solid #293950;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.failure-tab-error-label {
+  padding: 8px 12px;
+  background: #111b29;
+  border-bottom: 1px solid #1a2435;
+  color: #93a2b8;
+  font-size: 11.5px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .04rem;
+}
+.failure-tab-error-pre {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  color: #dbe5f3;
+  background: #060a10;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ====================================================================
+   Live ramp chart (Soll vs Ist) for in-flight runs. The chart
+   draws the planned (green) and measured (blue) VU count over
+   time, plus a yellow live cursor on the current sample.
+   ==================================================================== */
+.ramp-tab {
+  background: #0a111b;
+  border: 1px solid #293950;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.ramp-tab-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 6px;
+}
+.ramp-tab-title {
+  color: #93a2b8;
+  font-size: 11.5px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .06rem;
+  flex: 1;
+}
+.ramp-tab-meta {
+  color: #6b7c95;
+  font-size: 11.5px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.ramp-tab-svg {
+  width: 100%;
+  height: 160px;
+  display: block;
+}
+.ramp-tab-legend {
+  display: flex; gap: 16px;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: #93a2b8;
+}
+.ramp-tab-legend span::before { content: "■"; margin-right: 6px; }
+.ramp-tab-legend .l-ist::before  { color: #4f8bff; }
+.ramp-tab-legend .l-soll::before { color: #5fcb95; }
+.ramp-tab-legend .l-now::before  { color: #fbbf24; }
+
+/* Summary card row beneath the ramp chart. Sits only on the
+   dedicated "Auslastung" tab (formerly part of the overview),
+   so the user can scan the headline numbers at a glance after
+   the run has ended without having to open the report. */
+.ramp-summary {
+  margin-top: 12px;
+  background: #0a111b;
+  border: 1px solid #293950;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.ramp-summary-title {
+  color: #93a2b8;
+  font-size: 11.5px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .06rem;
+  margin-bottom: 10px;
+}
+.ramp-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: #1a2435;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.ramp-summary-cell {
+  background: #0f1722;
+  padding: 10px 14px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.ramp-summary-cell span {
+  color: #93a2b8;
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06rem;
+}
+.ramp-summary-cell strong {
+  color: #fff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 22px; font-weight: 700;
+}
+.ramp-summary-cell small {
+  color: #93a2b8;
+  font-size: 11.5px;
+  margin-top: 2px;
+}
+
+/* ====================================================================
+   Shared "tab is empty" placeholder. Renders a soft card with
+   a title and a hint. Used by every tab that has no data yet
+   (e.g. a not-yet-completed run for a threshold result).
+   ==================================================================== */
+.run-tab-empty {
+  background: #0f1722;
+  border: 1px dashed #293950;
+  border-radius: 8px;
+  padding: 24px 18px;
+  text-align: center;
+}
+.run-tab-empty-title {
+  color: #fff; font-weight: 700; font-size: 15px;
+  margin-bottom: 4px;
+}
+.run-tab-empty-hint {
+  color: #93a2b8; font-size: 13px;
+  max-width: 60ch;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+
 
 

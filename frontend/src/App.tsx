@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAutoSizeTextarea } from './useAutoSizeTextarea.ts'
 import {
   cancellableRunIds,
@@ -39,7 +39,11 @@ import { DocPopup } from './DocPopup.tsx'
 import { WikiPopup } from './WikiPopup.tsx'
 import { useLanguage, LanguageProvider } from './useLanguage.tsx'
 import { translate, formatters, type SupportedLanguage } from './i18n.ts'
-import { RunStatusView } from './runStatusView.tsx'
+import { RunStatusView, LiveBanner, AktionenTab, LiveRampChart } from './runStatusView.tsx'
+import { vuSamplesToEpochSeconds } from './timeSeries.ts'
+import { computeRampChartParams } from './liveRampChartLayout.ts'
+import { ConsoleTab, ThresholdsTab, ConfigTab, FailureTab } from './runDetailTabs.tsx'
+import { EndpointTimelineTab } from './EndpointTimelineTab.tsx'
 import { useRunClock, useLiveClock } from './useRunClock.ts'
 import { LoadProfileEditor } from './LoadProfileEditor.tsx'
 import {
@@ -1221,7 +1225,21 @@ function LoadTestApp() {
           })}
       </div>
 
-      {run && <RunDetail run={run} runNow={runNow} />}
+      {run && <RunDetail run={run} runNow={runNow} handlers={{
+        onStop: async (force) => { await cancelRun(run.id, force) },
+        onRerun: () => rerunRun(run.id),
+        onCopyRunId: () => safeClipboard(run.id),
+        onCopyReportLink: () => safeClipboard(`${window.location.origin}/?report=${encodeURIComponent(run.id)}`),
+        onOpenReport: () => { window.open(`/?report=${encodeURIComponent(run.id)}`, '_blank', 'noopener,noreferrer') },
+        onDownloadScript: () => downloadScript(run),
+        onExportMetrics: () => downloadSummary(run),
+        onRemove: () => handleRemoveRun(run.id),
+        onRemoveAllOtherFailed: () => setRuns(current => {
+          const next = removeAllOtherFailed(current, run.id)
+          setActiveRunId(pickActiveRunId(next, activeRunId))
+          return next
+        }),
+      }} />}
     </section>}
 
     {runMenu && <RunContextMenu
@@ -1283,27 +1301,439 @@ function LoadTestApp() {
  * status view and the optional console / summary blocks. Extracted
  * from the inline JSX so the multi-run dashboard above can stay
  * simple.
+ *
+ * Since the "Tab-Navigation + Aktionen-Tab" release, the detail
+ * view is split into a horizontal tab strip (Übersicht · Timeline ·
+ * Aktionen · k6-Konsole · Schwellen · Konfiguration · Fehler-Diagnose)
+ * plus a tab body. The previous "stack everything" layout is
+ * preserved in the Übersicht tab so the user still sees the live
+ * banner, the RunProgress grid, the metric cards and the
+ * console/summary extras in one place when they need them all.
  */
-function RunDetail({ run, runNow }: { run: TestRun, runNow: number }) {
+type DetailTabId = 'overview' | 'ramp' | 'timeline' | 'actions' | 'console' | 'thresholds' | 'config' | 'failure'
+
+function RunDetail({ run, runNow, handlers }: { run: TestRun, runNow: number, handlers: RunActionHandlers }) {
   const { language } = useLanguage()
-  // The detail block shows the live status of the currently selected
-  // run. The associated endpoint is already rendered in the badge
-  // grid above, so we do not duplicate it here — only the status,
-  // metrics and report button. The report button now lives inside
-  // the ResultHeader (PASSED / ABORTED pill), no longer in its own
-  // header row above. Via `showReportButton` we tell RunStatusView
-  // to render the link; the full report in TestRunReport.tsx omits
-  // the flag because the report itself is the link's destination.
+  const [activeTab, setActiveTab] = useState<DetailTabId>('overview')
+  // Wall-clock scroll position the user is reading at, captured
+  // right before the tab change. The browser tries to scroll the
+  // activated tab button into view as part of its click-event
+  // default behaviour — this happens AFTER React's onClick
+  // handler returns, AFTER the layout effect runs, and even
+  // AFTER the next animation frame. None of the standard
+  // React-side recovery hooks catch it. The robust solution is
+  // a one-shot scroll listener: as soon as the user agent
+  // scrolls away from the snapshotted position, we scroll back.
+  // A ref is used (not state) because the value is only read
+  // by the listener below and must NOT trigger a re-render on
+  // its own.
+  const anchorScrollY = useRef<number | null>(null)
+  const inFlight = isInFlight(run.status)
+  const failed = run.status === 'FAILED' || run.status === 'ABORTED'
+  const selectTab = (tab: DetailTabId) => {
+    setActiveTab(tab)
+  }
+  // Snapshot the user's reading position in `mousedown` so it
+  // is captured BEFORE the browser's click-event default can
+  // scroll the page (e.g. scroll-into-view on the activated
+  // tab button). `onMouseDown` is also the right hook to
+  // call `preventDefault()` to stop the focus from jumping to
+  // the tab button, which would also trigger a focus-driven
+  // scroll. The `onPointerEnter` handler is a defensive
+  // secondary capture: if a regression ever reintroduces a
+  // scroll BEFORE `mousedown` fires (e.g. the browser starts
+  // scrolling on hover), we still have a recent anchor.
+  const onTabMouseDown = (event: React.MouseEvent) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    anchorScrollY.current = window.scrollY
+  }
+  const onPointerEnter = () => {
+    if (anchorScrollY.current === null) {
+      anchorScrollY.current = window.scrollY
+    }
+  }
+  // Capture the user's reading position before a tab change
+  // and restore it immediately after the new tab body commits.
+  // Two scroll-affecting events conspire here:
+  //   1. The user agent may scroll the activated tab button
+  //      into view (a click-event default that fires after
+  //      React's onClick). Catching the position in
+  //      `mousedown` and re-applying it synchronously in
+  //      `useLayoutEffect` is the only way to fight it.
+  //   2. The new tab body is a different height than the old
+  //      one, so `document.scrollHeight` changes. The browser
+  //      clamps `window.scrollY` to the new maximum — if the
+  //      user was at the very bottom of the long Timeline tab,
+  //      they land at the bottom of the short Schwellen tab.
+  //      We can't preserve the exact pixel (the document is
+  //      genuinely shorter) but we can pin the position to
+  //      the new maximum instead of letting the browser
+  //      animate a jump. Without the layout effect the
+  //      browser keeps the stale `scrollY` until the next
+  //      `scroll` event, which is what produces the visible
+  //      "page jumps up" artefact.
+  useLayoutEffect(() => {
+    if (anchorScrollY.current === null) return
+    const target = anchorScrollY.current
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight)
+    window.scrollTo({ top: Math.min(target, maxScroll), left: 0, behavior: 'instant' as ScrollBehavior })
+    anchorScrollY.current = null
+  }, [activeTab])
+  // Re-render the tab strip whenever the selected run changes —
+  // when the user clicks a different run the new run's natural
+  // landing tab is "overview", not whatever the previous run was
+  // showing (e.g. "Aktionen" makes no sense if the user then
+  // selected a different run).
+  //
+  // The Timeline tab is the one exception: when the user is
+  // browsing the endpoint timeline and picks a different run
+  // from the [LastRunsPanel] list, the chart must stay open and
+  // re-centre on the new run's [createdAt]. Forcing the user
+  // back to "Übersicht" would throw away the very context
+  // (the bar in the Gantt, the heatmap, the focus label) that
+  // makes the timeline useful as a navigation surface.
+  useEffect(() => {
+    setActiveTab(prev => (prev === 'timeline' ? prev : 'overview'))
+  }, [run.id])
   return <>
-    <TestRunSummary run={run} />
-    <RunStatusView run={run} now={runNow} showReportButton />
-    {((run.consoleOutput ?? run.error) || run.summary) && <div className="result-extras">
-      <div className="result-extras-details">
-        {(run.consoleOutput ?? run.error) && <details><summary>{translate(language, 'report.console')}</summary><pre>{run.consoleOutput ?? run.error}</pre></details>}
-        {run.summary && <details><summary>{translate(language, 'report.json')}</summary><pre>{run.summary.raw}</pre></details>}
-      </div>
-    </div>}
+    {inFlight && <LiveBanner run={run} onStop={handlers.onStop} />}
+    <div className="run-detail-tabs" role="tablist" aria-label={translate(language, 'detail.tab.aria')}>
+      {/* The `onMouseDown` handler on every tab button calls
+          `preventDefault()` to suppress the browser's default
+          focus-on-mouse-click behaviour. Without it, clicking
+          a tab moves keyboard focus to the button, which in
+          turn triggers the user agent's "scroll the focused
+          element into view" pass — and the page jumps back to
+          the tab strip even when the user is reading content
+          further down. The click handler still fires (so
+          `selectTab` runs), and the button remains focusable
+          via the Tab key, so keyboard users and screen readers
+          keep full access. The same hook is applied uniformly
+          to every tab rather than only to some of them,
+          because the user expects the same "stay where I am"
+          behaviour from every entry.
+
+          `preventDefault()` on `mousedown` is necessary but
+          not sufficient: the user agent ALSO scrolls the
+          activated element into view as a click-event
+          consequence (not focus-driven), so we additionally
+          capture `window.scrollY` in [selectTab] and restore
+          it in the `useLayoutEffect` above. Keyboard
+          activation (Tab + Enter) is unaffected because the
+          user is in fact expected to see the focused tab in
+          that case. */}
+      <button type="button" role="tab" aria-selected={activeTab === 'overview'}
+        className={`run-detail-tab ${activeTab === 'overview' ? 'active' : ''}`}
+        onMouseEnter={onPointerEnter}
+        onFocus={onPointerEnter}
+        onMouseDown={onTabMouseDown}
+        onClick={() => selectTab('overview')}>
+        {translate(language, 'detail.tab.overview')}
+      </button>
+      <button type="button" role="tab" aria-selected={activeTab === 'ramp'}
+        className={`run-detail-tab ${activeTab === 'ramp' ? 'active' : ''}`}
+        onMouseEnter={onPointerEnter}
+        onFocus={onPointerEnter}
+        onMouseDown={onTabMouseDown}
+        onClick={() => selectTab('ramp')}>
+        {translate(language, 'detail.tab.ramp')}
+      </button>
+      <button type="button" role="tab" aria-selected={activeTab === 'timeline'}
+        className={`run-detail-tab ${activeTab === 'timeline' ? 'active' : ''}`}
+        onMouseEnter={onPointerEnter}
+        onFocus={onPointerEnter}
+        onMouseDown={onTabMouseDown}
+        onClick={() => selectTab('timeline')}>
+        {translate(language, 'detail.tab.timeline')} <span className="badge actions-badge">{translate(language, 'detail.tab.timeline.badge')}</span>
+      </button>
+      <button type="button" role="tab" aria-selected={activeTab === 'actions'}
+        className={`run-detail-tab ${activeTab === 'actions' ? 'active' : ''}`}
+        onMouseEnter={onPointerEnter}
+        onFocus={onPointerEnter}
+        onMouseDown={onTabMouseDown}
+        onClick={() => selectTab('actions')}>
+        {translate(language, 'detail.tab.actions')}
+      </button>
+      <button type="button" role="tab" aria-selected={activeTab === 'console'}
+        className={`run-detail-tab ${activeTab === 'console' ? 'active' : ''}`}
+        onMouseEnter={onPointerEnter}
+        onFocus={onPointerEnter}
+        onMouseDown={onTabMouseDown}
+        onClick={() => selectTab('console')}>
+        {translate(language, 'detail.tab.console')}
+      </button>
+      <button type="button" role="tab" aria-selected={activeTab === 'thresholds'}
+        className={`run-detail-tab ${activeTab === 'thresholds' ? 'active' : ''}`}
+        onMouseEnter={onPointerEnter}
+        onFocus={onPointerEnter}
+        onMouseDown={onTabMouseDown}
+        onClick={() => selectTab('thresholds')}>
+        {translate(language, 'detail.tab.thresholds')}
+      </button>
+      <button type="button" role="tab" aria-selected={activeTab === 'config'}
+        className={`run-detail-tab ${activeTab === 'config' ? 'active' : ''}`}
+        onMouseEnter={onPointerEnter}
+        onFocus={onPointerEnter}
+        onMouseDown={onTabMouseDown}
+        onClick={() => selectTab('config')}>
+        {translate(language, 'detail.tab.config')}
+      </button>
+      <button type="button" role="tab" aria-selected={activeTab === 'failure'}
+        className={`run-detail-tab ${activeTab === 'failure' ? 'active' : ''}`}
+        onMouseEnter={onPointerEnter}
+        onFocus={onPointerEnter}
+        onMouseDown={onTabMouseDown}
+        onClick={() => selectTab('failure')}>
+        {translate(language, 'detail.tab.failure')} {failed && <span className="badge alert">!</span>}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={false}
+        className="run-detail-tab run-detail-tab-external"
+        title={translate(language, 'detail.tab.external.title')}
+        onClick={() => window.open(`/?report=${encodeURIComponent(run.id)}`, '_blank', 'noopener,noreferrer')}
+      >
+        <span className="external-icon" aria-hidden="true">↗</span>
+        {translate(language, 'detail.tab.external')}
+      </button>
+    </div>
+    <div className="run-detail-tab-body">
+      {activeTab === 'overview' && <>
+        <TestRunSummary run={run} />
+        <RunStatusView run={run} now={runNow} />
+        {/* The k6 console output and the JSON summary live in
+            their own tabs (and in the Aktionen → Roh-Zusammenfassung
+            exportieren action). Keeping them out of the Übersicht
+            tab keeps the high-level view compact — the user
+            explicitly asked to drop the long blocks from here. */}
+      </>}
+      {activeTab === 'ramp' && <>
+        <OverviewLiveRamp run={run} now={runNow} />
+        {run.startedAt && run.finishedAt && <RampSummary run={run} />}
+      </>}
+      {activeTab === 'timeline' && (() => {
+        const endpoint = run.configuration?.operations?.[0]
+        if (!endpoint) return <EmptyStateTimeline run={run} />
+        return <EndpointTimelineTab
+          method={endpoint.method}
+          path={endpoint.path}
+          apiTitle={run.configuration?.apiTitle}
+          selectedRunId={run.id}
+          // When the parent swaps in a different run, the
+          // timeline re-centres on the new run's `createdAt`
+          // (via [EndpointTimelineTab]'s internal effect) so
+          // the user lands in the middle of the chart and sees
+          // the new bar highlighted immediately. Klicks INNERHALB
+          // des Timeline-Tabs (Listeneintrag oder Gantt-Balken)
+          // ändern den aktiven Run NICHT — der Nutzer bleibt im
+          // Timeline-Tab, die Tab-Leiste verschwindet nicht.
+          // Ein Run-Wechsel passiert weiterhin ausschließlich
+          // über die [LastRunsPanel] oben.
+          focusRunCreatedAt={run.createdAt}
+        />
+      })()}
+      {activeTab === 'actions' && <AktionenTab
+        run={run}
+        onStop={handlers.onStop}
+        onRerun={handlers.onRerun}
+        onCopyRunId={handlers.onCopyRunId}
+        onCopyReportLink={handlers.onCopyReportLink}
+        onOpenReport={handlers.onOpenReport}
+        onDownloadScript={handlers.onDownloadScript}
+        onExportMetrics={handlers.onExportMetrics}
+        onRemove={handlers.onRemove}
+        onRemoveAllOtherFailed={handlers.onRemoveAllOtherFailed}
+      />}
+      {activeTab === 'console' && <ConsoleTab run={run} />}
+      {activeTab === 'thresholds' && <ThresholdsTab run={run} />}
+      {activeTab === 'config' && <ConfigTab run={run} />}
+      {activeTab === 'failure' && <FailureTab run={run} />}
+    </div>
   </>
+}
+
+/**
+ * Bundle of callbacks the Aktionen tab needs from [App]. Keeping
+ * the tab a pure presentation component means the action routing
+ * (fetch calls, clipboard, navigation) stays in the App where the
+ * REST helpers and i18n are already in scope.
+ */
+type RunActionHandlers = {
+  onStop: (force: boolean) => void | Promise<void>
+  onRerun: () => void | Promise<void>
+  onCopyRunId: () => void | Promise<void>
+  onCopyReportLink: () => void | Promise<void>
+  onOpenReport: () => void | Promise<void>
+  onDownloadScript: () => void | Promise<void>
+  onExportMetrics: () => void | Promise<void>
+  onRemove: () => void
+  onRemoveAllOtherFailed: () => void
+}
+
+// The tabs that do not yet have a dedicated body fall back to a
+// small placeholder card explaining where the data lives. The
+// placeholder keeps the layout stable while the dedicated tab
+// bodies (config, thresholds, failure) are being migrated.
+function EmptyStateTimeline({ run }: { run: TestRun }) {
+  const { language } = useLanguage()
+  return <div className="run-tab-empty">
+    <div className="run-tab-empty-title">{translate(language, 'detail.empty.noOperation.title')}</div>
+    <div className="run-tab-empty-hint">
+      {translate(language, 'detail.empty.noOperation.hint', { id: run.id.slice(0, 8) })}
+    </div>
+  </div>
+}
+
+/**
+ * Renders the Soll-vs-Ist live chart inside the Übersicht tab
+ * for in-flight runs. Pulls the planned line from the load
+ * profile and the actual line from
+ * `/api/test-runs/{id}/time-series` (sourced from H2, so the
+ * data is stable across container restarts); the polyline
+ * auto-updates as the polling loop pulls new samples.
+ */
+function RampSummary({ run }: { run: TestRun }) {
+  const { language } = useLanguage()
+  // Below the chart, surface the headline numbers so the user
+  // does not have to squint at the SVG to tell whether the run
+  // met its target. The values come from the run snapshot, not
+  // the time-series, so they are stable once the run has ended.
+  const summary = parseK6Summary(run)
+  const reqs = summary?.metrics?.['http_reqs']?.['count'] as number | undefined
+  const rps = summary?.metrics?.['http_reqs']?.['rate'] as number | undefined
+  const p95 = summary?.metrics?.['http_req_duration']?.['p(95)'] as number | undefined
+  const errorRate = summary?.metrics?.['http_req_failed']?.['value'] as number | undefined
+  const errorCount = summary?.metrics?.['http_req_failed']?.['passes'] as number | undefined
+  const profile = run.configuration?.loadProfile
+  const targetVUs = profile?.virtualUsers ?? 0
+  // The numbers are formatted with the user's locale; the
+  // labels are translated via the i18n dict.
+  return <div className="ramp-summary">
+    <div className="ramp-summary-title">{translate(language, 'detail.ramp.summary.title')}</div>
+    <div className="ramp-summary-grid">
+      <div className="ramp-summary-cell">
+        <span>{translate(language, 'detail.ramp.summary.plannedVUs')}</span>
+        <strong>{targetVUs || '–'}</strong>
+      </div>
+      <div className="ramp-summary-cell">
+        <span>{translate(language, 'detail.ramp.summary.totalRequests')}</span>
+        <strong>{reqs != null ? reqs.toLocaleString(language) : '–'}</strong>
+        {rps != null && <small>{translate(language, 'detail.ramp.summary.totalRequestsPerSec', { rps: rps.toFixed(1) })}</small>}
+      </div>
+      <div className="ramp-summary-cell">
+        <span>{translate(language, 'detail.ramp.summary.p95')}</span>
+        <strong>{p95 != null ? `${Math.round(p95)} ms` : '–'}</strong>
+        <small>{translate(language, 'detail.ramp.summary.p95.threshold')}</small>
+      </div>
+      <div className="ramp-summary-cell">
+        <span>{translate(language, 'detail.ramp.summary.errorRate')}</span>
+        <strong style={{ color: errorRate != null && errorRate >= 0.05 ? '#ff8a8a' : '#5fcb95' }}>
+          {errorRate != null ? `${(errorRate * 100).toFixed(2)} %` : '–'}
+        </strong>
+        {errorCount != null && <small>{translate(language, 'detail.ramp.summary.errorCount', { n: errorCount })}</small>}
+      </div>
+    </div>
+  </div>
+}
+
+function OverviewLiveRamp({ run, now }: { run: TestRun, now: number }) {
+  const [vus, setVus] = useState<{ t: number, value: number }[]>([])
+  const profile = run.configuration?.loadProfile ?? null
+  // The ramp chart's planned line, y-axis scale and run length
+  // all come from a single helper. Before this lived in
+  // `runStatusView.tsx` as `plannedRampPoints`, the helper only
+  // handled VU-based executors and dropped the planned line
+  // entirely for any arrival-rate profile — so the spike,
+  // stress, soak and lead-stress presets rendered an empty
+  // green line while the report (a different code path) showed
+  // the same chart correctly. [computeRampChartParams] is now
+  // the single source of truth for both surfaces.
+  const chartParams = computeRampChartParams(profile)
+  const startedAt = run.startedAt ? Date.parse(run.startedAt) : Date.now()
+  // Tracks whether the run is still in flight at the moment
+  // the effect re-runs. Captured at effect time so the cleanup
+  // function (which closes over the previous run's interval)
+  // does not see a stale value.
+  const inFlight = isInFlight(run.status)
+
+  // Fetch the time-series immediately on mount, then keep
+  // polling every 2s while the run is in flight. The data is
+  // already cached on the backend in H2 (see
+  // [H2TimeSeriesReader] + the seedPlannedRampProfile call in
+  // [LocalK6TestRunService]), so the dashboard never has to
+  // wait for k6 to write a summary to see the planned line.
+  //
+  // The effect deliberately depends on `run.id` + the in-flight
+  // status only — NOT on `now` (which ticks every 500ms). Listing
+  // `now` here would tear down the interval on every clock tick
+  // and starve the polling loop; the rendered SVG already reads
+  // `now` via its prop on each render so the elapsed-time label
+  // stays current without the effect re-firing.
+  useEffect(() => {
+    let cancelled = false
+    const tick = () => {
+      if (cancelled) return
+      fetch(`/api/test-runs/${encodeURIComponent(run.id)}/time-series`)
+        .then(r => (r.ok ? r.json() : null))
+        .then((data: { vus?: { time: string, value: number }[] } | null) => {
+          if (cancelled || !data) return
+          // Backend returns ISO-8601 timestamps; convert to
+          // epoch seconds here so the ramp chart's x-axis
+          // projection (which scales by `t * 1000`) does not
+          // blow up on `NaN`. See [vuSamplesToEpochSeconds].
+          setVus(vuSamplesToEpochSeconds(data.vus ?? []))
+        })
+        .catch(() => { /* ignore transient errors */ })
+    }
+    tick()
+    if (!inFlight) return () => { cancelled = true }
+    const timer = window.setInterval(tick, 2000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [run.id, inFlight])
+
+  // The ramp chart needs both a target value (VUs or RPS, to
+  // anchor the y-axis) and a planned duration (to anchor the
+  // x-axis). A run without a load profile OR a profile whose
+  // chart unit is `none` (e.g. shared-iterations) cannot
+  // produce a meaningful planned line, so we render an
+  // explicit empty state instead. The measured line still
+  // shows up as soon as the polling loop delivers its first
+  // sample — the empty state is only about the planned
+  // reference.
+  if (!profile || chartParams.unit === 'none' || chartParams.targetValue <= 0) {
+    return <div className="run-tab-empty">
+      <div className="run-tab-empty-title">Keine Auslastungs-Daten</div>
+      <div className="run-tab-empty-hint">
+        Für diesen Lauf ist kein Last-Profil mit Ziel-VUs oder Ziel-Rate konfiguriert. Sobald ein Profil mit einem vorhersagbaren Soll-Verlauf existiert, zeigt dieser Tab die geplante und gemessene Kurve.
+      </div>
+    </div>
+  }
+  // The H2 samples carry absolute epoch *seconds* (see
+  // [H2TimeSeriesReader] + the seed step in [LocalK6TestRunService]).
+  // [LiveRampChart] expects the polyline in [RampPoint] form
+  // where `t` is "seconds since run start" — convert the epoch
+  // timestamps back into the same offset space the planned line
+  // uses, so the two polylines line up on the SVG.
+  const startedAtSeconds = Math.floor(startedAt / 1000)
+  const actualInWindow = vus
+    .map(p => ({ t: p.t - startedAtSeconds, planned: NaN, actual: p.value }))
+    .filter(p => p.t >= -1 && p.t <= chartParams.totalDuration + 1)
+  const windowStart = startedAt
+  const windowEnd = startedAt + chartParams.totalDuration * 1000
+  return <div style={{ marginTop: 14 }}>
+    <LiveRampChart
+      planned={chartParams.planned}
+      actual={actualInWindow}
+      totalDurationSeconds={chartParams.totalDuration}
+      elapsedSeconds={(now - startedAt) / 1000}
+      targetValue={chartParams.targetValue}
+      unit={chartParams.unit}
+      windowStartMs={windowStart}
+      windowEndMs={windowEnd}
+    />
+  </div>
 }
 
 type TestRunSummaryProps = {

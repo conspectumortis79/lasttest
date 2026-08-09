@@ -1,15 +1,32 @@
 package de.lasttest.demo
 
+import de.lasttest.domain.DemoRequestLogEntity
+import de.lasttest.domain.DemoRequestLogRepository
+import org.springframework.data.domain.Example
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+import org.springframework.data.domain.Sort
 import java.time.Instant
+import java.util.Optional
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class RingBufferDemoRequestLogTest {
+    /**
+     * No-op repository used so the tests do not need an H2 data
+     * source. Every `save()` call is a pure in-memory operation;
+     * the contract under test is the ring buffer itself, not the
+     * persistence layer.
+     */
+    private val noopRepository = de.lasttest.domain.InMemoryDemoRequestLogRepository()
+
+    private fun newLog(): RingBufferDemoRequestLog = RingBufferDemoRequestLog(noopRepository)
+
     @Test
     fun `snapshot on an empty log returns an empty list`() {
-        val log = RingBufferDemoRequestLog()
+        val log = newLog()
 
         assertEquals(emptyList(), log.snapshot(runId = null, limit = 10))
         assertEquals(emptyList(), log.snapshot(runId = "any", limit = 10))
@@ -17,7 +34,7 @@ class RingBufferDemoRequestLogTest {
 
     @Test
     fun `snapshot returns the entries newest first`() {
-        val log = RingBufferDemoRequestLog()
+        val log = newLog()
         log.record(entry("1", runId = "r"))
         log.record(entry("2", runId = "r"))
         log.record(entry("3", runId = "r"))
@@ -31,7 +48,7 @@ class RingBufferDemoRequestLogTest {
 
     @Test
     fun `snapshot filters by runId and leaves non-matching entries out`() {
-        val log = RingBufferDemoRequestLog()
+        val log = newLog()
         log.record(entry("1", runId = "a"))
         log.record(entry("2", runId = "b"))
         log.record(entry("3", runId = "a"))
@@ -44,7 +61,7 @@ class RingBufferDemoRequestLogTest {
 
     @Test
     fun `snapshot clamps the limit to the buffer capacity`() {
-        val log = RingBufferDemoRequestLog()
+        val log = newLog()
         repeat(10) { index -> log.record(entry("e$index", runId = "r")) }
 
         val snapshot = log.snapshot(runId = null, limit = 999_999)
@@ -57,7 +74,7 @@ class RingBufferDemoRequestLogTest {
 
     @Test
     fun `snapshot returns at most the requested limit`() {
-        val log = RingBufferDemoRequestLog()
+        val log = newLog()
         repeat(10) { index -> log.record(entry("e$index", runId = "r")) }
 
         val snapshot = log.snapshot(runId = null, limit = 3)
@@ -68,7 +85,7 @@ class RingBufferDemoRequestLogTest {
 
     @Test
     fun `ring buffer drops the oldest entry when full`() {
-        val log = RingBufferDemoRequestLog()
+        val log = newLog()
         // Fill the buffer past its capacity so the oldest entry has
         // to be evicted.
         repeat(RingBufferDemoRequestLog.MAX_ENTRIES + 50) { index ->
@@ -89,7 +106,7 @@ class RingBufferDemoRequestLogTest {
 
     @Test
     fun `snapshot rejects non-positive limit values`() {
-        val log = RingBufferDemoRequestLog()
+        val log = newLog()
         log.record(entry("1", runId = "r"))
 
         // Defensive contract: a malformed query string on the wire
@@ -104,7 +121,7 @@ class RingBufferDemoRequestLogTest {
 
     @Test
     fun `clear empties the buffer so the next snapshot is empty`() {
-        val log = RingBufferDemoRequestLog()
+        val log = newLog()
         log.record(entry("1", runId = "r"))
         log.record(entry("2", runId = "r"))
 
@@ -119,7 +136,7 @@ class RingBufferDemoRequestLogTest {
         // thread, so writes must be safe under concurrent load.
         // 200 threads each insert one entry; every entry must be
         // recoverable.
-        val log = RingBufferDemoRequestLog()
+        val log = newLog()
         val threads =
             (0 until 200).map { index ->
                 Thread { log.record(entry("e$index", runId = "r")) }

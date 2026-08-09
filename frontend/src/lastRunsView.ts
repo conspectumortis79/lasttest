@@ -65,9 +65,29 @@ export function statusBadgeLabel(status: string, lang: SupportedLanguage): strin
 export function runDisplayName(run: TestRun): string {
   const operations = run.configuration?.operations ?? []
   if (operations.length === 0) return run.id.slice(0, 8)
-  const method = operations[0]?.method ?? '–'
+  // `||` (not `??`) so an empty-string method also surfaces the
+  // dash — synthetic fixtures occasionally ship with
+  // `method: ''` and we would otherwise render " /path".
+  const method = operations[0]?.method || '–'
   const path = operations.map(op => op.path).join(', ')
   return `${method} ${path}`
+}
+
+/**
+ * Returns the (method, path) tuple that uniquely identifies the
+ * primary endpoint a run exercised. Used by [LastRunsPanel] to
+ * look up the per-endpoint × N statistics from
+ * [useOperationStats]. Returns empty strings when the run has no
+ * configuration attached (synthetic / unknown runs); the caller
+ * treats those as "untested" rather than "× 0".
+ */
+export function operationMethodAndPath(run: TestRun): { method: string, path: string } {
+  const operations = run.configuration?.operations ?? []
+  if (operations.length === 0) return { method: '', path: '' }
+  return {
+    method: operations[0]?.method ?? '',
+    path: operations[0]?.path ?? '',
+  }
 }
 
 /**

@@ -2,10 +2,13 @@ package de.lasttest.api
 
 import de.lasttest.demo.DemoSpecificationProvider
 import de.lasttest.domain.InvalidSpecificationException
+import de.lasttest.domain.OperationStatisticsRepository
 import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
+import de.lasttest.domain.TestRunRepository
 import de.lasttest.domain.TestRunService
 import de.lasttest.domain.TimeSeriesReader
+import de.lasttest.domain.toTestRun
 import jakarta.validation.Valid
 import org.springframework.http.ContentDisposition
 import org.springframework.http.HttpHeaders
@@ -31,6 +34,8 @@ class LastTestController(
     private val demoSpecificationProvider: DemoSpecificationProvider,
     private val remoteFetcher: RemoteSpecificationFetcher,
     private val timeSeriesReader: TimeSeriesReader,
+    private val statisticsRepository: OperationStatisticsRepository,
+    private val runRepository: TestRunRepository,
 ) {
     @GetMapping("/demo-specification", produces = [DEMO_SPECIFICATION_MEDIA_TYPE])
     fun demoSpecification(): String = demoSpecificationProvider.load()
@@ -84,7 +89,12 @@ class LastTestController(
     ): ResponseEntity<TimeSeriesResponse> {
         val run = testRuns.find(id) ?: return ResponseEntity.notFound().build()
         val started = run.startedAt ?: return ResponseEntity.notFound().build()
-        val finished = run.finishedAt ?: return ResponseEntity.notFound().build()
+        // The dashboard's ramp chart needs live samples *while*
+        // the run is still going, so falling back to "now" when
+        // [finishedAt] is missing is what makes the chart tick
+        // instead of returning 404 to the polling client. Only an
+        // unknown id (or a never-started run) yields 404.
+        val finished = run.finishedAt ?: java.time.Instant.now().toString()
         val vus =
             timeSeriesReader
                 .readVusOverTime(id, started, finished)
@@ -151,6 +161,78 @@ class LastTestController(
         // 202 Accepted so the caller knows the k6 process has not
         // finished spawning yet.
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(newRun)
+    }
+
+    /**
+     * Returns the denormalised "× N" counter for every endpoint the
+     * server has seen. The dashboard polls this endpoint on the same
+     * cadence as `/api/test-runs` and renders the result next to
+     * each operation card in the left list. The list is ordered by
+     * total test count descending so the most-tested endpoints are
+     * at the top.
+     */
+    @GetMapping("/operations/stats")
+    fun operationStats(): ResponseEntity<List<OperationStatsResponse>> =
+        ResponseEntity.ok(
+            statisticsRepository.findAllByOrderByTestCountDesc().map { entity ->
+                OperationStatsResponse(
+                    method = entity.method,
+                    path = entity.path,
+                    testCount = entity.testCount,
+                    lastStatus = entity.lastStatus,
+                    lastTestAt = entity.lastTestAt.toString(),
+                    lastRunId = entity.lastRunId,
+                )
+            },
+        )
+
+    /**
+     * Returns the most recent runs of a single endpoint, ordered by
+     * `createdAt` descending. The per-endpoint timeline tab on the
+     * right panel calls this when the user clicks a different
+     * endpoint so it can re-render its Gantt chart against the
+     * freshest data.
+     *
+     * The endpoint is keyed by query parameters rather than path
+     * variables because Spring's path-variable matcher refuses to
+     * decode `%2F` sequences in `{path:.*}` placeholders (a
+     * 400 Bad Request from Tomcat) — endpoints like
+     * `/api/products/{id}` would otherwise need to be URL-encoded
+     * in a way that the dashboard cannot do reliably. Query
+     * parameters side-step the issue without changing the
+     * `TestRunRepository` signature.
+     */
+    @GetMapping("/operations/runs")
+    fun runsForOperation(
+        @RequestParam(name = "method", required = true) method: String,
+        @RequestParam(name = "path", required = true) path: String,
+    ): ResponseEntity<List<TestRun>> =
+        ResponseEntity.ok(
+            runRepository
+                .findByOperationMethodAndOperationPathOrderByCreatedAtDesc(method, path)
+                .map { it.toTestRun() },
+        )
+
+    /**
+     * Returns a deep-link to the full k6 report for a given run.
+     * The dashboard renders a button next to "Im neuen Tab öffnen"
+     * that points at this URL; the button is hidden on the
+     * dashboard itself (the report link duplicates the same tab
+     * the user is already on) and shown on the multi-run list view
+     * where the user has to switch contexts to see the details.
+     */
+    @GetMapping("/test-runs/{id}/report-link")
+    fun reportLink(
+        @PathVariable id: String,
+    ): ResponseEntity<ReportLinkResponse> {
+        val run = testRuns.find(id) ?: return ResponseEntity.notFound().build()
+        return ResponseEntity.ok(
+            ReportLinkResponse(
+                runId = run.id,
+                url = "/?report=${java.net.URLEncoder.encode(run.id, Charsets.UTF_8)}",
+                isComplete = run.status == de.lasttest.api.TestRunStatus.COMPLETED,
+            ),
+        )
     }
 
     @ExceptionHandler(InvalidSpecificationException::class, IllegalArgumentException::class)

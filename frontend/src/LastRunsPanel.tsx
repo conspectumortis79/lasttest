@@ -15,6 +15,14 @@
 // `lastRunsView.ts` (status → CSS class, meta line, duration and
 // relative-time formatters) so the React tree stays small and
 // the heavy lifting stays unit-testable under `node:test`.
+//
+// Since the per-endpoint "× N" statistics release, every row
+// also renders a small badge next to the operation name
+// showing the total number of times that endpoint has been
+// tested. The badge is data-driven by [useOperationStats] and
+// is a no-op (renders nothing) until the first response
+// arrives — so the panel still works on cold start, offline,
+// or when the backend is down.
 
 import { useLanguage } from './useLanguage.tsx'
 import { translate } from './i18n.ts'
@@ -24,12 +32,14 @@ import { isInFlight, sortRunsByCreatedAt } from './runDashboard.ts'
 import {
   durationFor,
   metaLineFor,
+  operationMethodAndPath,
   relativeWhenFor,
   runDisplayName,
   statusBadgeClass,
   statusBadgeLabel,
   statusDotClass,
 } from './lastRunsView.ts'
+import { findTestCount, useOperationStats } from './useOperationStats.ts'
 
 type LastRunsPanelProps = {
   runs: Record<string, TestRun>
@@ -50,6 +60,10 @@ type LastRunsPanelProps = {
 export function LastRunsPanel({ runs, activeRunId, now, onSelect, onContextMenu }: LastRunsPanelProps) {
   const { language } = useLanguage()
   const ordered = sortRunsByCreatedAt(runs)
+  // Polls /api/operations/stats in the background. The data
+  // flows down into [LastRunsRow] via the `stats` prop so each
+  // row can render its own × N badge without re-fetching.
+  const { stats } = useOperationStats({ intervalMs: 5_000 })
 
   if (ordered.length === 0) {
     return (
@@ -82,6 +96,7 @@ export function LastRunsPanel({ runs, activeRunId, now, onSelect, onContextMenu 
             run={run}
             now={now}
             isActive={run.id === activeRunId}
+            stats={stats}
             onSelect={() => onSelect(run.id)}
             onContextMenu={event => onContextMenu(event, run.id)}
           />
@@ -95,16 +110,24 @@ type LastRunsRowProps = {
   run: TestRun
   now: number
   isActive: boolean
+  stats: import('./useOperationStats.ts').OperationStats[]
   onSelect: () => void
   onContextMenu: (event: React.MouseEvent) => void
 }
 
-function LastRunsRow({ run, now, isActive, onSelect, onContextMenu }: LastRunsRowProps) {
+function LastRunsRow({ run, now, isActive, stats, onSelect, onContextMenu }: LastRunsRowProps) {
   const { language } = useLanguage()
   const elapsed = runElapsedSeconds(run, now)
   const inFlight = isInFlight(run.status)
   const badgeClass = statusBadgeClass(run.status)
   const dotClass = statusDotClass(run.status)
+  // Look up the per-endpoint × N count. The hook returns an
+  // empty list on cold start, so [findTestCount] gives 0 by
+  // default — meaning "neu" (untested) is the safe rendering
+  // until the first response arrives.
+  const { method, path } = operationMethodAndPath(run)
+  const testCount = method ? findTestCount(stats, method, path) : 0
+  const countLabel = testCount > 0 ? `× ${testCount}` : translate(language, 'lastRuns.untested')
   return (
     <button
       type="button"
@@ -123,9 +146,19 @@ function LastRunsRow({ run, now, isActive, onSelect, onContextMenu }: LastRunsRo
       <div className="run-list-main">
         <div className="run-list-name">
           <span className="run-list-identifier">{runDisplayName(run)}</span>
+          <span
+            className={`run-list-test-count ${testCount === 0 ? 'untested' : ''}`}
+            title={
+              testCount > 0
+                ? translate(language, 'lastRuns.tested.title', { n: testCount })
+                : translate(language, 'lastRuns.untested.title')
+            }
+          >
+            {countLabel}
+          </span>
           <span className={`status-badge ${badgeClass}`}>{statusBadgeLabel(run.status, language)}</span>
           <span className="run-list-hint" aria-hidden="true">
-            <kbd>Rechtsklick</kbd>
+            <kbd>{translate(language, 'lastRuns.rightClick')}</kbd>
             {translate(language, 'lastRuns.forActions')}
           </span>
         </div>

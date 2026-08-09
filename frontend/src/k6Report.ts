@@ -146,13 +146,14 @@ export function renderPayloadStrategyHelp(strategy: ReportPayloadStrategy | stri
 // normalising `type` below ensures that all downstream switch
 // statements can work case-insensitively.
 export type ReportLoadProfile = {
-  type: 'ramping-vus' | 'RAMPING_VUS' | 'constant-vus' | 'CONSTANT_VUS' | 'shared-iterations' | 'SHARED_ITERATIONS' | 'constant-arrival-rate' | 'CONSTANT_ARRIVAL_RATE'
+  type: 'ramping-vus' | 'RAMPING_VUS' | 'constant-vus' | 'CONSTANT_VUS' | 'shared-iterations' | 'SHARED_ITERATIONS' | 'constant-arrival-rate' | 'CONSTANT_ARRIVAL_RATE' | 'ramping-arrival-rate' | 'RAMPING_ARRIVAL_RATE'
   virtualUsers?: number
   durationSeconds?: number
   iterations?: number
   startVUs?: number
   stages?: ReportLoadStage[]
   rate?: number
+  startRate?: number
   timeUnitSeconds?: number
   preAllocatedVUs?: number
   maxVUs?: number
@@ -450,6 +451,8 @@ export function profileTotalSeconds(profile: ReportLoadProfile): number | undefi
     case 'constant-arrival-rate':
       return profile.durationSeconds ?? 0
     case 'ramping-vus':
+      return (profile.stages ?? []).reduce((sum, stage) => sum + stage.durationSeconds, 0)
+    case 'ramping-arrival-rate':
       return (profile.stages ?? []).reduce((sum, stage) => sum + stage.durationSeconds, 0)
     case 'shared-iterations':
       return undefined
@@ -777,6 +780,27 @@ function buildSollPoints(profile: ReportLoadProfile): Array<{ seconds: number, v
       const stages = profile.stages ?? []
       let cursor = 0
       let previous = profile.startVUs ?? 0
+      for (const stage of stages) {
+        points.push({ seconds: cursor, value: previous })
+        cursor += stage.durationSeconds
+        points.push({ seconds: cursor, value: stage.target })
+        previous = stage.target
+      }
+      return points
+    }
+    case 'ramping-arrival-rate': {
+      // Same shape as `ramping-vus` but the y-axis unit is
+      // requests/second, not VUs. The previous report left
+      // this executor unhandled so the chart dropped the
+      // target line entirely; with it, the user can finally
+      // compare a spike/stress/soak test (lead-stress is the
+      // main preset that uses this executor) against the
+      // measured RPS — which is the whole point of using
+      // arrival-rate in the first place.
+      const points: Array<{ seconds: number, value: number }> = []
+      const stages = profile.stages ?? []
+      let cursor = 0
+      let previous = profile.startRate ?? 0
       for (const stage of stages) {
         points.push({ seconds: cursor, value: previous })
         cursor += stage.durationSeconds
