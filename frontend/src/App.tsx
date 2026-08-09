@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useAutoSizeTextarea } from './useAutoSizeTextarea.ts'
 import {
   cancellableRunIds,
@@ -9,6 +9,7 @@ import {
   pickActiveRunIdAfterStart,
   removeAllOtherFailed,
   removeRun,
+  showsStatusPill,
 } from './runDashboard.ts'
 import {
   detectTerminalTransitions,
@@ -32,8 +33,9 @@ import {
   summarizeFailure,
   type TestRun,
 } from './k6Report.ts'
-import { buildRunMenuItems, type MenuItem } from './runMenuItems.ts'
-import { MenuItemIcon } from './runMenuIcons.tsx'
+import type { MenuItem } from './runMenuItems.ts'
+import { RunContextMenu } from './RunContextMenu.tsx'
+import { dispatchRunMenuAction, type RunActionHandlers } from './runActionHandlers.ts'
 import { TopToolbar, type ToolbarDocId } from './TopToolbar.tsx'
 import { SettingsDrawer } from './SettingsDrawer.tsx'
 import { DocPopup } from './DocPopup.tsx'
@@ -44,7 +46,7 @@ import { translate, formatters, type SupportedLanguage } from './i18n.ts'
 import { RunStatusView, LiveBanner, AktionenTab, LiveRampChart } from './runStatusView.tsx'
 import { vuSamplesToEpochSeconds } from './timeSeries.ts'
 import { computeRampChartParams } from './liveRampChartLayout.ts'
-import { ConsoleTab, ThresholdsTab, ConfigTab, FailureTab } from './runDetailTabs.tsx'
+import { ConsoleTab, ThresholdsTab, ConfigTab, FailureTab, K6ScriptTab } from './runDetailTabs.tsx'
 import { EndpointTimelineTab } from './EndpointTimelineTab.tsx'
 import { useRunClock, useLiveClock } from './useRunClock.ts'
 import { LoadProfileEditor } from './LoadProfileEditor.tsx'
@@ -738,77 +740,13 @@ function LoadTestApp() {
     setRunMenu({ runId, x: event.clientX, y: event.clientY })
   }
 
-  /**
-   * Routes a menu item to the matching action. Most actions are
-   // local (clipboard, navigation, state update); cancel / rerun
-   // hit the backend through `fetch`. Errors are surfaced via
-   // `runActionError` so the user sees the failure in the same
-   // banner as the rest of the dashboard.
-   */
-  async function runMenuAction(run: TestRun, item: MenuItem) {
-    setRunMenu(null)
-    switch (item.action) {
-      case 'focus':
-        setActiveRunId(run.id)
-        return
-      case 'copy-run-id':
-        await safeClipboard(run.id)
-        return
-      case 'copy-report-link': {
-        const url = `${window.location.origin}/?report=${encodeURIComponent(run.id)}`
-        await safeClipboard(url)
-        return
-      }
-      case 'open-report':
-        window.open(`/?report=${encodeURIComponent(run.id)}`, '_blank', 'noopener,noreferrer')
-        return
-      case 'export-metrics':
-        await downloadSummary(run)
-        return
-      case 'download-script':
-        await downloadScript(run)
-        return
-      case 'stop':
-        await cancelRun(run.id, false)
-        return
-      case 'force-abort':
-        await cancelRun(run.id, true)
-        return
-      case 'rerun':
-        await rerunRun(run.id)
-        return
-      case 'remove-from-view':
-        // Frontend-only cleanup: drops the clicked badge from
-        // the in-memory runs map. The implementation is shared
-        // with the inline X button on the badge (see
-        // `handleRemoveRun`) so the two affordances cannot
-        // drift apart.
-        handleRemoveRun(run.id)
-        return
-      case 'remove-all-other-failed':
-        // Bulk frontend cleanup: keeps the clicked badge but
-        // drops every other FAILED run from the in-memory map.
-        // STOPPED and ABORTED are intentionally preserved — the
-        // user asked for "failed" (the FAILED status), not for
-        // every non-success outcome. Focus is re-evaluated so
-        // the detail card survives the removal even when the
-        // previously-focused run was a different FAILED badge.
-        setRuns(current => {
-          const next = removeAllOtherFailed(current, run.id)
-          setActiveRunId(pickActiveRunId(next, activeRunId))
-          return next
-        })
-        return
-    }
-  }
-
-  async function safeClipboard(text: string) {
+  const safeClipboard = useCallback(async (text: string) => {
     try {
       await copyTextToClipboard(text)
     } catch (cause) {
       setRunActionError(cause instanceof Error ? cause.message : translate(language, 'error.copyFailed'))
     }
-  }
+  }, [language])
 
   /**
    * Downloads the k6 summary JSON for a finished/aborted run via
@@ -818,7 +756,7 @@ function LoadTestApp() {
    // is offered only when a summary is actually present so the
    // server is not pinged for nothing.
    */
-  async function downloadSummary(run: TestRun) {
+  const downloadSummary = useCallback(async (run: TestRun) => {
     // The menu only enables the export item when a summary is
     // present (see runMenuItems.ts), so we never reach this path
     // without data. Downloading the summary as a file is more
@@ -834,7 +772,19 @@ function LoadTestApp() {
     anchor.click()
     document.body.removeChild(anchor)
     URL.revokeObjectURL(url)
-  }
+  }, [])
+
+  /**
+   * Variant of [downloadSummary] that takes a run id. Looks the
+   * run up in the cached [runsRef] so callers that only have
+   * the id (right-click menus, per-run handlers) do not have
+   * to thread the full `TestRun` through their props.
+   */
+  const downloadSummaryById = useCallback(async (runId: string) => {
+    const run = runsRef.current[runId]
+    if (!run) return
+    await downloadSummary(run)
+  }, [downloadSummary])
 
   /**
    * Downloads the generated k6 script for a finished run by
@@ -845,7 +795,7 @@ function LoadTestApp() {
    * stay in sync and pick up any future server-side filename
    * change automatically.
    */
-  async function downloadScript(run: TestRun) {
+  const downloadScript = useCallback((run: TestRun) => {
     const anchor = document.createElement('a')
     anchor.href = k6ScriptUrl(run.id)
     anchor.download = k6ScriptDownloadName(run.id)
@@ -853,9 +803,19 @@ function LoadTestApp() {
     document.body.appendChild(anchor)
     anchor.click()
     document.body.removeChild(anchor)
-  }
+  }, [])
 
-  async function cancelRun(runId: string, force: boolean) {
+  /**
+   * Variant of [downloadScript] that takes a run id. The
+   * original only needs `run.id` to build the URL, so this is
+   * a one-liner — kept as a separate function so the handler
+   * bundle has a uniform `(runId) => void` signature.
+   */
+  const downloadScriptById = useCallback((runId: string) => {
+    downloadScript({ id: runId } as TestRun)
+  }, [downloadScript])
+
+  const cancelRun = useCallback(async (runId: string, force: boolean) => {
     try {
       const response = await fetch(`/api/test-runs/${encodeURIComponent(runId)}/cancel?force=${force}`, { method: 'POST' })
       if (!response.ok && response.status !== 409) {
@@ -871,7 +831,7 @@ function LoadTestApp() {
     } catch (cause) {
       setRunActionError(cause instanceof Error ? cause.message : translate(language, 'error.cancelFailedNoStatus'))
     }
-  }
+  }, [language])
 
   /**
    * Sends a graceful cancel to the backend for the given run
@@ -895,7 +855,7 @@ function LoadTestApp() {
     }
   }
 
-  async function rerunRun(runId: string) {
+  const rerunRun = useCallback(async (runId: string) => {
     try {
       const response = await fetch(`/api/test-runs/${encodeURIComponent(runId)}/rerun`, { method: 'POST' })
       if (!response.ok) {
@@ -920,7 +880,7 @@ function LoadTestApp() {
     } catch (cause) {
       setRunActionError(cause instanceof Error ? cause.message : translate(language, 'error.rerunFailedNoStatus'))
     }
-  }
+  }, [language, activeRunId])
 
   // Drops a single run from the in-memory dashboard map and
   // re-evaluates which run should keep the focus. Shared by
@@ -930,13 +890,58 @@ function LoadTestApp() {
   // comes back referentially equal and React skips the
   // re-render). The backend still holds the run; a page
   // refresh would re-hydrate it from /api/test-runs.
-  function handleRemoveRun(runId: string) {
+  const handleRemoveRun = useCallback((runId: string) => {
     setRuns(current => {
       if (current[runId] === undefined) return current
       const next = removeRun(current, runId)
       setActiveRunId(pickActiveRunId(next, activeRunId))
       return next
     })
+  }, [activeRunId])
+
+  /**
+   * Single source of truth for run-targeted actions. Every
+   * handler takes the run id explicitly so the same bundle
+   * drives the Aktionen tab in [RunDetail] (operates on the
+   * focused run) and the per-run right-click menus in the
+   * run grid / endpoint timeline (operate on whichever past
+   * run was clicked). Memoisd so child components that depend
+   * on handler identity (e.g. inside `useEffect`) do not
+   * re-fire on every parent render.
+   *
+   * Lives after every underlying callback because `const`
+   * declarations have a temporal-dead-zone; referencing
+   * `cancelRun` / `rerunRun` etc. before they are
+   * initialised would throw at first render.
+   */
+  const runHandlers = useMemo<RunActionHandlers>(() => ({
+    onFocusRun: (runId) => setActiveRunId(runId),
+    onStop: (runId, force) => cancelRun(runId, force),
+    onRerun: (runId) => rerunRun(runId),
+    onCopyRunId: (runId) => safeClipboard(runId),
+    onCopyReportLink: (runId) => safeClipboard(`${window.location.origin}/?report=${encodeURIComponent(runId)}`),
+    onOpenReport: (runId) => { window.open(`/?report=${encodeURIComponent(runId)}`, '_blank', 'noopener,noreferrer') },
+    onDownloadScript: (runId) => downloadScriptById(runId),
+    onExportMetrics: (runId) => downloadSummaryById(runId),
+    onRemove: (runId) => handleRemoveRun(runId),
+    onRemoveAllOtherFailed: (runId) => setRuns(current => {
+      const next = removeAllOtherFailed(current, runId)
+      setActiveRunId(pickActiveRunId(next, activeRunId))
+      return next
+    }),
+  }), [cancelRun, rerunRun, safeClipboard, downloadScriptById, downloadSummaryById, handleRemoveRun, activeRunId])
+
+  /**
+   * Closes the overview-badge menu and dispatches the picked
+   * item to the matching handler in [runHandlers]. The actual
+   * action routing lives in [dispatchRunMenuAction] so the
+   * overview badge menu and the per-endpoint timeline menu
+   * share one implementation. We close the menu synchronously
+   * here (a UI concern) and let the handler complete async.
+   */
+  async function runMenuAction(run: TestRun, item: MenuItem) {
+    setRunMenu(null)
+    await dispatchRunMenuAction(item, runHandlers, run.id)
   }
 
   return <>
@@ -1261,21 +1266,12 @@ function LoadTestApp() {
       {run && <RunDetail
         run={run}
         runNow={runNow}
-        handlers={{
-          onStop: async (force) => { await cancelRun(run.id, force) },
-          onRerun: () => rerunRun(run.id),
-          onCopyRunId: () => safeClipboard(run.id),
-          onCopyReportLink: () => safeClipboard(`${window.location.origin}/?report=${encodeURIComponent(run.id)}`),
-          onOpenReport: () => { window.open(`/?report=${encodeURIComponent(run.id)}`, '_blank', 'noopener,noreferrer') },
-          onDownloadScript: () => downloadScript(run),
-          onExportMetrics: () => downloadSummary(run),
-          onRemove: () => handleRemoveRun(run.id),
-          onRemoveAllOtherFailed: () => setRuns(current => {
-            const next = removeAllOtherFailed(current, run.id)
-            setActiveRunId(pickActiveRunId(next, activeRunId))
-            return next
-          }),
-        }}
+        handlers={runHandlers}
+        // Forward the full dashboard runs map so the per-endpoint
+        // timeline tab can render the right-click menu and disable
+        // the "remove all other failed" entry when no other
+        // FAILED badge is in the dashboard.
+        runs={runs}
         // Forward the parent-owned refresh counter so the
         // per-endpoint timeline tab inside <RunDetail> can
         // re-fetch its run list whenever a new run is started
@@ -1354,9 +1350,9 @@ function LoadTestApp() {
  * banner, the RunProgress grid, the metric cards and the
  * console/summary extras in one place when they need them all.
  */
-type DetailTabId = 'overview' | 'ramp' | 'timeline' | 'actions' | 'console' | 'thresholds' | 'config' | 'failure'
+type DetailTabId = 'overview' | 'script' | 'timeline' | 'actions' | 'console' | 'thresholds' | 'config' | 'failure'
 
-function RunDetail({ run, runNow, handlers, timelineRefreshTick }: { run: TestRun, runNow: number, handlers: RunActionHandlers, timelineRefreshTick: number }) {
+function RunDetail({ run, runNow, handlers, timelineRefreshTick, runs }: { run: TestRun, runNow: number, handlers: RunActionHandlers, timelineRefreshTick: number, runs: Record<string, TestRun> }) {
   const { language } = useLanguage()
   const [activeTab, setActiveTab] = useState<DetailTabId>('overview')
   // Wall-clock scroll position the user is reading at, captured
@@ -1475,14 +1471,6 @@ function RunDetail({ run, runNow, handlers, timelineRefreshTick }: { run: TestRu
         onClick={() => selectTab('overview')}>
         {translate(language, 'detail.tab.overview')}
       </button>
-      <button type="button" role="tab" aria-selected={activeTab === 'ramp'}
-        className={`run-detail-tab ${activeTab === 'ramp' ? 'active' : ''}`}
-        onMouseEnter={onPointerEnter}
-        onFocus={onPointerEnter}
-        onMouseDown={onTabMouseDown}
-        onClick={() => selectTab('ramp')}>
-        {translate(language, 'detail.tab.ramp')}
-      </button>
       <button type="button" role="tab" aria-selected={activeTab === 'timeline'}
         className={`run-detail-tab ${activeTab === 'timeline' ? 'active' : ''}`}
         onMouseEnter={onPointerEnter}
@@ -1531,6 +1519,23 @@ function RunDetail({ run, runNow, handlers, timelineRefreshTick }: { run: TestRu
         onClick={() => selectTab('failure')}>
         {translate(language, 'detail.tab.failure')} {failed && <span className="badge alert">!</span>}
       </button>
+      {/* The k6 Script tab is intentionally placed *directly*
+          to the left of the external "K6 Bericht öffnen" link
+          (the open-in-new-tab affordance). The two are
+          conceptually paired — the script tab is for users
+          who want to run the test outside lasttest, the
+          external link is for users who want the printable
+          web report — so they sit next to each other at the
+          end of the tab strip. */}
+      <button type="button" role="tab" aria-selected={activeTab === 'script'}
+        className={`run-detail-tab ${activeTab === 'script' ? 'active' : ''}`}
+        onMouseEnter={onPointerEnter}
+        onFocus={onPointerEnter}
+        onMouseDown={onTabMouseDown}
+        title={translate(language, 'detail.tab.script.title')}
+        onClick={() => selectTab('script')}>
+        {translate(language, 'detail.tab.script')}
+      </button>
       <button
         type="button"
         role="tab"
@@ -1547,16 +1552,25 @@ function RunDetail({ run, runNow, handlers, timelineRefreshTick }: { run: TestRu
       {activeTab === 'overview' && <>
         <TestRunSummary run={run} />
         <RunStatusView run={run} now={runNow} />
+        {/* Always surface the ramp chart here on the Übersicht
+            tab. The chart shows both the planned and the
+            measured curve over the whole run lifetime, so it is
+            useful before the run starts (planned only), while
+            it is running (planned + live measured), and after
+            it has finished (planned + frozen measured). The
+            dedicated Auslastung tab was removed; this is now
+            the only place the live chart renders.
+            [OverviewLiveRamp] itself only polls /time-series
+            while the run is in flight, so a finished run does
+            not keep firing requests in the background. */}
+        <OverviewLiveRamp run={run} now={runNow} />
         {/* The k6 console output and the JSON summary live in
             their own tabs (and in the Aktionen → Roh-Zusammenfassung
             exportieren action). Keeping them out of the Übersicht
             tab keeps the high-level view compact — the user
             explicitly asked to drop the long blocks from here. */}
       </>}
-      {activeTab === 'ramp' && <>
-        <OverviewLiveRamp run={run} now={runNow} />
-        {run.startedAt && run.finishedAt && <RampSummary run={run} />}
-      </>}
+      {activeTab === 'script' && <K6ScriptTab run={run} />}
       {activeTab === 'timeline' && (() => {
         const endpoint = run.configuration?.operations?.[0]
         if (!endpoint) return <EmptyStateTimeline run={run} />
@@ -1565,6 +1579,16 @@ function RunDetail({ run, runNow, handlers, timelineRefreshTick }: { run: TestRu
           path={endpoint.path}
           apiTitle={run.configuration?.apiTitle}
           selectedRunId={run.id}
+          // Forward the right-click menu wiring so list items
+          // and Gantt bars open the same context menu as the
+          // overview badges. [handlers] is memoisd in
+          // [LoadTestApp] so a new bundle is only produced when
+          // an underlying callback (e.g. `cancelRun`) changes.
+          // [runs] is the full dashboard map — needed so the
+          // menu can disable "remove all other failed" when
+          // there is nothing else to remove.
+          handlers={handlers}
+          runs={runs}
           // Parent-owned refresh signal: the tab re-fetches its
           // run list whenever the counter changes so a new
           // (or re-run) test shows up immediately in the Gantt
@@ -1608,22 +1632,13 @@ function RunDetail({ run, runNow, handlers, timelineRefreshTick }: { run: TestRu
 }
 
 /**
- * Bundle of callbacks the Aktionen tab needs from [App]. Keeping
- * the tab a pure presentation component means the action routing
- * (fetch calls, clipboard, navigation) stays in the App where the
- * REST helpers and i18n are already in scope.
+ * Bundle of callbacks for actions that target a specific run.
+ * Re-exported here so existing imports keep working without
+ * pulling a new module into the public surface. The canonical
+ * type lives in [runActionHandlers.ts] so child components can
+ * import it without a circular dependency on `App.tsx`.
  */
-type RunActionHandlers = {
-  onStop: (force: boolean) => void | Promise<void>
-  onRerun: () => void | Promise<void>
-  onCopyRunId: () => void | Promise<void>
-  onCopyReportLink: () => void | Promise<void>
-  onOpenReport: () => void | Promise<void>
-  onDownloadScript: () => void | Promise<void>
-  onExportMetrics: () => void | Promise<void>
-  onRemove: () => void
-  onRemoveAllOtherFailed: () => void
-}
+export type { RunActionHandlers } from './runActionHandlers.ts'
 
 // The tabs that do not yet have a dedicated body fall back to a
 // small placeholder card explaining where the data lives. The
@@ -1647,50 +1662,6 @@ function EmptyStateTimeline({ run }: { run: TestRun }) {
  * data is stable across container restarts); the polyline
  * auto-updates as the polling loop pulls new samples.
  */
-function RampSummary({ run }: { run: TestRun }) {
-  const { language } = useLanguage()
-  // Below the chart, surface the headline numbers so the user
-  // does not have to squint at the SVG to tell whether the run
-  // met its target. The values come from the run snapshot, not
-  // the time-series, so they are stable once the run has ended.
-  const summary = parseK6Summary(run)
-  const reqs = summary?.metrics?.['http_reqs']?.['count'] as number | undefined
-  const rps = summary?.metrics?.['http_reqs']?.['rate'] as number | undefined
-  const p95 = summary?.metrics?.['http_req_duration']?.['p(95)'] as number | undefined
-  const errorRate = summary?.metrics?.['http_req_failed']?.['value'] as number | undefined
-  const errorCount = summary?.metrics?.['http_req_failed']?.['passes'] as number | undefined
-  const profile = run.configuration?.loadProfile
-  const targetVUs = profile?.virtualUsers ?? 0
-  // The numbers are formatted with the user's locale; the
-  // labels are translated via the i18n dict.
-  return <div className="ramp-summary">
-    <div className="ramp-summary-title">{translate(language, 'detail.ramp.summary.title')}</div>
-    <div className="ramp-summary-grid">
-      <div className="ramp-summary-cell">
-        <span>{translate(language, 'detail.ramp.summary.plannedVUs')}</span>
-        <strong>{targetVUs || '–'}</strong>
-      </div>
-      <div className="ramp-summary-cell">
-        <span>{translate(language, 'detail.ramp.summary.totalRequests')}</span>
-        <strong>{reqs != null ? reqs.toLocaleString(language) : '–'}</strong>
-        {rps != null && <small>{translate(language, 'detail.ramp.summary.totalRequestsPerSec', { rps: rps.toFixed(1) })}</small>}
-      </div>
-      <div className="ramp-summary-cell">
-        <span>{translate(language, 'detail.ramp.summary.p95')}</span>
-        <strong>{p95 != null ? `${Math.round(p95)} ms` : '–'}</strong>
-        <small>{translate(language, 'detail.ramp.summary.p95.threshold')}</small>
-      </div>
-      <div className="ramp-summary-cell">
-        <span>{translate(language, 'detail.ramp.summary.errorRate')}</span>
-        <strong style={{ color: errorRate != null && errorRate >= 0.05 ? '#ff8a8a' : '#5fcb95' }}>
-          {errorRate != null ? `${(errorRate * 100).toFixed(2)} %` : '–'}
-        </strong>
-        {errorCount != null && <small>{translate(language, 'detail.ramp.summary.errorCount', { n: errorCount })}</small>}
-      </div>
-    </div>
-  </div>
-}
-
 function OverviewLiveRamp({ run, now }: { run: TestRun, now: number }) {
   const [vus, setVus] = useState<{ t: number, value: number }[]>([])
   const profile = run.configuration?.loadProfile ?? null
@@ -1704,7 +1675,15 @@ function OverviewLiveRamp({ run, now }: { run: TestRun, now: number }) {
   // the same chart correctly. [computeRampChartParams] is now
   // the single source of truth for both surfaces.
   const chartParams = computeRampChartParams(profile)
-  const startedAt = run.startedAt ? Date.parse(run.startedAt) : Date.now()
+  // While the run is still QUEUED the backend has not written a
+  // [startedAt] timestamp yet, so we cannot compute a real
+  // elapsed duration. Falling back to [Date.now()] here would
+  // make `now - startedAt` hover around 0 and [formatDurationSeconds]
+  // render "00:00" — which flickers with every 500 ms tick because
+  // each render captures a fresh [Date.now()]. Keep the value
+  // `undefined` in that window so the chart shows the same "–"
+  // dash as every other queued-only surface.
+  const startedAtMs = run.startedAt ? Date.parse(run.startedAt) : null
   // Tracks whether the run is still in flight at the moment
   // the effect re-runs. Captured at effect time so the cleanup
   // function (which closes over the previous run's interval)
@@ -1770,18 +1749,26 @@ function OverviewLiveRamp({ run, now }: { run: TestRun, now: number }) {
   // where `t` is "seconds since run start" — convert the epoch
   // timestamps back into the same offset space the planned line
   // uses, so the two polylines line up on the SVG.
-  const startedAtSeconds = Math.floor(startedAt / 1000)
-  const actualInWindow = vus
-    .map(p => ({ t: p.t - startedAtSeconds, planned: NaN, actual: p.value }))
-    .filter(p => p.t >= -1 && p.t <= chartParams.totalDuration + 1)
-  const windowStart = startedAt
-  const windowEnd = startedAt + chartParams.totalDuration * 1000
+  //
+  // The QUEUED path is handled defensively: `startedAtMs` is
+  // `null`, `vus` is empty, and the planned line is the only
+  // thing on the canvas anyway. Anchoring the actual-line window
+  // at the current tick would otherwise push any future sample
+  // into negative `t` territory once the run starts.
+  const startedAtSeconds = startedAtMs != null ? Math.floor(startedAtMs / 1000) : 0
+  const actualInWindow = startedAtMs == null
+    ? []
+    : vus
+      .map(p => ({ t: p.t - startedAtSeconds, planned: NaN, actual: p.value }))
+      .filter(p => p.t >= -1 && p.t <= chartParams.totalDuration + 1)
+  const windowStart = startedAtMs ?? now
+  const windowEnd = windowStart + chartParams.totalDuration * 1000
   return <div style={{ marginTop: 14 }}>
     <LiveRampChart
       planned={chartParams.planned}
       actual={actualInWindow}
       totalDurationSeconds={chartParams.totalDuration}
-      elapsedSeconds={(now - startedAt) / 1000}
+      elapsedSeconds={startedAtMs == null ? undefined : (now - startedAtMs) / 1000}
       targetValue={chartParams.targetValue}
       unit={chartParams.unit}
       windowStartMs={windowStart}
@@ -1805,20 +1792,28 @@ function TestRunSummary({ run }: TestRunSummaryProps) {
   // result presentation (PASSED/FAILED pill + exit code in the
   // `ResultHeader` row, threshold notice, cards, run foot). Here at
   // the top we hide both the status pill and the failure causes so
-  // nothing appears twice. For RUNNING/QUEUED the status pill stays
-  // visible; we keep hiding the time hint ("running since …")
-  // because the three cells below (RUNNING SINCE / REMAINING /
-  // STARTED) show the same information more clearly.
-  // A terminal run is rendered by `RunStatusView` below — which
-  // carries the colour-coded "STOPPED" / "ABORTED" pills and the
-  // matching threshold notice. Showing the generic gray ".status"
-  // pill on top would duplicate the status and look colourless
-  // next to the dedicated terminal-state badges.
+  // nothing appears twice. For RUNNING/QUEUED we suppress the
+  // status pill entirely: it would otherwise render in the
+  // default gray `.status` colour (no `.status.running` /
+  // `.status.queued` modifier exists) and the cells below
+  // (RUNNING SINCE / REMAINING / STARTED) already communicate the
+  // in-flight state more clearly. STOPPING keeps the pill because
+  // it doubles as a "k6 is winding down" hint that no cell carries
+  // on its own. A terminal run is rendered by `RunStatusView`
+  // below — which carries the colour-coded "STOPPED" / "ABORTED"
+  // pills and the matching threshold notice. Showing the generic
+  // gray ".status" pill on top would duplicate the status and
+  // look colourless next to the dedicated terminal-state badges.
+  // The pill-visibility predicate is centralised in
+  // `showsStatusPill` so the same rule is exercised by the unit
+  // tests in `runDashboard.test.ts` rather than living only as
+  // inline JSX.
   const isFinished = isTerminalRun(run.status)
+  const showStatusRow = showsStatusPill(run.status)
 
   return (
     <>
-      {!isFinished && <div className="status-row">
+      {showStatusRow && <div className="status-row">
         <div className={`status ${run.status.toLowerCase()}`}>{run.status}</div>
         {run.status === 'FAILED' && (
           <>
@@ -2193,77 +2188,6 @@ function formatParameterType(schema: unknown): string | undefined {
     return candidate.type
   }
   return undefined
-}
-
-/**
- * Floating menu that opens on right-click on a run badge. The
- * visible items come from `buildRunMenuItems(run)` and adapt to the
- * run's current status. The component is intentionally dumb: it
- * does not know what each action does — it just emits the
- * `MenuItem` and lets the parent route to the right handler.
- */
-function RunContextMenu({
-  menu,
-  run,
-  runs,
-  language,
-  onAction,
-  onClose,
-  menuRef,
-}: {
-  menu: { runId: string, x: number, y: number }
-  run: TestRun | undefined
-  runs: Record<string, TestRun>
-  language: SupportedLanguage
-  onAction: (item: MenuItem) => void
-  onClose: () => void
-  menuRef: React.RefObject<HTMLDivElement | null>
-}) {
-  // Defensive: the menu should be closed by the parent when run
-  // disappears from the map, but render nothing if it slipped
-  // through.
-  if (!run) { onClose(); return null }
-  // The full runs map is passed so the menu can disable the
-  // "remove all other failed" item when no other FAILED run
-  // is in the dashboard. Without it the user could click the
-  // action with no visible effect. The active language comes
-  // from the toolbar so the labels match the rest of the UI.
-  const groups = buildRunMenuItems(run, language, runs)
-  // Clamp the position so the menu stays inside the viewport.
-  // We use 8px padding from the viewport edge so the rounded
-  // corners and the focus ring do not get clipped.
-  const menuWidth = 240
-  const menuHeightEstimate = 48 * groups.flat().length + 24
-  const x = Math.max(8, Math.min(menu.x, window.innerWidth - menuWidth - 8))
-  const y = Math.max(8, Math.min(menu.y, window.innerHeight - menuHeightEstimate - 8))
-  return <div
-    ref={menuRef}
-    className="run-context-menu"
-    role="menu"
-    aria-label={translate(language, 'run.contextMenu.aria')}
-    style={{ left: x, top: y }}
-    onContextMenu={event => event.preventDefault()}
-  >
-    {groups.map((group, groupIndex) => <div key={groupIndex} className="run-context-menu-group">
-      {group.map(item => {
-        const disabled = Boolean(item.disabledReason)
-        return <button
-          key={item.id}
-          type="button"
-          role="menuitem"
-          className={`run-context-menu-item ${item.danger ? 'is-danger' : ''} ${disabled ? 'is-disabled' : ''}`}
-          disabled={disabled}
-          title={item.disabledReason ?? item.label}
-          onClick={() => { if (!disabled) onAction(item) }}
-        >
-          <MenuItemIcon action={item.action} />
-          <span>{item.label}</span>
-          {item.shortcut && <kbd className="kbd">{item.shortcut}</kbd>}
-        </button>
-      })}
-      {groupIndex < groups.length - 1 && <div className="run-context-menu-separator" />}
-    </div>)}
-  </div>
 }
 
 export default App

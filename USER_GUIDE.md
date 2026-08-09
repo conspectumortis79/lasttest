@@ -47,11 +47,14 @@
    - 9.5 [Payload strategy — sequential vs. random](#95-payload-strategy--sequential-vs-random)
    - 9.6 [Validation and limits](#96-validation-and-limits)
 10. [Step 4 — Running the test and reading the result](#10-step-4--running-the-test-and-reading-the-result)
-    - 10.1 [The multi-run dashboard](#101-the-multi-run-dashboard)
-    - 10.2 [The run-badge action menu (right-click)](#102-the-run-badge-action-menu-right-click)
-    - 10.3 [Live status](#103-live-status)
+    - 10.1 [The `Letzte Läufe` panel — multi-run dashboard](#101-the-letzte-läufe-panel--multi-run-dashboard)
+    - 10.2 [The run-row action menu (right-click)](#102-the-run-row-action-menu-right-click)
+    - 10.3 [Live status and the `Live · Lasttest läuft` banner](#103-live-status-and-the-live--lasttest-läuft-banner)
     - 10.4 [Diagnosis, metrics, console output and raw JSON](#104-diagnosis-metrics-console-output-and-raw-json)
     - 10.5 [Re-running](#105-re-running)
+    - 10.6 [Run-detail tab strip](#106-run-detail-tab-strip)
+    - 10.7 [Per-endpoint timeline (heat map + Gantt)](#107-per-endpoint-timeline-heat-map--gantt)
+    - 10.8 [Live ramp-grafik (Auslastung — Soll vs Ist)](#108-live-ramp-grafik-auslastung--soll-vs-ist)
 11. [Step 5 — Reading the detailed k6 report](#11-step-5--reading-the-detailed-k6-report)
     - 11.1 [Opening the report](#111-opening-the-report)
     - 11.2 [Visual tour of the report](#112-visual-tour-of-the-report)
@@ -410,7 +413,7 @@ be added without touching the i18n core.
 > toolbar now shows `Dashboard / User Guide / README / DE`, the
 > status pills render `EINGEREIHT`, `LÄUFT`, `GESTOPPT`, `BESTANDEN`,
 > `FEHLGESCHLAGEN`, `ABGEBROCHEN`, and the right-click menu on a run
-> badge says **Erneut ausführen** instead of *Rerun*. Reload the
+> row says **Erneut ausführen** instead of *Rerun*. Reload the
 > page — German is still active. To go back to English, click ⚙
 > again and pick **🇬🇧 English**.
 
@@ -1078,19 +1081,21 @@ not started and the first card with the problem is highlighted.
 
 Once the run is accepted, the fourth card appears with:
 
-- a **multi-run dashboard** (one badge per run started in the current
-  session),
-- a coloured status badge for the run you are currently watching,
+- a **`Letzte Läufe` panel** (one row per run started in the
+  current session, with a `× N` test counter per endpoint),
+- the run-detail card for the focused run, organised as a tab
+  strip (Übersicht · Timeline · Aktionen · k6-Konsole · Schwellen
+  · Konfiguration · Fehler-Diagnose · ↗ k6-Bericht),
 - a deep-link to the printable report,
 - optionally, the captured k6 console output and raw JSON.
 
-### 10.1 The multi-run dashboard
+### 10.1 The `Letzte Läufe` panel — multi-run dashboard
 
 Every k6 run you start in the current session appears as a compact
-**badge** in a horizontal grid above the detail card. The badge is
-the focus target — a single left-click moves the detail card to that
-run, and a right-click opens the action menu (see
-[Section 10.2](#102-the-run-badge-action-menu-right-click)). A
+**row** in the `Letzte Läufe` panel above the detail card. The row
+is the focus target — a single left-click moves the detail card to
+that run, and a right-click opens the action menu (see
+[Section 10.2](#102-the-run-row-action-menu-right-click)). A
 status-coloured stripe on the left edge encodes the run state:
 
 | Status | Stripe colour | Meaning |
@@ -1101,28 +1106,54 @@ status-coloured stripe on the left edge encodes the run state:
 | `STOPPED` | purple | You asked for a graceful stop (`SIGTERM`); k6 wound down cleanly. |
 | `ABORTED` | dark red | You escalated to `SIGKILL` (or `STOPPING` was followed by `force`); metrics may be partial. |
 
-A row in the grid contains:
+A row in the list contains:
 
 - the HTTP method as a coloured chip (green GET, brown POST, blue
   PUT/PATCH, red DELETE),
-- the run status as text,
-- the operation path as monospace.
+- the run status as a coloured badge,
+- the operation path as monospace,
+- a small **× N** chip showing how many times the same endpoint
+  has already been tested (powered by `/api/operations/stats`),
+- a one-line meta string (`10 VUs · 30 s`),
+- the elapsed/planned duration column,
+- a relative `when` stamp on the right (`just now`, `5 min ago`,
+  `yesterday` …).
 
 Focus transfer rules (see `runDashboard.pickActiveRunId`):
 
-- **Starting a new run** focuses the new badge (so the user sees live
+- **Starting a new run** focuses the new row (so the user sees live
   status immediately).
 - **Rerunning via right-click** follows the same rule — the fresh
-  badge becomes active.
-- **Clicking another badge** focuses it. The previously focused run
+  row becomes active.
+- **Clicking another row** focuses it. The previously focused run
   keeps polling until it reaches a terminal state, but the detail
   card only shows the focused one.
 - **Stopping / aborting via right-click** does not move focus; the
   user keeps watching the same run as it transitions.
 
-#### 10.1.1 Right-clicking a badge opens the action menu
+#### 10.1.1 The `× N` test counter
 
-Every badge in the dashboard responds to a **right-click**: a small
+The `× N` chip next to each row's operation name comes from
+`/api/operations/stats`, which is polled every 5 s while the panel
+is mounted. The chip is data-driven by `useOperationStats`:
+
+- shows the literal number when the same `(method, path)` pair
+  has been tested before (e.g. `× 4`),
+- falls back to `neu` (untested) when the backend has not yet
+  answered, so the panel still works on cold start, offline, or
+  when the backend is down,
+- updates immediately after a new run is queued so the user
+  sees the counter tick up without waiting for the next polling
+  cycle.
+
+The chip is purely informational; it does not affect run state or
+focus. Hovering it surfaces the title *„This endpoint has been
+tested N× in total"* (or *„This endpoint has not been tested
+yet"* for `neu`).
+
+#### 10.1.2 Right-clicking a row opens the action menu
+
+Every row in the panel responds to a **right-click**: a small
 context menu appears at the cursor position with a focused list of
 actions for that run. The left-click is reserved for *focusing* the
 run; the right-click is reserved for *acting on* it. `Esc` or any
@@ -1130,49 +1161,26 @@ click outside the menu closes it.
 
 The visible items adapt to the run's current status — the full
 reference with HTTP endpoints, keyboard shortcuts and disabled-state
-rules lives in [Section 10.2](#102-the-run-badge-action-menu-right-click).
-Quick overview of what the right-click exposes:
-
-**For `QUEUED` / `RUNNING` / `STOPPING` runs (the run is still owned by k6):**
-
-| Item | What it does |
-| --- | --- |
-| **Show live details** | Focuses the badge (same as left-click). |
-| **Copy run id** | Copies the run's UUID to the clipboard. |
-| **Open k6 web report** | Opens the printable report in a new tab. |
-| **Stop (graceful)** | Sends `SIGTERM`; k6 winds down, the run ends as `STOPPED`. |
-| **Force abort** | Sends `SIGKILL`; the run ends immediately as `ABORTED` (metrics may be partial). |
-
-**For terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`):**
-
-| Item | What it does |
-| --- | --- |
-| **Show summary** / **Show aborted details** | Focuses the badge (label adapts to the run status). |
-| **Copy report link** | Copies the report URL to the clipboard. |
-| **Open k6 web report** | Opens the printable report in a new tab. |
-| **Export k6 JSON** | Downloads the raw k6 summary JSON (disabled when no summary is available). |
-| **Rerun** | Re-runs the same scenario against the same base URL with a fresh run id. |
-| **Remove from view** | Drops the clicked badge from the in-memory dashboard (a page refresh reverses it). |
-| **Remove all other failed runs** | Drops every other `FAILED` badge from the dashboard (disabled when no other `FAILED` badge exists). |
+rules lives in [Section 10.2](#102-the-run-row-action-menu-right-click).
 
 The dashboard polls `/api/test-runs/{id}` for **every non-terminal
-run** in parallel once per second, so multiple badges can update
+run** in parallel once per second, so multiple rows can update
 simultaneously. The terminal-state predicate is the single source of
 truth in `runDashboard.isTerminalRun()` (unit-tested) — the frontend
 keeps polling `STOPPING` runs on purpose, otherwise the
-`STOPPING → STOPPED` transition would freeze the badge forever.
+`STOPPING → STOPPED` transition would freeze the row forever.
 
 > 💡 **Worked example — comparing two smoke runs:** you ran the demo
 > with `Smoke` (10 s, 10 VUs) once at 14:00 and tweaked the Base URL
-> before running it again at 14:02. Both badges are visible in the
-> grid. The first is green (`COMPLETED`), the second is the active
-> badge. Click the older one to inspect it; right-click it and pick
+> before running it again at 14:02. Both rows are visible in the
+> list. The first is green (`COMPLETED`), the second is the active
+> row. Click the older one to inspect it; right-click it and pick
 > **Rerun** to fire a third run that lasttest will add to the same
-> grid, with focus jumping back to the freshest in-flight run.
+> list, with focus jumping back to the freshest in-flight run.
 
-### 10.2 The run-badge action menu (right-click)
+### 10.2 The run-row action menu (right-click)
 
-Right-clicking a badge opens a small **context menu** at the cursor
+Right-clicking a row opens a small **context menu** at the cursor
 position. The menu only offers actions that make sense for the run's
 current state — the visible items are computed by
 `runMenuItems.buildRunMenuItems(run)` and unit-tested for every
@@ -1183,7 +1191,7 @@ groups:
 
 | Item | Shortcut | Effect |
 | --- | --- | --- |
-| **Show live details** | — | Focuses the badge (same as left-click). |
+| **Show live details** | — | Focuses the row (same as left-click). |
 | **Copy run id** | — | Copies the UUID to the clipboard. |
 | **Open k6 web report** | — | Opens the printable report in a new tab (the report page exists from the moment the run is queued). |
 | **Stop (graceful)** | `S` | `POST /api/test-runs/{id}/cancel?force=false`. k6 receives `SIGTERM`, the run transitions `RUNNING → STOPPING → STOPPED`. |
@@ -1194,13 +1202,13 @@ the menu offers:
 
 | Item | Visible when | Effect |
 | --- | --- | --- |
-| **Show summary** / **Show aborted details** *(label adapts to status)* | always | Focuses the badge. |
+| **Show summary** / **Show aborted details** *(label adapts to status)* | always | Focuses the row. |
 | **Copy report link** | always | Copies `http://…/?report=<run-id>` to the clipboard — drop it into chat, a ticket, or a runbook. |
 | **Open k6 web report** | always | Opens the printable report in a new tab. |
 | **Export k6 JSON** | only when a complete summary is available (`ABORTED` runs and runs without a summary are disabled) | Downloads `lasttest-<run-id>-summary.json` for offline analysis or to feed into another tool. |
-| **Rerun** | always (terminal runs only) | `POST /api/test-runs/{id}/rerun`. The backend replays the `CreateTestRunRequest` it preserved when the original run was started, k6 starts fresh, the new badge appears in the dashboard and gets focus. The new run shares the operation, payload pool, load profile and base URL of the original. |
-| **Remove from view** | always (terminal runs only) | Frontend-only cleanup that drops the clicked badge from the in-memory map. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs`. The remaining badges re-sort by their original `createdAt` so the dashboard stays in newest-first order; the dashboard focus is re-evaluated so the detail card survives the removal. |
-| **Remove all other failed runs** | terminal runs that have at least one other `FAILED` badge in the map (otherwise the item is disabled with the reason *“No other failed runs to remove.”*) | Bulk frontend cleanup: drops every other `FAILED` badge except the clicked one. `STOPPED` and `ABORTED` runs are intentionally preserved — the menu entry targets the `FAILED` status only, not every non-success outcome. |
+| **Rerun** | always (terminal runs only) | `POST /api/test-runs/{id}/rerun`. The backend replays the `CreateTestRunRequest` it preserved when the original run was started, k6 starts fresh, the new row appears in the dashboard and gets focus. The new run shares the operation, payload pool, load profile and base URL of the original. |
+| **Remove from view** | always (terminal runs only) | Frontend-only cleanup that drops the clicked row from the in-memory map. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs`. The remaining rows re-sort by their original `createdAt` so the dashboard stays in newest-first order; the dashboard focus is re-evaluated so the detail card survives the removal. |
+| **Remove all other failed runs** | terminal runs that have at least one other `FAILED` row in the map (otherwise the item is disabled with the reason *“No other failed runs to remove.”*) | Bulk frontend cleanup: drops every other `FAILED` row except the clicked one. `STOPPED` and `ABORTED` runs are intentionally preserved — the menu entry targets the `FAILED` status only, not every non-success outcome. |
 
 The menu closes on any click outside (`Esc` also closes it). The
 **left-click** is reserved for focusing the run, so it never opens
@@ -1210,47 +1218,47 @@ the list but rendered as **disabled** with a `title` explaining why
 
 > 💡 **Worked example — rerun via right-click:** you ran the demo
 > with `Smoke` (10 VUs, 30 s) and want to confirm the result is
-> reproducible. Right-click the green `COMPLETED` badge, pick
+> reproducible. Right-click the green `COMPLETED` row, pick
 > **Rerun**. lasttest posts `/api/test-runs/{id}/rerun`, the
 > backend re-queues the preserved `CreateTestRunRequest`, k6 starts
-> a fresh process against the same base URL, and the new badge
+> a fresh process against the same base URL, and the new row
 > appears in the dashboard with focus moved to it. The dashboard
-> starts polling immediately; the old `COMPLETED` badge stays put so
+> starts polling immediately; the old `COMPLETED` row stays put so
 > you can still compare the two runs side-by-side.
 
 > 💡 **Worked example — escalating a stuck run:** you ran a `Load`
 > profile against a slow staging server. After 5 minutes it has not
 > finished and you want the metrics you already have. Right-click
-> the orange `RUNNING` badge, pick **Stop (graceful)** (or press
+> the orange `RUNNING` row, pick **Stop (graceful)** (or press
 > `S` inside the menu). The status transitions `RUNNING → STOPPING`
-> and the badge stripe turns purple while k6 winds down. If the
+> and the row stripe turns purple while k6 winds down. If the
 > graceful stop hangs, right-click again and pick **Force abort**
-> (`⇧S`). The badge turns dark red and the detail card renders the
+> (`⇧S`). The row turns dark red and the detail card renders the
 > *“Aborted by user — k6 was killed via SIGKILL”* notice with a
 > warning that only partial counters are available.
 
 > 💡 **Worked example — sharing a report link:** a colleague asks
 > for the numbers from a 5-minute `Stress` run you did yesterday.
-> Right-click its badge, pick **Copy report link**, and paste the
+> Right-click its row, pick **Copy report link**, and paste the
 > URL into the chat. Anyone with access to the running lasttest
 > instance can open `/?report=<run-id>` and inspect the printable
 > report — the link stays valid for the lifetime of the process.
 
 > 💡 **Worked example — cleaning up the dashboard:** you ran five
 > back-to-back smoke tests and three of them failed (DNS lookup
-> issues). You do not need the failed badges in the dashboard
+> issues). You do not need the failed rows in the dashboard
 > anymore but you want to keep the two `COMPLETED` ones. Right-click
-> any of the failed badges, pick **Remove all other failed runs**,
+> any of the failed rows, pick **Remove all other failed runs**,
 > and the dashboard keeps only the clicked `FAILED` plus the two
-> successful ones. To drop a single badge without affecting the
+> successful ones. To drop a single row without affecting the
 > rest, right-click it and pick **Remove from view**. Both actions
-> are frontend-only; reload the page and the removed badges return
+> are frontend-only; reload the page and the removed rows return
 > (the backend still has them), which is the safety net for users
 > who changed their mind mid-cleanup.
 
-### 10.3 Live status
+### 10.3 Live status and the `Live · Lasttest läuft` banner
 
-The status badge cycles through:
+The status badge in the detail header cycles through:
 
 - `QUEUED` — accepted, k6 has not been spawned yet
 - `RUNNING` — k6 is executing
@@ -1263,12 +1271,24 @@ The status badge cycles through:
 - `ABORTED` — you stopped the run with `SIGKILL`; metrics may be partial
 
 The UI polls `/api/test-runs/{id}` every second while the run is
-in flight (`QUEUED`, `RUNNING` or `STOPPING`), so the badge updates
-without a page reload.
+in flight (`QUEUED`, `RUNNING` or `STOPPING`), so the status badge
+updates without a page reload.
+
+While a run is `QUEUED`, `RUNNING` or `STOPPING`, the detail card
+shows a pulsing **Live · Lasttest läuft** banner at the top with
+the method+path being tested, a one-line summary of the active
+load profile (e.g. `ramping-vus · 50 VUs · 60 s`) and the same
+Stop / Abort buttons the Aktionen tab offers — so the user can
+halt a stuck run without having to leave the Übersicht tab.
+
+The banner is hidden the moment the run reaches a terminal state.
+It is purely a presentation surface: the same Stop / Abort actions
+are still reachable from the Aktionen tab and from the run-row
+context menu.
 
 ### 10.4 Diagnosis, metrics, console output and raw JSON
 
-The status row always shows the badge plus a short hint while the run is
+The status row always shows the status badge plus a short hint while the run is
 still in flight ("läuft seit X s", "wartet auf Executor"). When the run
 settles, the card expands with three additional blocks:
 
@@ -1304,16 +1324,134 @@ volle Fehlersuche.
 
 You have two ways to re-run the same scenario:
 
-- **Via the right-click menu** on a terminal badge — see
-  [Section 10.2](#102-the-run-badge-action-menu-right-click). This is
+- **Via the right-click menu** on a terminal row — see
+  [Section 10.2](#102-the-run-row-action-menu-right-click). This is
   the recommended path because it preserves the exact
   `CreateTestRunRequest` that was originally sent (operation,
   payloads, load profile, base URL). The new run gets a fresh UUID
   and gets focus automatically.
 - **By re-configuring the form** — change any value in steps 2 or 3
   and click **k6-Lasttest starten** again. The new run has no
-  genealogical link to the old one; the old badge stays in the
+  genealogical link to the old one; the old row stays in the
   dashboard unchanged.
+
+---
+
+### 10.6 Run-detail tab strip
+
+The detail card for a run is organised as a horizontal tab strip
+(plus an external link at the end). Switching tabs preserves the
+user's reading position so the detail card does not jump back to
+the top of the page on every click.
+
+| Tab | Purpose |
+| --- | --- |
+| **Übersicht** | Live status banner, metric cards, **live ramp-grafik** (see [§10.8](#108-live-ramp-grafik-auslastung--soll-vs-ist)) |
+| **Timeline** | Per-endpoint heat map + Gantt (see [§10.7](#107-per-endpoint-timeline-heat-map--gantt)) |
+| **Aktionen** | Status-aware controls (Stop, Abort, Rerun, Copy, Open, Export, Remove) |
+| **k6-Konsole** | Full k6 stdout/stderr of the run |
+| **Schwellen** | Every configured k6 threshold with the measured value |
+| **Konfiguration** | API, load profile, operations, run metadata |
+| **Fehler-Diagnose** | Typed failure diagnosis for `FAILED` / `ABORTED` runs |
+| **↗ k6-Bericht öffnen** | Opens the printable report in a new tab |
+
+When you click another row in the `Letzte Läufe` panel while the
+Timeline tab is open, the Timeline stays open and re-centres on
+the new run's `createdAt` — closing the tab would throw away the
+very context (focused Gantt bar, heatmap, "Centred on …" label)
+that makes the timeline useful as a navigation surface. For all
+other tabs the new run lands on Übersicht, which is the natural
+starting point.
+
+---
+
+### 10.7 Per-endpoint timeline (heat map + Gantt)
+
+The **Timeline** tab is built from `EndpointTimelineTab.tsx` and
+turns the run history of a single `(method, path)` endpoint into
+one visual story. It is data-driven from
+`/api/operations/runs?method=…&path=…`, polled on the same cadence
+as the run list, so a freshly-started (or rerun) test shows up in
+the chart within a few seconds.
+
+From top to bottom the tab renders:
+
+- a **toolbar** with an endpoint chip (`METHOD /path` plus the API
+  title when known), a window selector (`24 h / 7 d / 30 d /
+  90 d`), and — when the chart is focused on a historical run —
+  a `↺ Reset to "now"` button and a "Centred on … (vor N min)"
+  label;
+- a **stat strip** with four cards: `Runs (window)`, `Passed`,
+  `Failed`, `Last issues`; the last one shows the timestamp of
+  the most recent failed run (or `–`);
+- a **heat map** with one cell per day, coloured by the day's
+  outcome (green = all `COMPLETED`, yellow = at least one
+  `STOPPED`, red = at least one `FAILED` / `ABORTED`, empty =
+  no runs); the "today" / focus cell sits in the centre so the
+  heatmap is balanced around the anchor;
+- a **Gantt-style single-row timeline** with one bar per run,
+  centred on the focused run (or "now" when none is focused);
+  clicking a bar jumps the chart to that run's `createdAt`;
+- a compact **list** of the eight most-recent runs in the window
+  with status badges, relative `when` stamps, VU counts and
+  exit codes; the list mirrors the Gantt: clicking a list entry
+  jumps the chart to that run's `createdAt`.
+
+Right-clicking on a Gantt bar or a list entry opens the same
+per-run context menu as the overview rows (stop, abort, rerun,
+copy run id, copy report link, open report, export, remove from
+view, remove all other failed). The timeline keeps its own
+`hiddenRunIds` set so a removed run stays out of view across the
+next poll, while the dashboard map (where it may also live)
+stays untouched.
+
+---
+
+### 10.8 Live ramp-grafik (Auslastung — Soll vs Ist)
+
+While a run is in flight, the **Übersicht** (Overview) tab shows
+a live SVG chart that compares the **Soll** (planned) curve —
+derived deterministically from the configured load profile —
+against the **Ist** (actual) curve streamed from the time-series
+container.
+
+- The **planned line** is rendered as a flat or stepped polyline
+  depending on the executor: `constant-vus` is a horizontal line
+  at the target VU count, `ramping-vus` is a staircase with
+  linear ramps between consecutive stages, `constant-arrival-rate`
+  is a horizontal line at the target RPS. `shared-iterations`
+  produces no planned line (its concurrency is unbounded by
+  design); the legend then hides the `Soll (geplant)` entry.
+- The **actual polyline** updates every few seconds while the
+  run is in flight. A yellow cursor marks the latest sample.
+- The **y-axis** is labelled `VUs` for VU-based executors and as
+  `Anfragen/s` for arrival-rate executors so a 50 req/s spike
+  test is no longer mis-labelled as `VUs`.
+- The header strip carries the elapsed duration (`läuft seit
+  HH:MM:SS`) and the number of received samples (`12 Messpunkte`
+  / `noch keine Messpunkte`).
+- When the run finishes, the actual polyline freezes at the
+  final measured values so the same chart doubles as a
+  post-mortem view — open the report to compare against the same
+  data rendered at full resolution.
+
+The **planned curve** is computed client-side from
+`run.configuration.loadProfile` via `computeRampChartParams` in
+`liveRampChartLayout.ts`. The helper is unit-tested and is the
+single source of truth for both the live tab and the printable
+report, so the two views can never disagree on the planned shape.
+The **actual curve** is fetched from
+`/api/test-runs/{id}/time-series` (sourced from H2 so the data is
+stable across container restarts); the polling loop fires only
+while the run is in flight, so a finished run does not keep
+generating traffic in the background.
+
+If you start lasttest without InfluxDB
+(`LASTTEST_INFLUXDB_ENABLED=false` or a bare `docker run`), the
+planned line still renders and the header strip still shows the
+elapsed duration. The actual polyline is simply not available —
+the same applies to the printable report (see
+[Section 14.3](#143-ramp-grafik-shows-only-the-soll-line)).
 
 ---
 
@@ -1659,7 +1797,7 @@ and use a managed time-series database.
 | `PKIX path building failed: unable to find valid certification path to requested target` | The target API uses a TLS certificate that is not trusted by the JVM (self-signed, internal CA, missing intermediate) | See [Section 14.1 — Trusting custom TLS certificates](#141-trusting-custom-tls-certificates) |
 | k6 run logs contain `x509: certificate signed by unknown authority` (but the spec import worked) | The backend TrustStore is fine, but k6 itself has not been told about the custom CA | Set `SSL_CERT_FILE` — see [Section 14.1.1](#1411-the-k6-side-ssl_cert_file) |
 | The ramp-grafik shows only the Soll line, no Ist line | InfluxDB is not reachable, or no data was written during the run | See [Section 14.2](#142-influxdb-is-not-reachable) and [14.3](#143-ramp-grafik-shows-only-the-soll-line) |
-| Right-click on a run badge does nothing | Cursor outside the badge, browser extension suppressing contextmenu, or mid-transition render | See [Section 14.4](#144-right-click-menu-does-not-appear) |
+| Right-click on a run row does nothing | Cursor outside the row, browser extension suppressing contextmenu, or mid-transition render | See [Section 14.4](#144-right-click-menu-does-not-appear) |
 | Toolbar language pill shows the wrong language | A previous session's `localStorage` entry is stale, or the browser blocks storage in private mode | See [Section 6.2](#62-settings-drawer-language-switch) — pick the language again; the selection falls back to English if `localStorage` is unavailable |
 | k6 run logs contain `could not create the 'influxdb' output: unknown query parameter: org` | The InfluxDB image version is 2.x; k6 v2 only supports InfluxDB v1 | Use the bundled Compose file (it ships with InfluxDB 1.11) |
 
@@ -1809,28 +1947,28 @@ write path is broken.
 
 ### 14.4 Right-click menu does not appear
 
-The run-badge context menu is opened with `onContextMenu` on the
-badge button. If a right-click on a badge does nothing, walk through
+The run-row context menu is opened with `onContextMenu` on the
+row button. If a right-click on a row does nothing, walk through
 these checks:
 
-1. **You clicked the detail card, not the badge.** The badge lives in
-   the multi-run dashboard grid (above the detail card). Right-click
+1. **You clicked the detail card, not the row.** The row lives in
+   the `Letzte Läufe` panel (above the detail card). Right-click
    there.
-2. **The badge is focused but you right-clicked outside it.** Move the
-   cursor over the badge itself (the coloured chip with method,
+2. **The row is focused but you right-clicked outside it.** Move
+   the cursor over the row itself (the coloured chip with method,
    status and path) before right-clicking. The menu opens at the
-   cursor location, so the cursor has to be on the badge.
+   cursor location, so the cursor has to be on the row.
 3. **Your browser overrode the menu.** Some kiosk / accessibility
    extensions suppress the browser context menu and with it
    lasttest's own menu. Disable the extension for the lasttest
-   origin or use the keyboard alternative: focus the badge with
+   origin or use the keyboard alternative: focus the row with
    `Tab` and press the context-menu key (`Menu` on most keyboards,
    `Shift + F10` is the universal fallback).
 4. **The run is mid-transition.** A run that just entered `STOPPING`
    re-renders very quickly; if you right-clicked during that frame
    the menu might have opened against the previous status and closed
-   itself when the badge re-rendered. Click the badge once to
-   re-focus it, then right-click again.
+   itself when the row re-rendered. Click the row once to re-focus
+   it, then right-click again.
 
 If none of the above helps, open the browser dev tools and check for
 JavaScript errors after the right-click — the menu mount is wrapped
@@ -1856,13 +1994,14 @@ in a single effect that logs to the console on failure.
 | **Run ID** | UUID assigned to each test run; used in deep-links and for downloading the script. |
 | **Spec** | The OpenAPI or Swagger document that describes the target API. |
 | **Demo API** | The in-process server lasttest exposes under `/demo-api/*` so that you can exercise the full pipeline without an external dependency. |
-| **Run badge** | The compact card in the multi-run dashboard that represents a single test run. Shows method, status and path; left-click focuses it, right-click opens the action menu. |
-| **Action menu (run badge)** | Context menu that opens on right-click on a run badge. Items adapt to the run's status (in-flight vs. terminal). Offers stop, force-abort, rerun, copy actions, export. |
+| **Run row** | A single row in the `Letzte Läufe` panel that represents one test run. Shows method, status badge, path, a `× N` test counter, a meta string and a relative `when` stamp; left-click focuses it, right-click opens the action menu. |
+| **`× N` test counter** | Small chip next to each run row's operation name that shows how many times the same `(method, path)` pair has been tested before. Sourced from `/api/operations/stats`, polled every 5 s, falls back to `neu` on cold start. |
+| **Action menu (run row)** | Context menu that opens on right-click on a run row in the `Letzte Läufe` panel. Items adapt to the run's status (in-flight vs. terminal). Offers stop, force-abort, rerun, copy actions, export. |
 | **Payload pool** | An ordered list of datasets (parameter values + request body + Bearer token) attached to a single endpoint. k6 walks through the pool according to the chosen strategy (sequential or random). |
 | **Payload strategy** | How the runner picks the next payload from the pool each iteration: `sequential` (round-robin, wraps around) or `random` (uniform pick). With a one-row pool the two are identical. |
 | **Settings drawer** | Slide-in modal opened from the gear in the top toolbar. Currently exposes the Language section for switching between English and German. Persists the choice in `localStorage`. |
 | **Doc popup** | Centred markdown modal opened from the toolbar (User Guide / README). Bilingual, with live search (`Ctrl/⌘ + F`), prev/next match navigation and Esc to close. |
-| **STOPPING** | Transient state of a test run after the user clicked *Stop (graceful)* but before k6 has actually exited. The badge stays polled until it transitions to `STOPPED` or `ABORTED`. |
+| **STOPPING** | Transient state of a test run after the user clicked *Stop (graceful)* but before k6 has actually exited. The row stays polled until it transitions to `STOPPED` or `ABORTED`. |
 | **STOPPED** | Terminal state after a graceful `SIGTERM` cancellation. Thresholds evaluated up to the stop are still reported. |
 | **ABORTED** | Terminal state after a forced `SIGKILL` cancellation (or a `STOPPING → force` escalation). Only partial counters may be present; the threshold evaluation is not meaningful. |
-| **Rerun** | Action that re-queues the `CreateTestRunRequest` of an existing terminal run with a fresh run id. Triggered from the right-click menu on terminal badges. |
+| **Rerun** | Action that re-queues the `CreateTestRunRequest` of an existing terminal run with a fresh run id. Triggered from the right-click menu on terminal rows. |

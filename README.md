@@ -21,15 +21,25 @@ For every imported spec lasttest lets you:
    Stress, Spike, Soak, Burst, and Arrival-Rate.
 3. **Run the test** and watch the status cycle through `QUEUED` →
    `RUNNING` → `COMPLETED` (or `FAILED`, `STOPPED`, `ABORTED`).
-   Every run shows up as a **badge** in the multi-run dashboard. **A
-   right-click on a badge opens an action menu** that lets you stop
-   (graceful), force-abort (SIGKILL), rerun with the same
-   configuration, copy the run id, copy the report link, open the
-   report in a new tab, or export the raw k6 JSON summary.
-4. **Open the report** in a new tab. It contains a printable summary, the
-   generated k6 script, and — if InfluxDB is running — a
-   **ramp-grafik** that compares the planned load (Soll) with the
-   measured load (Ist) over time.
+   Every run shows up as a **row** in the multi-run dashboard
+   (`Letzte Läufe` panel) with a **× N** badge showing how often
+   that endpoint has already been tested. **A right-click on a row
+   opens an action menu** that lets you stop (graceful),
+   force-abort (SIGKILL), rerun with the same configuration, copy
+   the run id, copy the report link, open the report in a new tab,
+   or export the raw k6 JSON summary.
+4. **Inspect the run** through a tabbed detail view that contains:
+   the live status, the **live ramp-grafik** (`Auslastung — Soll vs
+   Ist`) that compares the planned load (Soll) with the measured
+   load (Ist) over time, the **Timeline** tab (a per-endpoint
+   7-day heatmap plus a Gantt-style timeline of every historical
+   run), the **Aktionen** tab (one-click controls), the **k6
+   console**, the **Thresholds** table, the **Configuration**
+   recap, and the **Failure diagnosis**. **Open the printable
+   report** in a new tab for a print-ready A4 view that includes
+   the full summary, the generated k6 script, the ramp-grafik with
+   Soll/Ist comparison (when InfluxDB is running), and detailed k6
+   metrics.
 
 ## Quick start with a single container
 
@@ -175,13 +185,16 @@ shows the active language (English / Deutsch) and a gear icon opens the
   language, with live in-document search (`Ctrl/⌘ + F`),
   previous / next match navigation, and an Esc-to-close affordance.
 
-## The run-badge action menu (right-click)
+## The run-row action menu (right-click)
 
-Every k6 test run appears as a coloured badge in the **multi-run
-dashboard** (step 4). The badge shows the HTTP method, status, and
-path. A single left-click focuses the run; a **right-click opens the
-action menu** at the cursor position. The menu adapts to the run's
-current status so it only offers actions that make sense:
+Every k6 test run appears as a **row** in the **multi-run dashboard**
+(`Letzte Läufe` panel — step 4). The row shows a status dot, the
+HTTP method, status badge, path, a **× N** counter that summarises
+how often the same endpoint has been tested before, a meta string
+(`VUs · duration`) and a relative `when` stamp. A single left-click
+focuses the run; a **right-click opens the action menu** at the
+cursor position. The menu adapts to the run's current status so it
+only offers actions that make sense:
 
 | Menu item | Visible when | Effect |
 | --- | --- | --- |
@@ -193,17 +206,17 @@ current status so it only offers actions that make sense:
 | **Stop (graceful)** | `QUEUED`, `RUNNING`, `STOPPING` | Sends `SIGTERM`; k6 winds down, the run ends as `STOPPED` |
 | **Force abort** | `QUEUED`, `RUNNING`, `STOPPING` | Sends `SIGKILL`; the run ends immediately as `ABORTED` (metrics may be partial) |
 | **Rerun** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Re-runs the same scenario against the original base URL with a fresh run id |
-| **Remove from view** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Drops the badge from the in-memory dashboard. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs`. The remaining badges re-sort by their original `createdAt` so the dashboard stays in newest-first order. |
-| **Remove all other failed runs** | Terminal runs, when at least one other `FAILED` badge is present | Bulk-drops every other `FAILED` badge from the dashboard. Disabled (with a reason) when there is nothing to remove. `STOPPED` and `ABORTED` runs are intentionally preserved |
+| **Remove from view** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Drops the row from the in-memory dashboard. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs`. The remaining rows re-sort by their original `createdAt` so the dashboard stays in newest-first order. |
+| **Remove all other failed runs** | Terminal runs, when at least one other `FAILED` row is present | Bulk-drops every other `FAILED` row from the dashboard. Disabled (with a reason) when there is nothing to remove. `STOPPED` and `ABORTED` runs are intentionally preserved |
 
 > 💡 **Worked example — rerun via right-click:** you ran a 30 s
 > `Smoke` profile against the demo and want to confirm the result
-> is reproducible. Right-click the green `COMPLETED` badge, pick
+> is reproducible. Right-click the green `COMPLETED` row, pick
 > **Rerun** and lasttest POSTs `/api/test-runs/{id}/rerun`. The
 > backend re-queues the same `CreateTestRunRequest` it preserved
 > when the original run was started, k6 starts fresh, and the new
-> badge appears in the dashboard with focus automatically moved
-> to it.
+> row appears in the dashboard with focus automatically moved to
+> it.
 
 A click outside the menu (or `Esc`) closes it. The menu does not
 trigger on `Left-Click`; that stays reserved for focusing the run.
@@ -224,6 +237,94 @@ The pool is rendered as a compact table with `+ Payload hinzufügen`
 to add a row and `×` to remove one (the last row stays — at least
 one payload is always required). The strategy selector sits in the
 load profile card together with the executor dropdown.
+
+## Multi-run dashboard — the `Letzte Läufe` panel
+
+Since the *Letzte Läufe* release, every k6 run you start in the
+current session appears as a **row** in a compact list panel above
+the detail card. The panel replaces the older badge grid and adds:
+
+- a **status dot** + status badge (`EINGEREIHT` / `LÄUFT` /
+  `GESTOPPT` / `BESTANDEN` / `FEHLGESCHLAGEN` / `ABGEBROCHEN`),
+- a human-readable identifier (`METHOD /path`),
+- a small **× N** badge next to the operation name that shows how
+  often the same endpoint has been tested before — powered by
+  `/api/operations/stats` and polled on the same cadence as the
+  run list,
+- a one-line meta string (`VUs · duration`),
+- the elapsed/planned duration column,
+- a relative `when` stamp (`just now` / `5 min ago` / `yesterday` …).
+
+Left-clicking the row focuses it (same as the old badge).
+Right-clicking opens the same action menu (stop, abort, rerun,
+remove, share, export) at the cursor position, so the gesture
+contract from the badge grid stays unchanged.
+
+## Per-endpoint timeline tab
+
+The run-detail tabs include a dedicated **Timeline** tab that turns
+the run history of one specific (method, path) endpoint into a
+single visual story. It contains:
+
+- a **24 h / 7 d / 30 d / 90 d** window selector,
+- a **stat strip** with the run count, success / failure counts
+  and the timestamp of the last failed run,
+- a **heat map** of one cell per day, coloured by the day's
+  outcome (green = all `COMPLETED`, yellow = at least one
+  `STOPPED`, red = at least one `FAILED` / `ABORTED`),
+- a **Gantt-style single-row timeline** with one bar per run,
+  centred on the focused run (or "now" when none is focused);
+  clicking a bar jumps the chart to that run's `createdAt`,
+- a compact **list** of the most-recent runs in the window with
+  status badges, relative `when` stamps and a right-click menu
+  that mirrors the overview's actions.
+
+The data source is `/api/operations/runs?method=…&path=…`, polled
+on the same cadence as the run list. A right-click on a bar in
+the Gantt or on a list entry opens the same per-run context menu
+as on the overview badges.
+
+## Live ramp-grafik (Auslastung — Soll vs Ist)
+
+While a run is in flight the **Übersicht** (Overview) tab shows a
+live SVG chart that compares the **Soll** (planned) curve —
+derived deterministically from the configured load profile —
+against the **Ist** (actual) curve streamed from the time-series
+container. The chart:
+
+- renders the planned line as a flat or stepped curve depending
+  on the executor (constant-vus, ramping-vus,
+  constant-arrival-rate …),
+- updates the actual polyline every few seconds while the run is
+  in flight,
+- shows a yellow cursor at the latest sample,
+- freezes the actual curve at the final measured values once the
+  run completes, so the same chart doubles as a post-mortem view,
+- labels the y-axis as `VUs` for VU-based executors and as
+  `Anfragen/s` for arrival-rate executors.
+
+Without InfluxDB the chart still renders the planned line; the
+`Ist` curve is simply not available. The same chart also appears
+in the printable report (`/?report=<id>`) as the **Ramp-Grafik**
+section.
+
+## Run-detail tab strip
+
+The detail card for a run is organised as a horizontal tab strip:
+
+| Tab | Purpose |
+| --- | --- |
+| **Übersicht** | Live status, metric cards, live ramp-grafik |
+| **Timeline** | Per-endpoint heat map + Gantt (see above) |
+| **Aktionen** | Status-aware controls: Stop, Abort, Rerun, Copy run id, Copy report link, Open report, Download k6 script, Export raw summary, Remove from dashboard, Remove all other failed |
+| **k6-Konsole** | Full k6 stdout/stderr of the run |
+| **Schwellen** | Every configured k6 threshold with the measured value |
+| **Konfiguration** | API, load profile, operations, run metadata |
+| **Fehler-Diagnose** | Typed failure diagnosis for `FAILED` / `ABORTED` runs |
+| **↗ k6-Bericht öffnen** | Opens the printable report in a new tab |
+
+Switching tabs preserves the user's reading position so the detail
+card does not jump back to the top of the page on every click.
 
 The detailed report (`/?report=<id>`) breaks down the call distribution
 **per payload** using the k6 per-payload counters so you can verify
@@ -255,14 +356,13 @@ multi-environment spec looks in the UI.
 After a test run, the link "Open detailed k6 report in a new tab" opens a
 print-optimised result view. It contains the summary, thresholds, run and
 API configuration, the actually used endpoint parameters, the **ramp-grafik**
-with Soll/Ist comparison (when InfluxDB is running), detailed k6 metrics,
-and console / JSON raw data. Use "Print / Save as PDF" to archive this view
-directly as a PDF.
+with Soll/Ist comparison (when InfluxDB is running), and detailed k6
+metrics. Use "Print / Save as PDF" to archive this view directly as a PDF.
 
-Below the k6 JSON export, "Generated k6 test script" can be expanded. It
-shows the exact script that lasttest executed and offers a download as
-"Download k6 test script (.js)". The report also shows the matching
-manual start command, for example:
+The generated k6 script and the captured console output live on the
+dashboard, under the run-detail tabs **k6 script** and **k6 console**.
+The script tab offers the same "Download k6 test script (.js)" action
+and the matching manual start command, for example:
 
 ```bash
 k6 run -e BASE_URL="https://example.test" lasttest-<run-id>.js
@@ -338,8 +438,13 @@ explicitly.
 
 - **[`USER_GUIDE.md`](./USER_GUIDE.md)** — comprehensive, end-to-end
   English user manual covering the workflow, the demo API, the
-  configuration of every endpoint, running load tests, the report view,
-  the right-click run-badge menu, the settings drawer for language
+  configuration of every endpoint, running load tests, the
+  `Letzte Läufe` panel and its `× N` test counter, the run-detail
+  tab strip (Übersicht · Timeline · Aktionen · k6-Konsole ·
+  Schwellen · Konfiguration · Fehler-Diagnose), the per-endpoint
+  timeline (heat map + Gantt), the live ramp-grafik
+  (Auslastung — Soll vs Ist), the printable report view, the
+  right-click run-row menu, the settings drawer for language
   switching, and troubleshooting.
 - The same guides are available **inside the running application** at
   the top toolbar's **User Guide** and **README** links. They open as
@@ -370,11 +475,14 @@ npm test
 ```
 
 The tests enforce 100 % lines, branches, and functions for the frontend
-logic. They cover the run-badge context-menu classifier (`in-flight` /
+logic. They cover the run-row context-menu classifier (`in-flight` /
 `terminal` / `terminal-aborted`), the payload-pool helpers, the
-multi-run dashboard focus picker, the settings drawer / i18n
-dictionary parity (every key exists in both English and German) and the
-toolbar / status pills / report chrome.
+multi-run dashboard focus picker, the per-endpoint timeline
+(`EndpointTimelineTab.tsx`) helpers (window slicing, day-bucket
+colouring, day-label resolution), the live ramp chart layout
+(`liveRampChartLayout.ts`), the operation-stats helper, the
+settings drawer / i18n dictionary parity (every key exists in both
+English and German) and the toolbar / status pills / report chrome.
 
 ### Frontend E2E tests with Playwright
 
@@ -387,9 +495,13 @@ npm run test:e2e
 Playwright starts `docker compose up --build` when needed, uses Chromium,
 and verifies import errors, file import, parameter / body / Bearer
 configuration, payload strategy selection, load profile limits, successful
-k6 execution, polling, the run-badge right-click menu (rerun, stop,
-copy actions), the multi-run dashboard focus transfer, the report in a
-new tab, the print / PDF trigger, the settings drawer language switch,
+k6 execution, polling, the run-row right-click menu (rerun, stop, copy
+actions), the multi-run dashboard focus transfer, the `Letzte Läufe`
+row list and `× N` counter, the timeline tab (heatmap, Gantt bars,
+window selector), the run-detail tab strip (Übersicht · Timeline ·
+Aktionen · k6 console · Thresholds · Configuration · Failure
+diagnosis), the live ramp-grafik (Soll vs Ist), the report in a new
+tab, the print / PDF trigger, the settings drawer language switch,
 and unknown report IDs. The HTML report is available at
 `frontend/playwright-report/index.html`.
 

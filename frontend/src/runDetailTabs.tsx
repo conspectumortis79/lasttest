@@ -13,10 +13,15 @@
 // [TestRunReport.tsx] still exist for the deep dive, but the
 // quick read is on the dashboard itself.
 
+import { useEffect, useState } from 'react'
 import { useLanguage } from './languageStorage.ts'
 import { translate, type SupportedLanguage } from './i18n.ts'
 import {
+  copyTextToClipboard,
   formatTimestamp,
+  k6ScriptDownloadName,
+  k6ScriptUrl,
+  manualK6Command,
   parseK6Summary,
   type TestRun,
 } from './k6Report.ts'
@@ -346,3 +351,191 @@ function EmptyState({ title, hint }: { title: string, hint: string }) {
     <div className="run-tab-empty-hint">{hint}</div>
   </div>
 }
+
+// =====================================================================
+// K6ScriptTab — download / inspect / run the generated k6 script
+// =====================================================================
+//
+// Renders the actual k6 script that was generated for the current
+// run alongside the manual start command and a short reference
+// card for k6's most common CLI flags. The script text is fetched
+// from `/api/test-runs/{id}/script` the first time the tab is
+// mounted; while the request is in flight the user sees a
+// placeholder. The run-detail tab is the single source of truth
+// for the script and its download link — the printable report
+// (`TestRunReport.tsx`) intentionally omits the script so the
+// two surfaces don't drift. The fetch logic here is the only
+// place where the script body is rendered, which keeps the
+// "no stale copy from a different run" guarantee local.
+//
+// Why this lives in `runDetailTabs.tsx` and not next to the
+// existing download in `App.tsx`: the k6-script tab is a
+// first-class run-detail surface with its own body, copy button
+// and command widget. Pulling the JSX inline into `App.tsx`
+// would push the file past the size where the React tree stays
+// readable; the existing tabs (console / thresholds / config /
+// failure) already follow this same separation.
+
+const K6_DOCS_URL = 'https://grafana.com/docs/k6/latest/using-k6/'
+
+export function K6ScriptTab({ run }: { run: TestRun }) {
+  const { language: lang } = useLanguage()
+  const [script, setScript] = useState<string | undefined>(undefined)
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [copied, setCopied] = useState<'script' | 'command' | null>(null)
+
+  // The script is fetched on mount and whenever the user switches
+  // to a different run. Re-fetching on `run.id` change is
+  // important: the tab body must not keep showing the previous
+  // run's script when the user clicks a different badge in the
+  // [LastRunsPanel]. Caching the response on the client would
+  // shave one round-trip but would also make the cache a new
+  // surface for staleness bugs, so the request is plain and the
+  // server-side cache (H2) does the work.
+  useEffect(() => {
+    let cancelled = false
+    setScript(undefined)
+    setError(undefined)
+    async function load() {
+      try {
+        const response = await fetch(k6ScriptUrl(run.id))
+        if (!response.ok) {
+          throw new Error(response.status === 404
+            ? translate(lang, 'detail.script.error.hint')
+            : translate(lang, 'detail.script.error.hint'))
+        }
+        const text = await response.text()
+        if (!cancelled) setScript(text)
+      } catch (cause) {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : translate(lang, 'detail.script.error.hint'))
+        }
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [run.id, lang])
+
+  // Reset the "copied" badge whenever the run changes — the
+  // visible label should always reflect the current run's
+  // command, not the one the user copied two minutes ago.
+  useEffect(() => { setCopied(null) }, [run.id])
+
+  const command = manualK6Command(run.configuration, run.id)
+  const downloadName = k6ScriptDownloadName(run.id)
+  const downloadHref = k6ScriptUrl(run.id)
+
+  async function handleCopyScript() {
+    if (!script) return
+    if (await copyTextToClipboard(script)) setCopied('script')
+  }
+  async function handleCopyCommand() {
+    if (await copyTextToClipboard(command)) setCopied('command')
+  }
+
+  // Tiny copy-feedback timeout: flip the "copied" pill back to
+  // the idle label after 1.5 s. Mirrors [CopyButton] in
+  // [TestRunReport.tsx] so the two surfaces behave identically.
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(null), 1500)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  return <div className="k6-script-tab">
+    <div className="k6-script-tab-head">
+      <h3 className="k6-script-tab-title">{translate(lang, 'detail.script.heading')}</h3>
+      <p className="k6-script-tab-intro">{translate(lang, 'detail.script.intro')}</p>
+    </div>
+
+    <section className="k6-script-section">
+      <div className="k6-script-section-head">
+        <h4 className="k6-script-section-title">{translate(lang, 'detail.script.heading')}</h4>
+        <div className="k6-script-section-actions">
+          <a
+            className="k6-script-download"
+            href={downloadHref}
+            download={downloadName}
+            aria-label={translate(lang, 'detail.script.download')}
+          >{translate(lang, 'detail.script.download')} ↓</a>
+          <button
+            type="button"
+            className={`k6-script-copy ${copied === 'script' ? 'copied' : ''}`}
+            onClick={handleCopyScript}
+            disabled={!script}
+            aria-label={translate(lang, 'detail.script.copy')}
+          >{copied === 'script' ? translate(lang, 'detail.script.copied') : translate(lang, 'detail.script.copy')}</button>
+        </div>
+      </div>
+      <div className="k6-script-warning">
+        <strong>{translate(lang, 'detail.script.warning.title')}:</strong>{' '}
+        {translate(lang, 'detail.script.warning.body')}
+      </div>
+      {error && <div className="k6-script-error">
+        <div className="k6-script-error-title">{translate(lang, 'detail.script.error.title')}</div>
+        <div className="k6-script-error-hint">{error}</div>
+      </div>}
+      {!error && !script && <div className="k6-script-loading">{translate(lang, 'detail.script.loading')}</div>}
+      {script && <pre className="k6-script-pre" data-testid="k6-script-source">{script}</pre>}
+    </section>
+
+    <section className="k6-script-section">
+      <h4 className="k6-script-section-title">{translate(lang, 'detail.script.manualTitle')}</h4>
+      <p className="k6-script-section-intro">{translate(lang, 'detail.script.manualIntro')}</p>
+      <div className="k6-script-command">
+        <code data-testid="k6-script-command">{command}</code>
+        <button
+          type="button"
+          className={`k6-script-copy ${copied === 'command' ? 'copied' : ''}`}
+          onClick={handleCopyCommand}
+          aria-label={translate(lang, 'detail.script.copyCommand')}
+        >{copied === 'command' ? translate(lang, 'detail.script.copiedCommand') : translate(lang, 'detail.script.copyCommand')}</button>
+      </div>
+    </section>
+
+    <section className="k6-script-section">
+      <h4 className="k6-script-section-title">{translate(lang, 'detail.script.prereqTitle')}</h4>
+      <p className="k6-script-section-intro">{translate(lang, 'detail.script.prereq.intro')}</p>
+      <a
+        className="k6-script-external-link"
+        href="https://grafana.com/docs/k6/latest/set-up/install-k6/"
+        target="_blank"
+        rel="noopener noreferrer"
+      >{translate(lang, 'detail.script.prereq.install')} ↗</a>
+    </section>
+
+    <section className="k6-script-section">
+      <h4 className="k6-script-section-title">{translate(lang, 'detail.script.docsTitle')}</h4>
+      <p className="k6-script-section-intro">{translate(lang, 'detail.script.docsIntro')}</p>
+      <ul className="k6-script-cmd-list">
+        <li>
+          <strong>{translate(lang, 'detail.script.docs.run')}:</strong>{' '}
+          <code>k6 run {downloadName}</code>
+          <div className="k6-script-cmd-desc">{translate(lang, 'detail.script.docs.runDesc')}</div>
+        </li>
+        <li>
+          <strong>{translate(lang, 'detail.script.docs.out')}:</strong>{' '}
+          <code>k6 run --out json=result.json {downloadName}</code>
+          <div className="k6-script-cmd-desc">{translate(lang, 'detail.script.docs.outDesc')}</div>
+        </li>
+        <li>
+          <strong>{translate(lang, 'detail.script.docs.env')}:</strong>{' '}
+          <code>k6 run -e BASE_URL=https://staging.example.com {downloadName}</code>
+          <div className="k6-script-cmd-desc">{translate(lang, 'detail.script.docs.envDesc')}</div>
+        </li>
+        <li>
+          <strong>{translate(lang, 'detail.script.docs.cloud')}:</strong>{' '}
+          <code>k6 run --out cloud {downloadName}</code>
+          <div className="k6-script-cmd-desc">{translate(lang, 'detail.script.docs.cloudDesc')}</div>
+        </li>
+      </ul>
+      <a
+        className="k6-script-external-link"
+        href={K6_DOCS_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+      >{translate(lang, 'detail.script.docs.link')} ↗</a>
+    </section>
+  </div>
+}
+

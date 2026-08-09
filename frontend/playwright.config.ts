@@ -15,10 +15,23 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
+  // The `projects[].use` block REPLACES the top-level `use`
+  // block entirely for the matching project — it does not merge.
+  // We must re-state every shared setting (baseURL,
+  // storageState, …) here, otherwise tests run against a
+  // browser that has no base URL and `page.goto('/')` blows up
+  // with "Cannot navigate to invalid URL".
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://localhost:8286',
+        storageState: storageStatePath,
+        trace: 'retain-on-failure',
+        screenshot: 'only-on-failure',
+        video: 'retain-on-failure',
+      },
     },
   ],
   webServer: {

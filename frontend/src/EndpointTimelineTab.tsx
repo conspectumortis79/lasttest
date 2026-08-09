@@ -5,12 +5,16 @@
 // polled on the same cadence as the run list so a new run
 // shows up in the timeline within a few seconds.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLanguage } from './languageStorage.ts'
 import { translate, type SupportedLanguage } from './i18n.ts'
 import type { TestRun } from './k6Report.ts'
 import { formatTimestamp } from './k6Report.ts'
 import { formatDayTick, formatHourTick } from './endpointTimelineTicks.ts'
+import { RunContextMenu } from './RunContextMenu.tsx'
+import type { MenuItem } from './runMenuItems.ts'
+import { dispatchRunMenuAction, type RunActionHandlers } from './runActionHandlers.ts'
+import { mergeTimelineMenuRuns } from './runDashboard.ts'
 
 export type EndpointTimelineProps = {
   method: string
@@ -35,6 +39,24 @@ export type EndpointTimelineProps = {
    * prop) to leave the existing focus alone.
    */
   focusRunCreatedAt?: string | null
+  /**
+   * Bundle of actions the right-click menu dispatches to. The
+   * parent owns the actual implementation (clipboard, fetch,
+   * state updates) so the tab stays a pure presentation
+   * component. Every handler takes the targeted run id so the
+   * same bundle drives both the focused-run Aktionen tab and
+   * right-click menus on arbitrary past runs (timeline list
+   * items / Gantt bars).
+   */
+  handlers: RunActionHandlers
+  /**
+   * All known runs keyed by id. Required so the right-click
+   * menu can disable the "remove all other failed" item when
+   * no other FAILED run is in the dashboard (see
+   * [buildRunMenuItems]). Without it the user could click the
+   * action with no visible effect.
+   */
+  runs: Record<string, TestRun>
 }
 
 type Window = '24h' | '7d' | '30d' | '90d'
@@ -60,10 +82,15 @@ type DayBucket = {
   status: 'green' | 'yellow' | 'red' | 'empty'
 }
 
-export function EndpointTimelineTab({ method, path, apiTitle, selectedRunId, refreshTick, focusRunCreatedAt }: EndpointTimelineProps) {
+export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focusRunCreatedAt, handlers, runs: runsMap }: EndpointTimelineProps) {
   const { language } = useLanguage()
   const [window_, setWindow] = useState<Window>('7d')
-  const [runs, setRuns] = useState<TestRun[]>([])
+  const [timelineRuns, setTimelineRuns] = useState<TestRun[]>([])
+  // Runs removed from the timeline stay hidden across a refresh of
+  // the endpoint data. The backend remains unchanged; this mirrors
+  // the dashboard's "remove from view" semantics while preventing
+  // the next timeline fetch from immediately restoring the item.
+  const [hiddenRunIds, setHiddenRunIds] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   /**
@@ -75,6 +102,74 @@ export function EndpointTimelineTab({ method, path, apiTitle, selectedRunId, ref
    * default behaviour.
    */
   const [focusedTs, setFocusedTs] = useState<number | null>(null)
+  /**
+   * Right-click menu state. Local to the tab so the menu's
+   * click-outside / Escape listeners do not affect the parent
+   * dashboard's overview-badge menu (they are independent
+   * surfaces and the user can have both open on the same
+   * screen). `null` when no menu is open.
+   */
+  const [runMenu, setRunMenu] = useState<{ runId: string, x: number, y: number } | null>(null)
+  const runMenuRef = useRef<HTMLDivElement | null>(null)
+
+  /**
+   * Opens the menu on a right-click. Anchors at the cursor so
+   * the gesture feels native. `event.preventDefault()` keeps the
+   * browser's own context menu from popping up alongside our
+   * custom one.
+   */
+  function openRunMenu(event: React.MouseEvent, runId: string) {
+    event.preventDefault()
+    setRunMenu({ runId, x: event.clientX, y: event.clientY })
+  }
+
+  /**
+   * Closes the local menu, applies timeline-local cleanup, and
+   * dispatches the picked item to the parent handler bundle.
+   *
+   * Cleanup needs both state updates: `timelineRuns` is owned by
+   * this tab, while the dashboard map is owned by the parent. The
+   * old implementation only called the parent, so historical runs
+   * (which exist solely in `timelineRuns`) never disappeared from
+   * this view. Keeping hidden ids separately also prevents a later
+   * timeline refresh from restoring an item the user dismissed.
+   */
+  async function runMenuAction(item: MenuItem) {
+    if (!runMenu) return
+    const id = runMenu.runId
+    setRunMenu(null)
+    if (item.action === 'remove-from-view') {
+      setHiddenRunIds(current => addHiddenRunIds(current, [id]))
+    } else if (item.action === 'remove-all-other-failed') {
+      const failedRunIds = timelineRuns
+        .filter(run => run.status === 'FAILED' && run.id !== id)
+        .map(run => run.id)
+      setHiddenRunIds(current => addHiddenRunIds(current, failedRunIds))
+    }
+    await dispatchRunMenuAction(item, handlers, id)
+  }
+
+  // Close the menu on outside-click or Escape. Same pattern as
+  // the overview's badge menu — local effect, scoped to this
+  // tab's menu state so the parent dashboard's separate menu
+  // (if open) is unaffected.
+  useEffect(() => {
+    if (!runMenu) return
+    function handlePointer(event: MouseEvent) {
+      if (runMenuRef.current && !runMenuRef.current.contains(event.target as Node)) {
+        setRunMenu(null)
+      }
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setRunMenu(null)
+    }
+    window.addEventListener('mousedown', handlePointer)
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('mousedown', handlePointer)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [runMenu])
 
   // Re-centre the timeline when the parent tells us a new
   // run should drive the focus. The dependency is the ISO
@@ -108,12 +203,12 @@ export function EndpointTimelineTab({ method, path, apiTitle, selectedRunId, ref
       })
       .then(data => {
         if (cancelled) return
-        setRuns(data)
+        setTimelineRuns(data)
       })
       .catch(reason => {
         if (cancelled) return
         setError(translate(language, 'lastRuns.fetchError', { reason: String(reason) }))
-        setRuns([])
+        setTimelineRuns([])
       })
       .finally(() => {
         if (cancelled) return
@@ -133,7 +228,8 @@ export function EndpointTimelineTab({ method, path, apiTitle, selectedRunId, ref
   // Symmetric (= |ts - centerTs| ≤ windowMs/2) is what lets us
   // centre "today" in the middle of the chart instead of
   // pushing it to the right edge.
-  const windowedRuns = runs.filter(run => {
+  const visibleTimelineRuns = timelineRuns.filter(run => !hiddenRunIds.has(run.id))
+  const windowedRuns = visibleTimelineRuns.filter(run => {
     const ts = Date.parse(run.createdAt)
     return Number.isFinite(ts) && Math.abs(ts - centerTs) <= windowMs / 2
   })
@@ -299,10 +395,30 @@ export function EndpointTimelineTab({ method, path, apiTitle, selectedRunId, ref
             const isFocusedRun = isFocused && Math.abs(ts - centerTs) < 1000
             return <div
               key={run.id}
-              className={`timeline-tab-bar ${runStatusClass(run.status)} ${run.id === selectedRunId || isFocusedRun ? 'is-selected' : ''}`}
+              data-run-id={run.id}
+              // The bar's `is-selected` is driven exclusively by
+              // the in-tab focus, NOT by the parent-owned
+              // `selectedRunId`. The two were OR'd together here
+              // and the resulting class lit up two bars at once
+              // whenever the user clicked a different list item:
+              // the parent-driven `selectedRunId` matched the old
+              // active run, and the click-driven `isFocusedRun`
+              // matched the new one. The user expects exactly one
+              // bar to be highlighted at a time, and the timeline
+              // is a navigation surface (not a selection surface),
+              // so the focus is the right source of truth. The
+              // active run is already painted in the run-grid
+              // above; the Gantt should reflect where the user
+              // has scrolled the chart, not the run-grid pick.
+              className={`timeline-tab-bar ${runStatusClass(run.status)} ${isFocusedRun ? 'is-selected' : ''}`}
               style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
               title={`${formatTimestamp(run.createdAt)} · ${run.status} · ${run.id.slice(0, 8)} — ${translate(language, 'detail.timeline.list.item')}`}
               onClick={() => setFocusedTs(ts)}
+              // Right-click opens the same per-run menu as on
+              // the list items below and the overview badges.
+              // The bar is 1.5 % wide so it is small but the
+              // gesture is supported for consistency.
+              onContextMenu={event => openRunMenu(event, run.id)}
             />
           })}
         </div>
@@ -336,25 +452,50 @@ export function EndpointTimelineTab({ method, path, apiTitle, selectedRunId, ref
           const isListFocused = isFocused && Math.abs(listTs - centerTs) < 1000
           return <div
             key={run.id}
-            className={`timeline-tab-list-item ${run.id === selectedRunId || isListFocused ? 'is-selected' : ''}`}
+            data-run-id={run.id}
+            // Mirror of the Gantt-bar fix above: the list item's
+            // `is-selected` is driven by the in-tab focus only.
+            // Adding `run.id === selectedRunId` to the condition
+            // let the previously-active run keep its highlight
+            // after the user clicked a different list item,
+            // producing the "zwei badges markiert" behaviour the
+            // user reported. The list is sorted newest-first and
+            // renders a window into the endpoint's history; the
+            // highlight marks the run whose timestamp is centred
+            // on the chart, which is exactly the focus.
+            className={`timeline-tab-list-item ${isListFocused ? 'is-selected' : ''}`}
             title={`${formatTimestamp(run.createdAt)} · ${run.status} · ${run.id.slice(0, 8)} — ${translate(language, 'detail.timeline.list.item')}`}
             // Klick auf einen Eintrag in der Liste springt NUR
-            // im Zeitstrahl zu dieser Zeit (setFocusedTs). Der
+            // im Zeitstrahl zu dieser Zeit (`setFocusedTs`). Der
             // aktive Run im Inspector wird bewusst NICHT ge­
-            // wechselt: der Wechsel passiert weiterhin über die
-            // [LastRunsPanel] oben. So bleibt der Nutzer im
-            // Timeline-Tab, die Tab-Leiste verschwindet nicht,
-            // und der Fokus auf den angeklickten Zeitpunkt
-            // überlebt den Klick. Daten werden nicht neu ge­
-            // laden — `setFocusedTs` ist eine reine Client-State-
-            // Änderung.
+            // wechselt: die Timeline-Liste rendert Runs aus
+            // einem eigenen Fetch (`/api/operations/runs`), die
+            // nicht zwingend in der `runs`-Map des Parents
+            // liegen. Würden wir hier `handlers.onFocusRun(run.id)`
+            // aufrufen und die Id fehlt im Parent, würde der
+            // Inspector zusammenbrechen (`run` würde `undefined`
+            // und das ganze `RunDetail` würde verschwinden — die
+            // "Seite springt weg"-Symptomatik, die der Nutzer
+            // nach der ersten Implementierung dieser Brücke
+            // gemeldet hat). Der Wechsel passiert weiterhin aus­
+            // schließlich über die Run-Badges im Übersicht-Tab.
+            // `setFocusedTs` ist eine reine Client-State-Änderung,
+            // keine Daten-Neuladung.
             onClick={() => setFocusedTs(listTs)}
+            // Right-click opens the same per-run context menu
+            // as on the overview badges and the Gantt bars
+            // above. The list item is the primary target — it
+            // is much larger than the 1.5 %-wide Gantt bar and
+            // therefore easier to hit. The menu lives in
+            // [RunContextMenu] so both surfaces stay in sync
+            // by construction.
+            onContextMenu={event => openRunMenu(event, run.id)}
           >
-            {(run.id === selectedRunId || isListFocused) && <span className="pin" aria-hidden="true">●</span>}
+            {isListFocused && <span className="pin" aria-hidden="true">●</span>}
             <div className="top">
               <span className={`status-badge is-${runStatusBadgeClass(run.status)}`}>{runStatusBadgeLabel(run.status, language)}</span>
               <span className="when">
-                <span className="rel">{relativeWhen(run.createdAt, centerTs, language)}</span>
+                <span className="rel">{relativeWhen(run.createdAt, now, language)}</span>
                 <br />
                 <span className="abs">{formatTimestamp(run.createdAt)} · {run.id.slice(0, 8)}</span>
               </span>
@@ -374,7 +515,39 @@ export function EndpointTimelineTab({ method, path, apiTitle, selectedRunId, ref
         </div>
       )}
     </div>
+    {/* Right-click menu — same component as the overview uses,
+        so the item list (status-dependent focus / rerun /
+        share / cleanup actions) stays in lockstep by
+        construction. The menu state is local to this tab so
+        closing it does not affect the parent dashboard's
+        overview-badge menu. */}
+    {runMenu && (() => {
+      // Resolve the run (and its sibling scan for "remove all
+      // other failed") from a merged source. The dashboard map
+      // only contains runs started in this session; historical
+      // runs live exclusively in [timelineRuns]. Looking up the
+      // run from the dashboard map alone made the menu
+      // immediately call `onClose()` (its defensive
+      // `if (!run) return null` path) on every right-click on a
+      // historical run, which is the bug fixed here.
+      const menuRuns = mergeTimelineMenuRuns(runsMap, visibleTimelineRuns)
+      return <RunContextMenu
+        menu={runMenu}
+        run={menuRuns[runMenu.runId]}
+        runs={menuRuns}
+        language={language}
+        onAction={runMenuAction}
+        onClose={() => setRunMenu(null)}
+        menuRef={runMenuRef}
+      />
+    })()}
   </div>
+}
+
+function addHiddenRunIds(current: ReadonlySet<string>, runIds: Iterable<string>): Set<string> {
+  const next = new Set(current)
+  for (const runId of runIds) next.add(runId)
+  return next
 }
 
 function dayLabel(ts: number, center: number, language: SupportedLanguage): string {

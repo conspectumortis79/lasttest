@@ -6,16 +6,12 @@ import {
   buildSollPath,
   checkSuccessRate,
   completedRequestCount,
-  copyTextToClipboard,
   extractPayloadUsage,
   FALLBACK_CODES,
   formatBytes,
   formatInteger,
   formatNumber,
   formatTimestamp,
-  k6ScriptDownloadName,
-  k6ScriptUrl,
-  manualK6Command,
   metric,
   operationDisplayPath,
   parseK6Summary,
@@ -45,8 +41,6 @@ type TestRunReportPageProps = {
 export function TestRunReportPage({ runId }: TestRunReportPageProps) {
   const { language } = useLanguage()
   const [run, setRun] = useState<TestRun>()
-  const [generatedScript, setGeneratedScript] = useState<string>()
-  const [scriptError, setScriptError] = useState('')
   const [error, setError] = useState('')
   // Time-series from InfluxDB. Only loaded once, as soon as the run
   // is COMPLETED. EMPTY_TIME_SERIES means "not yet loaded or not
@@ -89,27 +83,6 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
     }
   }, [runId, language])
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadScript() {
-      try {
-        const response = await fetch(k6ScriptUrl(runId))
-        if (!response.ok) throw new Error(response.status === 404 ? 'Das generierte k6-Skript wurde nicht gefunden.' : 'Das generierte k6-Skript konnte nicht geladen werden.')
-        const script = await response.text()
-        if (!cancelled) {
-          setGeneratedScript(script)
-          setScriptError('')
-        }
-      } catch (cause) {
-        if (!cancelled) setScriptError(cause instanceof Error ? cause.message : 'Das generierte k6-Skript konnte nicht geladen werden.')
-      }
-    }
-
-    loadScript()
-    return () => { cancelled = true }
-  }, [runId])
-
   // Polling of the time series: once after COMPLETED. Earlier
   // statuses (QUEUED/RUNNING) do not yield useful data from InfluxDB
   // anyway; FAILED runs are uninteresting for the load curve.
@@ -133,8 +106,8 @@ export function TestRunReportPage({ runId }: TestRunReportPageProps) {
   return <ReportShell>
     <ReportHeader run={run} />
     {summary
-      ? <CompletedReport run={run} summary={summary} generatedScript={generatedScript} scriptError={scriptError} timeSeries={timeSeries} />
-      : <PendingOrFailedReport run={run} generatedScript={generatedScript} scriptError={scriptError} now={runNow} />}
+      ? <CompletedReport run={run} summary={summary} timeSeries={timeSeries} />
+      : <PendingOrFailedReport run={run} now={runNow} />}
   </ReportShell>
 }
 
@@ -171,14 +144,10 @@ function ReportHeader({ run }: { run: TestRun }) {
 function CompletedReport({
   run,
   summary,
-  generatedScript,
-  scriptError,
   timeSeries,
 }: {
   run: TestRun
   summary: K6Summary
-  generatedScript?: string
-  scriptError: string
   timeSeries: TimeSeriesResponse
 }) {
   const { language: lang } = useLanguage()
@@ -229,7 +198,6 @@ function CompletedReport({
     {run.configuration && <RampSection profile={run.configuration.loadProfile} timeSeries={timeSeries} />}
     <StatusCodeDistribution summary={summary} run={run} />
     <DetailedMetrics summary={summary} />
-    <RawResults run={run} generatedScript={generatedScript} scriptError={scriptError} />
   </>
 }
 
@@ -553,77 +521,11 @@ function DurationRow({ label, value }: { label: string, value: K6Metric }) {
   </tr>
 }
 
-function RawResults({
-  run,
-  generatedScript,
-  scriptError,
-}: {
-  run: TestRun
-  generatedScript?: string
-  scriptError: string
-}) {
-  const { language: lang } = useLanguage()
-  return <section className="report-section report-raw">
-    <h2>{translate(lang, 'report.rawData')}</h2>
-    {run.error && <details><summary>{translate(lang, 'report.console')}</summary><pre>{run.error}</pre></details>}
-    {run.summary && <details><summary>{translate(lang, 'report.json')}</summary><pre>{formatJson(run.summary.raw)}</pre></details>}
-    <GeneratedK6Script run={run} generatedScript={generatedScript} scriptError={scriptError} />
-  </section>
-}
-
-function GeneratedK6Script({
-  run,
-  generatedScript,
-  scriptError,
-}: {
-  run: TestRun
-  generatedScript?: string
-  scriptError: string
-}) {
-  const { language: lang } = useLanguage()
-  const command = manualK6Command(run.configuration, run.id)
-  return <>
-    <details className="report-script">
-      <summary>{translate(lang, 'report.script')}</summary>
-      {scriptError && <div className="report-alert failure">{scriptError}</div>}
-      {!generatedScript && !scriptError && <div className="report-loading">{translate(lang, 'common.loading')}</div>}
-      {generatedScript && <>
-        <div className="script-warning"><strong>{translate(lang, 'report.script.warning', { strong: 'strong' })}</strong> {translate(lang, 'report.script.warningBody')}</div>
-        <pre data-testid="generated-k6-script">{generatedScript}</pre>
-        <div className="script-actions">
-          <a
-            className="script-download"
-            href={k6ScriptUrl(run.id)}
-            download={k6ScriptDownloadName(run.id)}
-          >{translate(lang, 'report.script.download')} (.js) ↓</a>
-        </div>
-        <div className="script-command">
-          <div className="script-command-header">
-            <span>{translate(lang, 'report.manualStart')}</span>
-            <CopyButton
-              text={command}
-              label={translate(lang, 'report.command.copy')}
-              copiedLabel={translate(lang, 'report.command.copied')}
-              ariaLabel={translate(lang, 'report.command.copyAria')}
-              copiedAriaLabel={translate(lang, 'report.command.copiedAria')}
-            />
-          </div>
-          <code>{command}</code>
-        </div>
-      </>}
-    </details>
-  </>
-}
-
 function PendingOrFailedReport({
   run,
-  generatedScript,
-  scriptError,
   now,
 }: {
   run: TestRun
-  generatedScript?: string
-  scriptError: string
   now: number
 }) {
   const { language: lang } = useLanguage()
@@ -639,16 +541,7 @@ function PendingOrFailedReport({
     <RunStatusView run={run} now={now} />
     <TestConfiguration run={run} />
     {run.error && <pre>{run.error}</pre>}
-    <GeneratedK6Script run={run} generatedScript={generatedScript} scriptError={scriptError} />
   </section>
-}
-
-function formatJson(raw: string): string {
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2)
-  } catch {
-    return raw
-  }
 }
 
 // ---- Load profile & Ramp chart -------------------------------------------
@@ -807,38 +700,4 @@ function peakFromSoll(profile: ReportLoadProfile): number {
     default:
       return 0
   }
-}
-
-
-type CopyButtonProps = {
-  text: string
-  label: string
-  copiedLabel: string
-  ariaLabel: string
-  copiedAriaLabel: string
-}
-
-function CopyButton({ text, label, copiedLabel, ariaLabel, copiedAriaLabel }: CopyButtonProps) {
-  const [copied, setCopied] = useState(false)
-
-  useEffect(() => {
-    if (!copied) return
-    const timeout = window.setTimeout(() => setCopied(false), 1500)
-    return () => window.clearTimeout(timeout)
-  }, [copied])
-
-  async function handleClick() {
-    if (await copyTextToClipboard(text)) setCopied(true)
-  }
-
-  return (
-    <button
-      type="button"
-      className={copied ? 'script-copy copied' : 'script-copy'}
-      aria-label={copied ? copiedAriaLabel : ariaLabel}
-      onClick={handleClick}
-    >
-      {copied ? copiedLabel : label}
-    </button>
-  )
 }

@@ -29,6 +29,14 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")
+    // The `com.fasterxml.jackson` ObjectMapper used by the
+    // service and controller layers needs the Kotlin module
+    // to deserialise Kotlin data classes (CreateTestRunRequest,
+    // TestRunConfiguration). Without it Jackson cannot find
+    // a constructor for the class and silently returns null,
+    // which would turn every historical-rerun lookup into a
+    // 409 instead of a 202.
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("io.swagger.parser.v3:swagger-parser:2.1.37")
     // H2 is used as the embedded database for persisting test runs,
     // time-series samples, per-operation statistics, and the demo

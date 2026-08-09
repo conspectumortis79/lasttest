@@ -47,12 +47,16 @@
    - 9.5 [Payload-Strategie — sequenziell vs. zufällig](#95-payload-strategie--sequenziell-vs-zufällig)
    - 9.6 [Validierung und Limits](#96-validierung-und-limits)
 10. [Schritt 4 — Test starten und Ergebnis lesen](#10-schritt-4--test-starten-und-ergebnis-lesen)
-    - 10.1 [Das Multi-Run-Dashboard](#101-das-multi-run-dashboard)
-      - 10.1.1 [Rechtsklick auf ein Badge öffnet das Aktions-Menü](#1011-rechtsklick-auf-ein-badge-öffnet-das-aktions-menü)
-    - 10.2 [Das Aktions-Menü am Run-Badge (Rechtsklick)](#102-das-aktions-menü-am-run-badge-rechtsklick)
-    - 10.3 [Live-Status](#103-live-status)
-    - 10.4 [Diagnose, Metriken, Konsolenausgabe und Roh-JSON](#104-diagnose-metriken-konsolenausgabe-und-roh-json)
+    - 10.1 [Das `Letzte Läufe`-Panel — Multi-Run-Dashboard](#101-das-letzte-läufe-panel--multi-run-dashboard)
+      - 10.1.1 [Der `× N`-Test-Zähler](#1011-der--n-test-zähler)
+      - 10.1.2 [Rechtsklick auf eine Zeile öffnet das Aktions-Menü](#1012-rechtsklick-auf-eine-zeile-öffnet-das-aktions-menü)
+    - 10.2 [Das Aktions-Menü am Run-Row (Rechtsklick)](#102-das-aktions-menü-am-run-row-rechtsklick)
+    - 10.3 [Live-Status und der `Live · Lasttest läuft`-Banner](#103-live-status-und-der-live--lasttest-läuft-banner)
+    - 10.4 [Diagnose und Metriken](#104-diagnose-und-metriken)
     - 10.5 [Erneut ausführen](#105-erneut-ausführen)
+    - 10.6 [Run-Detail-Tab-Strip](#106-run-detail-tab-strip)
+    - 10.7 [Pro-Endpunkt-Timeline (Heatmap + Gantt)](#107-pro-endpunkt-timeline-heatmap--gantt)
+    - 10.8 [Live-Ramp-Grafik (Auslastung — Soll vs Ist)](#108-live-ramp-grafik-auslastung--soll-vs-ist)
 11. [Schritt 5 — Den ausführlichen k6-Report lesen](#11-schritt-5--den-ausführlichen-k6-report-lesen)
     - 11.1 [Report öffnen](#111-report-öffnen)
     - 11.2 [Sektionen des Reports](#112-sektionen-des-reports)
@@ -350,7 +354,7 @@ Session, also ist das Umschalten ein harter Schnitt:
   k6-Prozesse verschwinden, bevor der Rest des States gelöscht
   wird. Der Cancel-Request ist best-effort: Wenn das Backend den
   Run bereits abgeschlossen hat, ist der Call ein No-op.
-- Die Runs-Map wird geleert — keine Badges, keine Detail-Karte,
+- Die Runs-Map wird geleert — keine Zeilen, keine Detail-Karte,
   kein Run-Menü-State.
 - Die importierte Spec wird vergessen — die Operations-Karte
   (Schritt 2) verschwindet, die `selected` / `collapsed` /
@@ -359,7 +363,7 @@ Session, also ist das Umschalten ein harter Schnitt:
   (`constant-vus`, 10 VUs für 30 s). Preset-Auswahl,
   Exekutor-Wechsel oder Feldjustierungen werden zurückgenommen.
 - Die Fehler- und Run-Action-Banner werden geleert.
-- Das Rechtsklick-Kontextmenü an einem Run-Badge, falls es offen
+- Das Rechtsklick-Kontextmenü an einer Run-Zeile, falls es offen
   war, wird geschlossen.
 
 > 💡 **Warum der Reset symmetrisch ist.** Die Demo umzuschalten
@@ -390,12 +394,20 @@ lasttest ist in vier nummerierte Karten gegliedert:
    justieren, optional ein Preset laden (Smoke, Load, Stress, Spike,
    Soak, Arrival-Rate) und die **Payload-Strategie** festlegen
    (sequenziell oder zufällig — siehe [Abschnitt 9.5](#95-payload-strategie--sequenziell-vs-zufällig)).
-4. **Testlauf** — starten, beobachten und Ergebnis prüfen. Ein
-   **Rechtsklick auf ein Run-Badge** öffnet ein Aktions-Menü mit
+4. **Testlauf** — starten, beobachten und Ergebnis prüfen. Das
+   `Letzte Läufe`-Panel listet jeden k6-Lauf der aktuellen Session
+   als Zeile mit `× N`-Test-Zähler auf. Die Detail-Karte nutzt
+   einen Tab-Strip (Übersicht · Timeline · Aktionen · k6-Konsole
+   · Schwellen · Konfiguration · Fehler-Diagnose). Der
+   **Übersicht**-Tab zeigt die **Live-Ramp-Grafik** (`Auslastung —
+   Soll vs Ist`), solange der Lauf in flight ist; der
+   **Timeline**-Tab zeigt eine Pro-Endpunkt-Heatmap + Gantt mit
+   jeder historischen Lauf-Zeile für dieselbe Operation. Ein
+   **Rechtsklick auf eine Run-Zeile** öffnet ein Aktions-Menü mit
    *Stop*, *Force Abort*, *Erneut ausführen* (Rerun), *Run-ID
    kopieren*, *Report-Link kopieren*, *Report öffnen* und
    *k6-JSON exportieren* (Details in
-   [Abschnitt 10.2](#102-das-aktions-menü-am-run-badge-rechtsklick)).
+   [Abschnitt 10.2](#102-das-aktions-menü-am-run-row-rechtsklick)).
 
 Du gehst von oben nach unten vor. Jeder Schritt ist unabhängig und
 idempotent: du kannst eine Spec neu importieren, Endpunkte neu
@@ -407,6 +419,9 @@ Der Report in Schritt 4 enthält eine
 vergleicht, die du *geplant* hast (Soll), mit der Last, die k6
 tatsächlich erzeugt hat (Ist). Die Ist-Linie ist nur verfügbar, wenn
 InfluxDB läuft; siehe [Abschnitt 3.2](#32-docker-mit-influxdb--grafana-zeitreihen).
+Dasselbe Diagramm lebt auch auf dem **Übersicht**-Tab des Dashboards
+als Live-SVG, das sich aktualisiert, solange der Lauf in flight ist
+— siehe [§10.8](#108-live-ramp-grafik-auslastung--soll-vs-ist).
 
 ---
 
@@ -493,7 +508,7 @@ beschrieben.
 > `Dashboard / User Guide / README / DE`, die Status-Pills rendern
 > `EINGEREIHT`, `LÄUFT`, `GESTOPPT`, `BESTANDEN`,
 > `FEHLGESCHLAGEN`, `ABGEBROCHEN`, und das Rechtsklick-Menü an
-> einem Run-Badge sagt **Erneut ausführen** statt *Rerun*. Lade die
+> einer Run-Zeile sagt **Erneut ausführen** statt *Rerun*. Lade die
 > Seite neu — Deutsch ist weiterhin aktiv. Um zu Englisch
 > zurückzukehren, klick erneut ⚙ und wähle **🇬🇧 English**.
 
@@ -1216,21 +1231,22 @@ ist hervorgehoben.
 
 Sobald der Lauf akzeptiert ist, erscheint die vierte Karte mit:
 
-- einem **Multi-Run-Dashboard** (ein Badge pro Lauf, der in der
-  aktuellen Session gestartet wurde),
-- einem farbigen Status-Badge für den Lauf, den du gerade
-  beobachtest,
-- einem Deep-Link auf den druckoptimierten Report,
-- optional die aufgefangene k6-Konsolenausgabe und das rohe JSON.
+- einem **`Letzte Läufe`-Panel** (eine Zeile pro Lauf, der in der
+  aktuellen Session gestartet wurde, mit einem `× N`-Test-Zähler
+  pro Endpunkt),
+- der Run-Detail-Karte für den fokussierten Lauf, organisiert als
+  Tab-Strip (Übersicht · Timeline · Aktionen · k6-Konsole ·
+  Schwellen · Konfiguration · Fehler-Diagnose · ↗ k6-Bericht),
+- einem Deep-Link auf den druckoptimierten Report.
 
-### 10.1 Das Multi-Run-Dashboard
+### 10.1 Das `Letzte Läufe`-Panel — Multi-Run-Dashboard
 
 Jeder k6-Lauf, den du in der aktuellen Session startest, erscheint
-als kompaktes **Badge** in einem horizontalen Grid über der
-Detail-Karte. Das Badge ist das Fokus-Ziel — ein einzelner Linksklick
-bewegt die Detail-Karte zu diesem Lauf, ein Rechtsklick öffnet das
-Aktions-Menü (siehe
-[Abschnitt 10.2](#102-das-aktions-menü-am-run-badge-rechtsklick)). Ein
+als kompakte **Zeile** im `Letzte Läufe`-Panel über der
+Detail-Karte. Die Zeile ist das Fokus-Ziel — ein einzelner
+Linksklick bewegt die Detail-Karte zu diesem Lauf, ein Rechtsklick
+öffnet das Aktions-Menü (siehe
+[Abschnitt 10.2](#102-das-aktions-menü-am-run-row-rechtsklick)). Ein
 status-farbiger Streifen an der linken Kante kodiert den
 Lauf-Zustand:
 
@@ -1242,29 +1258,113 @@ Lauf-Zustand:
 | `STOPPED` | lila | Du hast einen graceful Stop angefordert (`SIGTERM`); k6 ist sauber ausgelaufen. |
 | `ABORTED` | dunkelrot | Du hast auf `SIGKILL` eskaliert (oder `STOPPING` wurde von `force` gefolgt); Metriken können unvollständig sein. |
 
-Eine Zeile im Grid enthält:
+```svg
+<svg viewBox="0 0 600 220" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="600" height="220" fill="#0b1220" rx="8"/>
+  <text x="20" y="28" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="13" font-weight="600">Letzte Läufe</text>
+  <text x="120" y="28" fill="#93a2b8" font-family="Inter, sans-serif" font-size="11">Lasttest Demo API runs</text>
+  <rect x="500" y="14" width="80" height="20" fill="#111b29" stroke="#2c3a52" rx="4"/>
+  <text x="540" y="28" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">Filter</text>
+  <line x1="20" y1="46" x2="580" y2="46" stroke="#2c3a52" stroke-width="1"/>
+
+  <!-- Zeile 1: COMPLETED (aktiv) -->
+  <rect x="20" y="56" width="560" height="46" fill="#15233a" stroke="#2c3a52" rx="4"/>
+  <rect x="20" y="56" width="3" height="46" fill="#22c55e"/>
+  <circle cx="36" cy="79" r="5" fill="#22c55e"/>
+  <rect x="48" y="71" width="36" height="16" fill="#0b3a25" stroke="#22c55e" rx="3"/>
+  <text x="66" y="82" text-anchor="middle" fill="#8fe8c1" font-family="Inter, sans-serif" font-size="9" font-weight="600">GET</text>
+  <rect x="90" y="71" width="86" height="16" fill="#0d3320" rx="8"/>
+  <text x="133" y="82" text-anchor="middle" fill="#8fe8c1" font-family="Inter, sans-serif" font-size="9" font-weight="600">BESTANDEN</text>
+  <text x="184" y="82" fill="#dbe5f3" font-family="monospace" font-size="11">/products/me</text>
+  <rect x="316" y="71" width="34" height="16" fill="#1f2a3d" rx="3"/>
+  <text x="333" y="82" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">× 4</text>
+  <text x="184" y="96" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">10 VUs · 30 s · <tspan fill="#fb923c">Rechtsklick</tspan> für Aktionen</text>
+  <text x="475" y="78" text-anchor="end" fill="#dbe5f3" font-family="monospace" font-size="11">00:32 / ~00:30</text>
+  <text x="572" y="78" text-anchor="end" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">gerade eben</text>
+
+  <!-- Zeile 2: RUNNING -->
+  <rect x="20" y="108" width="560" height="46" fill="#0b1220" stroke="#2c3a52" rx="4"/>
+  <rect x="20" y="108" width="3" height="46" fill="#fb923c"/>
+  <circle cx="36" cy="131" r="5" fill="#fb923c"/>
+  <rect x="48" y="123" width="46" height="16" fill="#3a2a0b" stroke="#fb923c" rx="3"/>
+  <text x="71" y="134" text-anchor="middle" fill="#fb923c" font-family="Inter, sans-serif" font-size="9" font-weight="600">POST</text>
+  <rect x="100" y="123" width="74" height="16" fill="#3a2a0b" rx="8"/>
+  <text x="137" y="134" text-anchor="middle" fill="#fb923c" font-family="Inter, sans-serif" font-size="9" font-weight="600">LÄUFT …</text>
+  <text x="182" y="134" fill="#dbe5f3" font-family="monospace" font-size="11">/products/search</text>
+  <rect x="318" y="123" width="34" height="16" fill="#1f2a3d" rx="3"/>
+  <text x="335" y="134" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">× 7</text>
+  <text x="182" y="148" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">20 VUs · 60 s · <tspan fill="#fb923c">Rechtsklick</tspan> für Aktionen</text>
+  <text x="475" y="130" text-anchor="end" fill="#dbe5f3" font-family="monospace" font-size="11">00:18 / ~01:00</text>
+  <text x="572" y="130" text-anchor="end" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">vor 2 min</text>
+
+  <!-- Zeile 3: FAILED -->
+  <rect x="20" y="160" width="560" height="46" fill="#0b1220" stroke="#2c3a52" rx="4"/>
+  <rect x="20" y="160" width="3" height="46" fill="#ef4444"/>
+  <circle cx="36" cy="183" r="5" fill="#ef4444"/>
+  <rect x="48" y="175" width="36" height="16" fill="#3a0b0b" stroke="#ef4444" rx="3"/>
+  <text x="66" y="186" text-anchor="middle" fill="#ffb5c3" font-family="Inter, sans-serif" font-size="9" font-weight="600">GET</text>
+  <rect x="90" y="175" width="74" height="16" fill="#3a0b0b" rx="8"/>
+  <text x="127" y="186" text-anchor="middle" fill="#ffb5c3" font-family="Inter, sans-serif" font-size="9" font-weight="600">FEHLGESCHL.</text>
+  <text x="172" y="186" fill="#dbe5f3" font-family="monospace" font-size="11">/products/admin/stats</text>
+  <rect x="358" y="175" width="34" height="16" fill="#1f2a3d" rx="3"/>
+  <text x="375" y="186" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">× 2</text>
+  <text x="172" y="200" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">10 VUs · 30 s · <tspan fill="#fb923c">Rechtsklick</tspan> für Aktionen</text>
+  <text x="475" y="182" text-anchor="end" fill="#dbe5f3" font-family="monospace" font-size="11">exit 1</text>
+  <text x="572" y="182" text-anchor="end" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">vor 5 min</text>
+</svg>
+```
+
+Eine Zeile in der Liste enthält:
 
 - die HTTP-Methode als farbiger Chip (grün GET, braun POST, blau
   PUT/PATCH, rot DELETE),
-- den Lauf-Status als Text,
-- den Operations-Pfad in Monospace.
+- den Lauf-Status als farbiges Badge,
+- den Operations-Pfad in Monospace,
+- einen kleinen **× N**-Chip, der anzeigt, wie oft derselbe
+  Endpunkt bereits getestet wurde (gespeist aus
+  `/api/operations/stats`),
+- einen einzeiligen Meta-String (`10 VUs · 30 s`),
+- die Spalte **Verstrichen / Geplant**,
+- einen **relativen `when`-Stempel** rechts (`gerade eben`,
+  `vor 5 min`, `gestern` …).
 
 Fokus-Übergabe-Regeln (siehe `runDashboard.pickActiveRunId`):
 
-- **Neuen Lauf starten** fokussiert das neue Badge (damit der
+- **Neuen Lauf starten** fokussiert die neue Zeile (damit der
   Nutzer den Live-Status sofort sieht).
-- **Erneut ausführen via Rechtsklick** folgt derselben Regel — das
-  frische Badge wird aktiv.
-- **Anderes Badge anklicken** fokussiert es. Der zuvor fokussierte
+- **Erneut ausführen via Rechtsklick** folgt derselben Regel — die
+  frische Zeile wird aktiv.
+- **Andere Zeile anklicken** fokussiert sie. Der zuvor fokussierte
   Lauf wird weiter gepollt, bis er einen Terminal-Zustand erreicht,
   aber die Detail-Karte zeigt nur den fokussierten.
 - **Stoppen / Abbrechen via Rechtsklick** bewegt den Fokus nicht;
   der Nutzer beobachtet denselben Lauf weiter, während er
   transitiert.
 
-#### 10.1.1 Rechtsklick auf ein Badge öffnet das Aktions-Menü
+#### 10.1.1 Der `× N`-Test-Zähler
 
-Jedes Badge im Dashboard reagiert auf einen **Rechtsklick**: ein
+Der `× N`-Chip neben dem Operations-Namen jeder Zeile kommt aus
+`/api/operations/stats` und wird alle 5 s gepollt, solange das
+Panel montiert ist. Der Chip ist datengetrieben durch
+`useOperationStats`:
+
+- zeigt die nackte Zahl, wenn dasselbe `(method, path)`-Paar
+  bereits getestet wurde (z. B. `× 4`),
+- fällt auf `neu` zurück, solange das Backend noch nicht geantwortet
+  hat — das Panel funktioniert also auch beim Cold-Start, offline
+  oder wenn das Backend nicht erreichbar ist,
+- aktualisiert sich sofort, nachdem ein neuer Lauf eingereiht
+  wurde, sodass der Zähler ohne Warten auf den nächsten
+  Polling-Zyklus hochzählt.
+
+Der Chip ist rein informativ; er beeinflusst weder den
+Lauf-Status noch den Fokus. Beim Hover erscheint der Tooltip
+*„Dieser Endpunkt wurde insgesamt N× getestet"* (bzw. *„Dieser
+Endpunkt wurde noch nicht getestet"* bei `neu`).
+
+#### 10.1.2 Rechtsklick auf eine Zeile öffnet das Aktions-Menü
+
+Jede Zeile im Panel reagiert auf einen **Rechtsklick**: ein
 kleines Kontextmenü erscheint an der Cursor-Position mit einer
 zugeschnittenen Aktionsliste für diesen Lauf. Der Linksklick ist
 dem *Fokussieren* vorbehalten; der Rechtsklick dem *Handeln*. `Esc`
@@ -1272,14 +1372,15 @@ oder ein Klick außerhalb des Menüs schließt es.
 
 Die sichtbaren Items passen sich dem aktuellen Status des Laufs an
 — die vollständige Referenz mit HTTP-Endpunkten, Tastatur-Shortcuts
-und Disabled-State-Regeln liegt in [Abschnitt 10.2](#102-das-aktions-menü-am-run-badge-rechtsklick).
+und Disabled-State-Regeln liegt in
+[Abschnitt 10.2](#102-das-aktions-menü-am-run-row-rechtsklick).
 Kurzüberblick, was der Rechtsklick freischaltet:
 
 **Für `QUEUED` / `RUNNING` / `STOPPING`-Läufe (k6 besitzt den Prozess noch):**
 
 | Item | Wirkung |
 | --- | --- |
-| **Live-Details anzeigen** | Fokussiert das Badge (wie Linksklick). |
+| **Live-Details anzeigen** | Fokussiert die Zeile (wie Linksklick). |
 | **Run-ID kopieren** | Kopiert die UUID des Laufs in die Zwischenablage. |
 | **k6-Webreport öffnen** | Öffnet den druckoptimierten Report in einem neuen Tab. |
 | **Stop (graceful)** | Sendet `SIGTERM`; k6 läuft sauber aus, der Lauf endet als `STOPPED`. |
@@ -1289,35 +1390,35 @@ Kurzüberblick, was der Rechtsklick freischaltet:
 
 | Item | Wirkung |
 | --- | --- |
-| **Zusammenfassung anzeigen** / **Aborted-Details anzeigen** | Fokussiert das Badge (Label passt sich dem Status an). |
+| **Zusammenfassung anzeigen** / **Aborted-Details anzeigen** | Fokussiert die Zeile (Label passt sich dem Status an). |
 | **Report-Link kopieren** | Kopiert die Report-URL in die Zwischenablage. |
 | **k6-Webreport öffnen** | Öffnet den druckoptimierten Report in einem neuen Tab. |
 | **k6-JSON exportieren** | Lädt das rohe k6-Summary-JSON herunter (deaktiviert, wenn keine Summary vorliegt). |
 | **Erneut ausführen** | Führt dasselbe Szenario gegen dieselbe Base-URL mit einer frischen Run-ID erneut aus. |
-| **Aus Ansicht entfernen** | Entfernt das geklickte Badge aus dem In-Memory-Dashboard (Page-Refresh macht es rückgängig). |
-| **Alle anderen fehlgeschlagenen Läufe entfernen** | Entfernt jedes andere `FAILED`-Badge aus dem Dashboard (deaktiviert, wenn kein weiteres `FAILED`-Badge existiert). |
+| **Aus Ansicht entfernen** | Entfernt die geklickte Zeile aus dem In-Memory-Dashboard (Page-Refresh macht es rückgängig). |
+| **Alle anderen fehlgeschlagenen Läufe entfernen** | Entfernt jede andere `FAILED`-Zeile aus dem Dashboard (deaktiviert, wenn keine weitere `FAILED`-Zeile existiert). |
 
 Das Dashboard pollt `/api/test-runs/{id}` für **jeden non-terminalen
-Lauf** parallel einmal pro Sekunde, sodass mehrere Badges
+Lauf** parallel einmal pro Sekunde, sodass mehrere Zeilen
 gleichzeitig aktualisieren können. Das Terminal-Zustand-Prädikat ist
 die einzige Source of Truth in `runDashboard.isTerminalRun()`
 (unit-getestet) — das Frontend pollt `STOPPING`-Läufe mit Absicht
-weiter, sonst würde der Übergang `STOPPING → STOPPED` das Badge
+weiter, sonst würde der Übergang `STOPPING → STOPPED` die Zeile
 für immer einfrieren.
 
 > 💡 **Beispiel — zwei Smoke-Läufe vergleichen:** Du hast die Demo
 > mit `Smoke` (10 s, 10 VUs) um 14:00 laufen lassen und die
-> Base-URL vor einem zweiten Lauf um 14:02 geändert. Beide Badges
-> sind im Grid sichtbar. Das erste ist grün (`COMPLETED`), das
-> zweite ist das aktive Badge. Klick auf das ältere, um es zu
+> Base-URL vor einem zweiten Lauf um 14:02 geändert. Beide Zeilen
+> sind in der Liste sichtbar. Die erste ist grün (`COMPLETED`), die
+> zweite ist die aktive Zeile. Klick auf die ältere, um sie zu
 > prüfen; Rechtsklick darauf und wähle **Erneut ausführen**, um
-> einen dritten Lauf zu feuern, den lasttest zum selben Grid
+> einen dritten Lauf zu feuern, den lasttest zur selben Liste
 > hinzufügt — der Fokus springt automatisch auf den jüngsten
 > in-flight-Lauf.
 
-### 10.2 Das Aktions-Menü am Run-Badge (Rechtsklick)
+### 10.2 Das Aktions-Menü am Run-Row (Rechtsklick)
 
-Rechtsklick auf ein Badge öffnet ein kleines **Kontextmenü** an der
+Rechtsklick auf eine Zeile öffnet ein kleines **Kontextmenü** an der
 Cursor-Position. Das Menü bietet nur Aktionen, die für den aktuellen
 Status des Laufs sinnvoll sind — die sichtbaren Items werden von
 `runMenuItems.buildRunMenuItems(run)` berechnet und für jede
@@ -1328,7 +1429,7 @@ Gruppen:
 
 | Item | Shortcut | Wirkung |
 | --- | --- | --- |
-| **Live-Details anzeigen** | — | Fokussiert das Badge (wie Linksklick). |
+| **Live-Details anzeigen** | — | Fokussiert die Zeile (wie Linksklick). |
 | **Run-ID kopieren** | — | Kopiert die UUID in die Zwischenablage. |
 | **k6-Webreport öffnen** | — | Öffnet den druckoptimierten Report in einem neuen Tab (die Report-Seite existiert ab dem Moment, in dem der Lauf eingereiht ist). |
 | **Stop (graceful)** | `S` | `POST /api/test-runs/{id}/cancel?force=false`. k6 erhält `SIGTERM`, der Lauf transitiert `RUNNING → STOPPING → STOPPED`. |
@@ -1339,13 +1440,13 @@ Gruppen:
 
 | Item | Sichtbar bei | Wirkung |
 | --- | --- | --- |
-| **Zusammenfassung anzeigen** / **Aborted-Details anzeigen** *(Label passt sich an)* | immer | Fokussiert das Badge. |
+| **Zusammenfassung anzeigen** / **Aborted-Details anzeigen** *(Label passt sich an)* | immer | Fokussiert die Zeile. |
 | **Report-Link kopieren** | immer | Kopiert `http://…/?report=<run-id>` in die Zwischenablage — in Chat, Ticket oder Runbook droppen. |
 | **k6-Webreport öffnen** | immer | Öffnet den druckoptimierten Report in einem neuen Tab. |
 | **k6-JSON exportieren** | nur wenn ein vollständiges Summary vorhanden ist (`ABORTED`-Läufe und Läufe ohne Summary sind deaktiviert) | Lädt `lasttest-<run-id>-summary.json` für Offline-Analysen oder zum Einspeisen in ein anderes Werkzeug. |
-| **Erneut ausführen** | immer (nur Terminal-Läufe) | `POST /api/test-runs/{id}/rerun`. Das Backend spielt den `CreateTestRunRequest` erneut, den es beim ursprünglichen Start erhalten hat, k6 startet frisch, das neue Badge erscheint im Dashboard und erhält den Fokus. Der neue Lauf teilt Operation, Payload-Pool, Lastprofil und Base-URL des ursprünglichen Laufs. |
-| **Aus Ansicht entfernen** | immer (nur Terminal-Läufe) | Frontend-only-Cleanup, der das geklickte Badge aus dem In-Memory-Map entfernt. Das Backend hält den Lauf weiterhin, sodass ein Page-Refresh ihn aus `/api/test-runs` wieder einliest. Der Dashboard-Fokus wird neu bewertet, damit die Detail-Karte die Entfernung überlebt. |
-| **Alle anderen fehlgeschlagenen Läufe entfernen** | Terminal-Läufe, die mindestens ein anderes `FAILED`-Badge in der Map haben (sonst ist das Item deaktiviert mit dem Grund *„Keine weiteren fehlgeschlagenen Läufe zum Entfernen.“*) | Bulk-Frontend-Cleanup: entfernt jedes andere `FAILED`-Badge außer dem geklickten. `STOPPED`- und `ABORTED`-Läufe werden bewusst erhalten — der Nutzer hat nach *fehlgeschlagen* gefragt, nicht nach jedem Nicht-Erfolg-Outcome. |
+| **Erneut ausführen** | immer (nur Terminal-Läufe) | `POST /api/test-runs/{id}/rerun`. Das Backend spielt den `CreateTestRunRequest` erneut, den es beim ursprünglichen Start erhalten hat, k6 startet frisch, die neue Zeile erscheint im Dashboard und erhält den Fokus. Der neue Lauf teilt Operation, Payload-Pool, Lastprofil und Base-URL des ursprünglichen Laufs. |
+| **Aus Ansicht entfernen** | immer (nur Terminal-Läufe) | Frontend-only-Cleanup, der die geklickte Zeile aus dem In-Memory-Map entfernt. Das Backend hält den Lauf weiterhin, sodass ein Page-Refresh ihn aus `/api/test-runs` wieder einliest. Der Dashboard-Fokus wird neu bewertet, damit die Detail-Karte die Entfernung überlebt. |
+| **Alle anderen fehlgeschlagenen Läufe entfernen** | Terminal-Läufe, die mindestens eine andere `FAILED`-Zeile in der Map haben (sonst ist das Item deaktiviert mit dem Grund *„Keine weiteren fehlgeschlagenen Läufe zum Entfernen.“*) | Bulk-Frontend-Cleanup: entfernt jede andere `FAILED`-Zeile außer der geklickten. `STOPPED`- und `ABORTED`-Läufe werden bewusst erhalten — der Nutzer hat nach *fehlgeschlagen* gefragt, nicht nach jedem Nicht-Erfolg-Outcome. |
 
 Das Menü schließt bei jedem Klick außerhalb (`Esc` schließt
 ebenfalls). Der **Linksklick** bleibt dem Fokussieren des Laufs
@@ -1356,30 +1457,30 @@ warum (z. B. *„Aborted runs have no complete summary to export"*).
 
 > 💡 **Beispiel — Rerun via Rechtsklick:** Du hast die Demo mit
 > `Smoke` (10 VUs, 30 s) laufen lassen und willst prüfen, ob das
-> Ergebnis reproduzierbar ist. Rechtsklick auf das grüne
-> `COMPLETED`-Badge, wähle **Erneut ausführen**. lasttest postet
+> Ergebnis reproduzierbar ist. Rechtsklick auf die grüne
+> `COMPLETED`-Zeile, wähle **Erneut ausführen**. lasttest postet
 > `/api/test-runs/{id}/rerun`, das Backend reiht den erhaltenen
 > `CreateTestRunRequest` erneut ein, k6 startet einen frischen
-> Prozess gegen dieselbe Base-URL, und das neue Badge erscheint im
-> Dashboard mit verschobenem Fokus. Das Dashboard pollt sofort; das
-> alte `COMPLETED`-Badge bleibt stehen, sodass du die zwei Läufe
+> Prozess gegen dieselbe Base-URL, und die neue Zeile erscheint im
+> Dashboard mit verschobenem Fokus. Das Dashboard pollt sofort; die
+> alte `COMPLETED`-Zeile bleibt stehen, sodass du die zwei Läufe
 > weiterhin nebeneinander vergleichen kannst.
 
 > 💡 **Beispiel — einen hängenden Lauf eskalieren:** Du hast ein
 > `Load`-Profil gegen einen langsamen Staging-Server laufen lassen.
 > Nach 5 Minuten ist es nicht fertig und du willst die Metriken, die
-> du bereits hast. Rechtsklick auf das orange `RUNNING`-Badge, wähle
+> du bereits hast. Rechtsklick auf die orange `RUNNING`-Zeile, wähle
 > **Stop (graceful)** (oder drücke `S` im Menü). Der Status
-> transitiert `RUNNING → STOPPING` und der Badge-Streifen wird lila,
-> während k6 ausläuft. Hängt der graceful Stop, Rechtsklick erneut
-> und wähle **Force abort** (`⇧S`). Das Badge wird dunkelrot und
-> die Detail-Karte rendert den Hinweis *„Vom Benutzer abgebrochen
-> — k6 wurde per SIGKILL beendet"* mit einer Warnung, dass nur
-> Teilkennzahlen vorliegen.
+> transitiert `RUNNING → STOPPING` und der Zeilen-Streifen wird
+> lila, während k6 ausläuft. Hängt der graceful Stop, Rechtsklick
+> erneut und wähle **Force abort** (`⇧S`). Die Zeile wird dunkelrot
+> und die Detail-Karte rendert den Hinweis *„Vom Benutzer
+> abgebrochen — k6 wurde per SIGKILL beendet"* mit einer Warnung,
+> dass nur Teilkennzahlen vorliegen.
 
 > 💡 **Beispiel — Report-Link teilen:** Ein Kollege fragt nach den
 > Zahlen eines 5-Minuten-`Stress`-Laufs, den du gestern gemacht
-> hast. Rechtsklick auf das Badge, wähle **Report-Link kopieren**
+> hast. Rechtsklick auf die Zeile, wähle **Report-Link kopieren**
 > und paste die URL in den Chat. Wer Zugriff auf die laufende
 > lasttest-Instanz hat, kann `/?report=<run-id>` öffnen und den
 > druckoptimierten Report einsehen — der Link bleibt für die
@@ -1387,22 +1488,22 @@ warum (z. B. *„Aborted runs have no complete summary to export"*).
 
 > 💡 **Beispiel — das Dashboard aufräumen:** Du hast fünf Smoke-Tests
 > direkt hintereinander laufen lassen, drei davon sind
-> fehlgeschlagen (DNS-Lookup-Probleme). Die fehlgeschlagenen
-> Badges brauchst du nicht mehr im Dashboard, aber die zwei
-> `COMPLETED`-Badges willst du behalten. Rechtsklick auf eines der
-> fehlgeschlagenen Badges, wähle **Alle anderen fehlgeschlagenen
-> Läufe entfernen**, und das Dashboard behält nur das geklickte
-> `FAILED` plus die zwei erfolgreichen. Um ein einzelnes Badge zu
+> fehlgeschlagen (DNS-Lookup-Probleme). Die fehlgeschlagenen Zeilen
+> brauchst du nicht mehr im Dashboard, aber die zwei
+> `COMPLETED`-Zeilen willst du behalten. Rechtsklick auf eine der
+> fehlgeschlagenen Zeilen, wähle **Alle anderen fehlgeschlagenen
+> Läufe entfernen**, und das Dashboard behält nur die geklickte
+> `FAILED` plus die zwei erfolgreichen. Um eine einzelne Zeile zu
 > entfernen, ohne die anderen zu beeinflussen, Rechtsklick darauf
 > und wähle **Aus Ansicht entfernen**. Beide Aktionen sind
-> Frontend-only; lade die Seite neu und die entfernten Badges
+> Frontend-only; lade die Seite neu und die entfernten Zeilen
 > kommen zurück (das Backend hat sie weiterhin), was das
 > Sicherheitsnetz für Nutzer ist, die ihre Meinung mitten im
 > Aufräumen ändern.
 
-### 10.3 Live-Status
+### 10.3 Live-Status und der `Live · Lasttest läuft`-Banner
 
-Das Status-Badge durchläuft:
+Das Status-Badge im Detail-Header durchläuft:
 
 - `QUEUED` — akzeptiert, k6 wurde noch nicht gespawnt
 - `RUNNING` — k6 führt aus
@@ -1416,12 +1517,55 @@ Das Status-Badge durchläuft:
   können unvollständig sein
 
 Die UI pollt `/api/test-runs/{id}` jede Sekunde, solange der Lauf
-in flight ist (`QUEUED`, `RUNNING` oder `STOPPING`), damit das Badge
-ohne Page-Reload aktualisiert.
+in flight ist (`QUEUED`, `RUNNING` oder `STOPPING`), damit das
+Status-Badge ohne Page-Reload aktualisiert.
 
-### 10.4 Diagnose, Metriken, Konsolenausgabe und Roh-JSON
+Während ein Lauf `QUEUED`, `RUNNING` oder `STOPPING` ist, zeigt
+die Detail-Karte ganz oben einen pulsierenden **Live · Lasttest
+läuft**-Banner mit der getesteten Methode+Pfad, einer einzeiligen
+Zusammenfassung des aktiven Lastprofils (z. B. `ramping-vus · 50
+VUs · 60 s`) und denselben Stop / Abort-Buttons, die der
+Aktionen-Tab anbietet — du kannst einen hängenden Lauf also
+abbrechen, ohne den Übersicht-Tab verlassen zu müssen.
 
-Die Status-Zeile zeigt immer das Badge plus einen kurzen Hinweis,
+```svg
+<svg viewBox="0 0 600 80" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="600" height="80" fill="#0b1220" rx="8"/>
+  <rect x="0" y="0" width="600" height="80" fill="#111b29" stroke="#fb923c" stroke-width="1" rx="8"/>
+
+  <!-- Pulsierender Punkt -->
+  <circle cx="22" cy="40" r="7" fill="#fb923c"/>
+  <circle cx="22" cy="40" r="11" fill="none" stroke="#fb923c" stroke-width="1" opacity="0.4"/>
+
+  <!-- Live-Label -->
+  <text x="40" y="32" fill="#fb923c" font-family="Inter, sans-serif" font-size="10" font-weight="600">Live · Lasttest läuft</text>
+  <text x="40" y="52" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="13" font-weight="600">POST /products/search</text>
+
+  <!-- Profil-Zusammenfassung -->
+  <text x="220" y="30" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">Last-Profil</text>
+  <text x="220" y="48" fill="#dbe5f3" font-family="monospace" font-size="11" font-weight="600">ramping-vus · 50 VUs · 60s</text>
+  <text x="220" y="64" fill="#6b7c95" font-family="monospace" font-size="9">http_req_duration p(95) aktualisiert sich alle 2 s</text>
+
+  <!-- Stop-Button -->
+  <rect x="430" y="22" width="64" height="36" fill="#3a2a0b" stroke="#d4a72c" rx="4"/>
+  <text x="462" y="38" text-anchor="middle" fill="#d4a72c" font-family="Inter, sans-serif" font-size="10" font-weight="600">Stop</text>
+  <text x="462" y="50" text-anchor="middle" fill="#d4a72c" font-family="Inter, sans-serif" font-size="8">graceful</text>
+
+  <!-- Abort-Button -->
+  <rect x="502" y="22" width="80" height="36" fill="#3a0b0b" stroke="#ef4444" rx="4"/>
+  <text x="542" y="38" text-anchor="middle" fill="#ffb5c3" font-family="Inter, sans-serif" font-size="10" font-weight="600">Abort</text>
+  <text x="542" y="50" text-anchor="middle" fill="#ffb5c3" font-family="Inter, sans-serif" font-size="8">SIGKILL</text>
+</svg>
+```
+
+Der Banner verschwindet in dem Moment, in dem der Lauf einen
+Terminal-Zustand erreicht. Er ist reine Präsentation: dieselben
+Stop / Abort-Aktionen sind weiterhin über den Aktionen-Tab und
+über das Rechtsklick-Menü der Run-Zeile erreichbar.
+
+### 10.4 Diagnose und Metriken
+
+Die Status-Zeile zeigt immer das Status-Badge plus einen kurzen Hinweis,
 solange der Lauf noch in flight ist ("läuft seit X s", "wartet auf
 Executor"). Wenn der Lauf sich setzt, expandiert die Karte mit drei
 zusätzlichen Blöcken:
@@ -1451,24 +1595,433 @@ zusätzlichen Blöcken:
    "Endpunkt `searchProducts` antwortete 480× mit HTTP 401 —
    Bearer-Token prüfen."
 
-Darunter bleiben die ausklappbaren Blöcke **k6-Konsolenausgabe**
-(volle k6-stdout/stderr) und **k6-JSON-Rohdaten** (Summary-JSON)
-für die volle Fehlersuche.
+Die volle k6-stdout/stderr und das rohe Summary-JSON findest du im
+Dashboard unter den Run-Detail-Tabs **k6-Konsole** und **k6-Skript**
+bzw. in der Fehler-Diagnose der Karte.
 
 ### 10.5 Erneut ausführen
 
 Du hast zwei Wege, dasselbe Szenario erneut auszuführen:
 
-- **Über das Rechtsklick-Menü** auf einem Terminal-Badge — siehe
-  [Abschnitt 10.2](#102-das-aktions-menü-am-run-badge-rechtsklick).
+- **Über das Rechtsklick-Menü** auf einer Terminal-Zeile — siehe
+  [Abschnitt 10.2](#102-das-aktions-menü-am-run-row-rechtsklick).
   Das ist der empfohlene Pfad, weil er den exakten
   `CreateTestRunRequest` bewahrt, der ursprünglich gesendet wurde
   (Operation, Payloads, Lastprofil, Base-URL). Der neue Lauf erhält
   eine frische UUID und automatisch den Fokus.
 - **Durch Neu-Konfigurieren des Formulars** — ändere einen Wert in
   Schritt 2 oder 3 und klick erneut **k6-Lasttest starten**. Der neue
-  Lauf hat keine genealogische Verbindung zum alten; das alte Badge
+  Lauf hat keine genealogische Verbindung zum alten; die alte Zeile
   bleibt unverändert im Dashboard.
+
+---
+
+### 10.6 Run-Detail-Tab-Strip
+
+Die Detail-Karte eines Laufs ist als horizontaler Tab-Strip
+organisiert (plus ein externer Link am Ende). Das Wechseln der
+Tabs erhält die Lese-Position des Nutzers, sodass die
+Detail-Karte bei jedem Klick nicht zurück an den Seitenanfang
+springt.
+
+```svg
+<svg viewBox="0 0 600 60" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="600" height="60" fill="#0b1220" rx="6"/>
+  <line x1="0" y1="48" x2="600" y2="48" stroke="#2c3a52" stroke-width="1"/>
+
+  <!-- Aktiver Tab: Übersicht -->
+  <rect x="12" y="14" width="92" height="34" fill="#15233a" stroke="#7d63ff" rx="4"/>
+  <rect x="12" y="44" width="92" height="4" fill="#7d63ff"/>
+  <text x="58" y="35" text-anchor="middle" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="11" font-weight="600">Übersicht</text>
+
+  <!-- Timeline (Plan-Badge) -->
+  <text x="135" y="35" fill="#93a2b8" font-family="Inter, sans-serif" font-size="11">Timeline</text>
+  <rect x="178" y="22" width="28" height="14" fill="#2d6a4f" rx="7"/>
+  <text x="192" y="32" text-anchor="middle" fill="#8fe8c1" font-family="Inter, sans-serif" font-size="8" font-weight="600">Plan</text>
+
+  <!-- Aktionen -->
+  <text x="226" y="35" fill="#93a2b8" font-family="Inter, sans-serif" font-size="11">Aktionen</text>
+
+  <!-- k6-Konsole -->
+  <text x="288" y="35" fill="#93a2b8" font-family="Inter, sans-serif" font-size="11">k6-Konsole</text>
+
+  <!-- Schwellen -->
+  <text x="365" y="35" fill="#93a2b8" font-family="Inter, sans-serif" font-size="11">Schwellen</text>
+
+  <!-- Konfiguration -->
+  <text x="434" y="35" fill="#93a2b8" font-family="Inter, sans-serif" font-size="11">Konfiguration</text>
+
+  <!-- Fehler-Diagnose (mit Alarm-Badge) -->
+  <text x="518" y="35" fill="#93a2b8" font-family="Inter, sans-serif" font-size="11">Fehler-Diagnose</text>
+  <circle cx="590" cy="28" r="7" fill="#793b4b" stroke="#ef4444"/>
+  <text x="590" y="32" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="9" font-weight="700">!</text>
+
+  <!-- Trenner -->
+  <line x1="0" y1="50" x2="600" y2="50" stroke="#2c3a52" stroke-width="1"/>
+
+  <!-- Bildunterschrift -->
+  <text x="12" y="58" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9" font-style="italic">Tab-Strip — Klick wechselt den Body; Rechtsklick auf eine Zeile im Letzte-Läufe-Panel hält den Timeline-Tab offen und zentriert auf den neuen Lauf</text>
+</svg>
+```
+
+| Tab | Zweck |
+| --- | --- |
+| **Übersicht** | Live-Status-Banner, Metrik-Karten, Konsole/Summary-Blöcke, **Live-Ramp-Grafik** (siehe [§10.8](#108-live-ramp-grafik-auslastung--soll-vs-ist)) |
+| **Timeline** | Pro-Endpunkt-Heatmap + Gantt (siehe [§10.7](#107-pro-endpunkt-timeline-heatmap--gantt)) |
+| **Aktionen** | Statusabhängige Controls: Stop, Abort, Rerun, Run-ID kopieren, Report-Link kopieren, Report öffnen, k6-Skript herunterladen, rohe Summary exportieren, aus Dashboard entfernen, alle anderen fehlgeschlagenen Läufe entfernen |
+| **k6-Konsole** | Vollständige k6-stdout/stderr des Laufs |
+| **Schwellen** | Jeder konfigurierte k6-Threshold mit gemessenem Wert |
+| **Konfiguration** | API, Lastprofil, Operationen, Lauf-Metadaten |
+| **Fehler-Diagnose** | Typisierte Fehler-Diagnose für `FAILED` / `ABORTED`-Läufe |
+| **↗ k6-Bericht öffnen** | Öffnet den druckoptimierten Report in einem neuen Tab |
+
+**Regeln für den Tab-Wechsel.** Wenn du auf eine andere Zeile im
+`Letzte Läufe`-Panel klickst, während der Timeline-Tab offen ist,
+bleibt der Timeline-Tab offen und zentriert sich neu auf den
+`createdAt` des neuen Laufs — das Schließen des Tabs würde genau
+den Kontext (fokussierter Gantt-Balken, Heatmap, „Zentriert auf
+…"-Label) wegwerfen, der die Timeline als Navigations-Oberfläche
+nützlich macht. Für alle anderen Tabs landet der neue Lauf auf
+Übersicht, was der natürliche Einstiegspunkt ist.
+
+**Scroll-Erhaltung.** Beim Tab-Wechsel wird `window.scrollY` in
+`mousedown` gespeichert (bevor der Click-Default des Browsers die
+Seite scrollen kann) und in einem Layout-Effekt wiederhergestellt,
+nachdem der neue Tab-Body committed ist — ein Klick auf einen
+Tab-Button wirft den Nutzer also nie an den Seitenanfang zurück.
+
+---
+
+### 10.7 Pro-Endpunkt-Timeline (Heatmap + Gantt)
+
+Der **Timeline**-Tab wird von `EndpointTimelineTab.tsx` gerendert
+und verwandelt die Lauf-Historie eines einzigen
+`(method, path)`-Endpunkts in eine einzige visuelle Geschichte.
+Er ist datengetrieben aus
+`/api/operations/runs?method=…&path=…`, gepollt mit derselben
+Kadenz wie die Run-Liste, sodass ein frisch gestarteter (oder
+erneut ausgeführter) Test innerhalb weniger Sekunden im Chart
+auftaucht.
+
+#### 10.7.1 Aufbau
+
+```svg
+<svg viewBox="0 0 600 380" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="600" height="380" fill="#0b1220" rx="8"/>
+
+  <!-- Toolbar: Endpunkt-Chip + Fenster-Selektor + Reset -->
+  <rect x="14" y="14" width="220" height="34" fill="#111b29" stroke="#2c3a52" rx="4"/>
+  <text x="26" y="34" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">Gefiltert nach:</text>
+  <rect x="116" y="22" width="32" height="16" fill="#0b3a25" stroke="#22c55e" rx="3"/>
+  <text x="132" y="33" text-anchor="middle" fill="#8fe8c1" font-family="Inter, sans-serif" font-size="9" font-weight="600">GET</text>
+  <text x="156" y="34" fill="#dbe5f3" font-family="monospace" font-size="10">/products/lookup-by-id</text>
+
+  <!-- Fenster-Selektor (Segmented Control) -->
+  <rect x="246" y="14" width="200" height="34" fill="#111b29" stroke="#2c3a52" rx="4"/>
+  <rect x="248" y="16" width="48" height="30" fill="#7d63ff" rx="3"/>
+  <text x="272" y="35" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="10" font-weight="600">24 h</text>
+  <text x="328" y="35" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">7 d</text>
+  <text x="376" y="35" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">30 d</text>
+  <text x="424" y="35" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">90 d</text>
+
+  <!-- Reset-Button -->
+  <rect x="460" y="14" width="126" height="34" fill="#111b29" stroke="#7d63ff" rx="4"/>
+  <text x="523" y="34" text-anchor="middle" fill="#c5b8ff" font-family="Inter, sans-serif" font-size="10">↺ Auf „jetzt" zurücksetzen</text>
+
+  <!-- Stat-Streifen -->
+  <g transform="translate(14,62)">
+    <rect width="140" height="56" fill="#111b29" stroke="#2c3a52" rx="4"/>
+    <text x="10" y="18" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">Runs (24 h)</text>
+    <text x="10" y="40" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="18" font-weight="700">14</text>
+    <text x="10" y="52" fill="#8fe8c1" font-family="Inter, sans-serif" font-size="8">im Fenster</text>
+  </g>
+  <g transform="translate(160,62)">
+    <rect width="140" height="56" fill="#111b29" stroke="#22c55e" rx="4"/>
+    <text x="10" y="18" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">Bestanden</text>
+    <text x="10" y="40" fill="#8fe8c1" font-family="Inter, sans-serif" font-size="18" font-weight="700">10</text>
+    <text x="10" y="52" fill="#8fe8c1" font-family="Inter, sans-serif" font-size="8">71 % Erfolgsquote</text>
+  </g>
+  <g transform="translate(306,62)">
+    <rect width="140" height="56" fill="#111b29" stroke="#ef4444" rx="4"/>
+    <text x="10" y="18" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">Fehlgeschlagen</text>
+    <text x="10" y="40" fill="#ffb5c3" font-family="Inter, sans-serif" font-size="18" font-weight="700">4</text>
+    <text x="10" y="52" fill="#ffb5c3" font-family="Inter, sans-serif" font-size="8">Erfordert Aufmerksamkeit</text>
+  </g>
+  <g transform="translate(452,62)">
+    <rect width="134" height="56" fill="#111b29" stroke="#2c3a52" rx="4"/>
+    <text x="10" y="18" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">Letzte Probleme</text>
+    <text x="10" y="36" fill="#ffb5c3" font-family="Inter, sans-serif" font-size="12" font-weight="700">11:42</text>
+    <text x="10" y="52" fill="#93a2b8" font-family="Inter, sans-serif" font-size="8">letzter Lauf: 11:55</text>
+  </g>
+
+  <!-- Heatmap -->
+  <text x="14" y="146" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="10" font-weight="600">Läufe pro Tag · Farbe = Tages-Outcome · 7 Tage · zentriert auf 12:00</text>
+  <g transform="translate(14,154)">
+    <rect x="0"   y="0" width="78" height="60" fill="#1f2a3d" stroke="#2c3a52" rx="4"/>
+    <text x="39" y="22" text-anchor="middle" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="14" font-weight="700">2</text>
+    <text x="39" y="38" text-anchor="middle" fill="#8fe8c1" font-family="Inter, sans-serif" font-size="8">alle ok</text>
+    <text x="39" y="54" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="8">−3 d</text>
+
+    <rect x="86"  y="0" width="78" height="60" fill="#3a2a0b" stroke="#d4a72c" rx="4"/>
+    <text x="125" y="22" text-anchor="middle" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="14" font-weight="700">3</text>
+    <text x="125" y="38" text-anchor="middle" fill="#d4a72c" font-family="Inter, sans-serif" font-size="8">1 gestoppt</text>
+    <text x="125" y="54" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="8">−2 d</text>
+
+    <rect x="172" y="0" width="78" height="60" fill="#3a0b0b" stroke="#ef4444" rx="4"/>
+    <text x="211" y="22" text-anchor="middle" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="14" font-weight="700">2</text>
+    <text x="211" y="38" text-anchor="middle" fill="#ffb5c3" font-family="Inter, sans-serif" font-size="8">2 Fehler</text>
+    <text x="211" y="54" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="8">−1 d</text>
+
+    <!-- Mitte / heute -->
+    <rect x="258" y="-4" width="78" height="68" fill="#0b3a25" stroke="#22c55e" stroke-width="2" rx="4"/>
+    <text x="297" y="20" text-anchor="middle" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="14" font-weight="700">4</text>
+    <text x="297" y="36" text-anchor="middle" fill="#8fe8c1" font-family="Inter, sans-serif" font-size="8">alle ok</text>
+    <text x="297" y="60" text-anchor="middle" fill="#8fe8c1" font-family="Inter, sans-serif" font-size="8" font-weight="700">heute</text>
+
+    <rect x="344" y="0" width="78" height="60" fill="#3a0b0b" stroke="#ef4444" rx="4"/>
+    <text x="383" y="22" text-anchor="middle" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="14" font-weight="700">1</text>
+    <text x="383" y="38" text-anchor="middle" fill="#ffb5c3" font-family="Inter, sans-serif" font-size="8">1 Fehler</text>
+    <text x="383" y="54" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="8">+1 d</text>
+
+    <rect x="430" y="0" width="78" height="60" fill="#1f2a3d" stroke="#2c3a52" rx="4"/>
+    <text x="469" y="22" text-anchor="middle" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="14" font-weight="700">2</text>
+    <text x="469" y="38" text-anchor="middle" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="8">—</text>
+    <text x="469" y="54" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="8">+2 d</text>
+
+    <rect x="516" y="0" width="56" height="60" fill="#1f2a3d" stroke="#2c3a52" rx="4"/>
+    <text x="544" y="34" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">—</text>
+    <text x="544" y="54" text-anchor="middle" fill="#93a2b8" font-family="Inter, sans-serif" font-size="8">+3 d</text>
+  </g>
+
+  <!-- Gantt-Timeline -->
+  <text x="14" y="232" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="10" font-weight="600">Einzeiliges Timeline · ein Balken pro Lauf · zentriert auf 12:00</text>
+  <g transform="translate(60,242)">
+    <line x1="0" y1="46" x2="500" y2="46" stroke="#2c3a52" stroke-width="1"/>
+    <text x="0"   y="60" text-anchor="middle" fill="#93a2b8" font-family="monospace" font-size="9">06:00</text>
+    <text x="125" y="60" text-anchor="middle" fill="#93a2b8" font-family="monospace" font-size="9">09:00</text>
+    <text x="250" y="60" text-anchor="middle" fill="#c5b8ff" font-family="monospace" font-size="9" font-weight="700">12:00</text>
+    <text x="375" y="60" text-anchor="middle" fill="#93a2b8" font-family="monospace" font-size="9">15:00</text>
+    <text x="500" y="60" text-anchor="middle" fill="#93a2b8" font-family="monospace" font-size="9">18:00</text>
+
+    <line x1="83"  y1="4" x2="83"  y2="46" stroke="#1f2a3d" stroke-dasharray="2,2"/>
+    <line x1="333" y1="4" x2="333" y2="46" stroke="#1f2a3d" stroke-dasharray="2,2"/>
+    <line x1="417" y1="4" x2="417" y2="46" stroke="#1f2a3d" stroke-dasharray="2,2"/>
+
+    <line x1="250" y1="0" x2="250" y2="46" stroke="#c5b8ff" stroke-width="2"/>
+    <text x="250" y="-2" text-anchor="middle" fill="#c5b8ff" font-family="Inter, sans-serif" font-size="9" font-weight="700">◀ Focus ▶</text>
+
+    <rect x="40"  y="14" width="6" height="20" fill="#8fe8c1" rx="1"/>
+    <rect x="90"  y="14" width="6" height="20" fill="#8fe8c1" rx="1"/>
+    <rect x="120" y="14" width="6" height="20" fill="#d4a72c" rx="1"/>
+    <rect x="170" y="14" width="6" height="20" fill="#ffb5c3" rx="1"/>
+    <rect x="200" y="14" width="6" height="20" fill="#ffb5c3" rx="1"/>
+    <rect x="248" y="14" width="6" height="20" fill="#8fe8c1" stroke="#c5b8ff" stroke-width="2" rx="1"/>
+    <rect x="290" y="14" width="6" height="20" fill="#8fe8c1" rx="1"/>
+    <rect x="340" y="14" width="6" height="20" fill="#8fe8c1" rx="1"/>
+    <rect x="395" y="14" width="6" height="20" fill="#ffb5c3" rx="1"/>
+    <rect x="445" y="14" width="6" height="20" fill="#8fe8c1" rx="1"/>
+    <rect x="470" y="14" width="6" height="20" fill="#8fe8c1" rx="1"/>
+
+    <text x="-58" y="28" fill="#93a2b8" font-family="monospace" font-size="9">GET</text>
+    <text x="-58" y="40" fill="#93a2b8" font-family="monospace" font-size="8">/lookup</text>
+  </g>
+
+  <g transform="translate(14,318)">
+    <rect x="0"   y="0" width="12" height="10" fill="#8fe8c1" rx="2"/>
+    <text x="18"  y="9" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">Bestanden</text>
+    <rect x="98"  y="0" width="12" height="10" fill="#ffb5c3" rx="2"/>
+    <text x="116" y="9" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">Fehlgeschlagen</text>
+    <rect x="196" y="0" width="12" height="10" fill="#d4a72c" rx="2"/>
+    <text x="214" y="9" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">Gestoppt</text>
+    <rect x="280" y="0" width="12" height="10" fill="#c5b8ff" rx="2"/>
+    <text x="298" y="9" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9">Ausgewählt / Fokus</text>
+  </g>
+
+  <text x="14" y="350" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9" font-style="italic">Klick auf einen Balken oder Listeneintrag springt im Chart zu dieser Zeit</text>
+  <line x1="14" y1="360" x2="586" y2="360" stroke="#2c3a52" stroke-width="1"/>
+  <text x="14" y="372" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="10" font-weight="600">Im Fenster sichtbar</text>
+  <text x="160" y="372" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">· 12 Läufe · neueste zuerst</text>
+</svg>
+```
+
+#### 10.7.2 Fenster und Fokus
+
+- **24 h** nutzt Stunden-Ticks (`HH:MM`), zentriert auf den
+  Anker, mit Major-Ticks alle 6 h.
+- **7 d** nutzt Tages-Ticks (`TT.MM`); der Center-Tick trägt
+  zusätzlich ein `HH:MM`-Label.
+- **30 d / 90 d** verdünnen zu Ticks alle 5 d / 15 d, damit die
+  Achse lesbar bleibt.
+
+Wenn du auf einen Gantt-Balken oder einen Listeneintrag klickst,
+verankert sich das Chart neu auf dem `createdAt` dieses Laufs;
+die Tages-Labels wechseln von absolut (`+1d` / `−2d`) zu relativ
+(`heute` / `gestern` / `vor N Tagen`), sodass der Center-Bucket
+immer `heute` liest, unabhängig davon, auf welchen Lauf du
+gesprungen bist. Der `� Auf „jetzt" zurücksetzen`-Button stellt
+das Default-Verhalten wieder her.
+
+#### 10.7.3 Rechtsklick in der Timeline
+
+Rechtsklick auf einen Gantt-Balken oder einen Listeneintrag
+öffnet dasselbe per-Run-Kontextmenü wie die Übersichts-Zeilen —
+Stop, Abort, Rerun, Run-ID kopieren, Report-Link kopieren, Report
+öffnen, Export, Aus Ansicht entfernen, alle anderen fehlgeschlagenen
+Läufe entfernen. Die Timeline pflegt ihr eigenes `hiddenRunIds`-
+Set, sodass ein entfernter Lauf über den nächsten Polling-Zyklus
+hinweg unsichtbar bleibt, während die Dashboard-Map (in der er
+auch liegen kann) unangetastet bleibt.
+
+#### 10.7.4 Beispiel — einen flaky Endpunkt untersuchen
+
+Dir fällt auf, dass `GET /products/lookup-by-id` lately vermehrt
+`429` zurückgibt. Öffne den Lauf, klick den **Timeline**-Tab,
+und das Chart zeigt die letzten 7 Tage für genau diesen Endpunkt.
+Die Heatmap verrät zwei rote Zellen von gestern und vorgestern.
+Klick auf einen der roten Balken im Gantt: das Chart zentriert
+sich neu auf den `createdAt` dieses Laufs, der Stat-Streifen
+aktualisiert sich mit der Erfolgsquote dieses Laufs, und die
+Liste unten markiert dieselbe Zeile mit einem `●`-Pin.
+Rechtsklick auf den Balken, wähle **Erneut ausführen**, und der
+neue Lauf erscheint im Dashboard — die Timeline frischt sich
+innerhalb weniger Sekunden auf und der neue Balken landet an
+seiner chronologischen Stelle.
+
+---
+
+### 10.8 Live-Ramp-Grafik (Auslastung — Soll vs Ist)
+
+Während ein Lauf in flight ist, zeigt der **Übersicht**-Tab eine
+Live-SVG-Grafik, die die **Soll**-Kurve (geplant, deterministisch
+aus dem konfigurierten Lastprofil abgeleitet) gegen die **Ist**-
+Kurve (tatsächlich, aus dem Time-Series-Container gestreamt)
+vergleicht.
+
+```svg
+<svg viewBox="0 0 600 240" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="600" height="240" fill="#0b1220" rx="8"/>
+
+  <!-- Header -->
+  <text x="20" y="28" fill="#7d63ff" font-family="Inter, sans-serif" font-size="11" font-weight="600">AUSLASTUNG</text>
+  <text x="100" y="28" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="11" font-weight="600">Soll vs Ist</text>
+  <text x="180" y="28" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">· Spike (5 → 200 → 5 VUs, 60 s)</text>
+
+  <text x="20" y="46" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">läuft seit</text>
+  <text x="78" y="46" fill="#dbe5f3" font-family="monospace" font-size="11" font-weight="700">00:42</text>
+  <text x="120" y="46" fill="#93a2b8" font-family="Inter, sans-serif" font-size="10">· 38 Messpunkte</text>
+
+  <!-- Y-Achse -->
+  <line x1="60" y1="180" x2="580" y2="180" stroke="#2c3a52" stroke-width="1"/>
+  <line x1="60" y1="140" x2="580" y2="140" stroke="#1a2435" stroke-width="1"/>
+  <line x1="60" y1="100" x2="580" y2="100" stroke="#1a2435" stroke-width="1"/>
+  <line x1="60" y1="60"  x2="580" y2="60"  stroke="#1a2435" stroke-width="1"/>
+  <line x1="60" y1="60"  x2="60"  y2="180" stroke="#2c3a52" stroke-width="1"/>
+
+  <text x="52" y="184" text-anchor="end" fill="#93a2b8" font-family="monospace" font-size="10">0</text>
+  <text x="52" y="144" text-anchor="end" fill="#93a2b8" font-family="monospace" font-size="10">50</text>
+  <text x="52" y="104" text-anchor="end" fill="#93a2b8" font-family="monospace" font-size="10">100</text>
+  <text x="52" y="64"  text-anchor="end" fill="#93a2b8" font-family="monospace" font-size="10">200</text>
+
+  <!-- X-Achse -->
+  <text x="60"  y="200" fill="#93a2b8" font-family="monospace" font-size="10">0s</text>
+  <text x="160" y="200" fill="#93a2b8" font-family="monospace" font-size="10">10s</text>
+  <text x="260" y="200" fill="#93a2b8" font-family="monospace" font-size="10">20s</text>
+  <text x="360" y="200" fill="#93a2b8" font-family="monospace" font-size="10">30s</text>
+  <text x="460" y="200" fill="#93a2b8" font-family="monospace" font-size="10">40s</text>
+  <text x="560" y="200" fill="#93a2b8" font-family="monospace" font-size="10">50s</text>
+
+  <!-- Soll-Linie (geplant): Rampe 5→200→5 -->
+  <polyline fill="none" stroke="#5fcb95" stroke-width="2"
+    points="60,176 76,176 160,66 460,66 476,176 580,176"/>
+
+  <!-- Ist-Linie (tatsächlich): leicht unter dem Peak -->
+  <polyline fill="none" stroke="#4f8bff" stroke-width="2"
+    points="60,176 76,176 100,170 130,150 160,90 200,72 240,68 280,68 320,70 360,72 400,76 440,82 460,86 476,176 580,176"/>
+
+  <!-- Cursor (jüngster Messpunkt) -->
+  <circle cx="460" cy="82" r="4" fill="#fbbf24" stroke="#0c131e" stroke-width="2"/>
+
+  <!-- Cursor-Callout -->
+  <line x1="460" y1="76" x2="460" y2="40" stroke="#fbbf24" stroke-dasharray="2,2"/>
+  <rect x="430" y="22" width="78" height="18" fill="#111b29" stroke="#fbbf24" rx="4"/>
+  <text x="469" y="34" text-anchor="middle" fill="#fbbf24" font-family="monospace" font-size="10">118 VUs</text>
+
+  <!-- Legende -->
+  <g transform="translate(380,212)">
+    <rect width="220" height="20" fill="#111b29" rx="4"/>
+    <line x1="10" y1="10" x2="30" y2="10" stroke="#4f8bff" stroke-width="2"/>
+    <text x="36" y="13" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="9">Ist (gemessen · live)</text>
+    <line x1="10" y1="10" x2="30" y2="10" stroke="#5fcb95" stroke-width="2" transform="translate(120,0)"/>
+    <text x="156" y="13" fill="#dbe5f3" font-family="Inter, sans-serif" font-size="9">Soll (geplant)</text>
+  </g>
+  <text x="20" y="226" fill="#93a2b8" font-family="Inter, sans-serif" font-size="9" font-style="italic">Y-Achse: VUs</text>
+</svg>
+```
+
+#### 10.8.1 Was die Grafik zeigt
+
+- Die **Soll-Linie** wird je nach Exekutor als flache oder
+  getreppte Polyline gerendert: `constant-vus` ist eine
+  Horizontale bei der Ziel-VU-Zahl, `ramping-vus` ist eine
+  Treppenkurve mit linearen Rampen zwischen aufeinanderfolgenden
+  Stages, `constant-arrival-rate` ist eine Horizontale beim
+  Ziel-RPS. `shared-iterations` produziert keine Soll-Linie
+  (dessen Parallelität ist konstruktionsbedingt unbegrenzt); die
+  Legende blendet dann den Eintrag `Soll (geplant)` aus.
+- Die **Ist-Polyline** aktualisiert sich alle paar Sekunden,
+  solange der Lauf in flight ist. Ein gelber Cursor markiert
+  den letzten Messpunkt.
+- Die **Y-Achse** ist als `VUs` für VU-basierte Exekutoren und
+  als `Anfragen/s` für Arrival-Rate-Exekutoren beschriftet,
+  sodass ein 50-req/s-Spike-Test nicht mehr fälschlich als
+  `VUs` angezeigt wird.
+- Der Header-Streifen trägt die verstrichene Dauer (`läuft seit
+  HH:MM:SS`) und die Anzahl der empfangenen Messpunkte
+  (`12 Messpunkte` / `noch keine Messpunkte`).
+- Wenn der Lauf endet, friert die Ist-Polyline auf den zuletzt
+  gemessenen Werten ein, sodass dieselbe Grafik als
+  Post-Mortem-Ansicht dient — öffne den Report, um sie mit
+  denselben Daten in voller Auflösung zu sehen.
+
+#### 10.8.2 Datenquellen
+
+- Die **Soll-Kurve** wird client-seitig aus
+  `run.configuration.loadProfile` über `computeRampChartParams`
+  in `liveRampChartLayout.ts` berechnet. Der Helfer ist
+  unit-getestet und ist die einzige Source of Truth für den
+  Live-Tab und den druckoptimierten Report, sodass die beiden
+  Ansichten in der Soll-Form nie voneinander abweichen können.
+- Die **Ist-Kurve** wird aus
+  `/api/test-runs/{id}/time-series` geladen (aus H2 gespeist,
+  damit die Daten über Container-Restarts hinweg stabil sind).
+  Die Polling-Schleife feuert nur, solange der Lauf in flight
+  ist — ein beendeter Lauf erzeugt also keinen Hintergrund-
+  Traffic.
+
+#### 10.8.3 Beispiel — ein Spike-Profil beobachten
+
+Du startest ein `Spike`-Profil (5 VUs Basis → 200 VUs in 10 s →
+5 VUs zurück). Der Übersicht-Tab zeigt die geplante Treppenkurve
+in Grün und beginnt Ist-Samples zu empfangen, sobald k6 hochfährt.
+Nach ~5 s beginnt die blaue Ist-Linie zu steigen; der Abstand zur
+grünen Soll-Linie verrät dir, ob das Target den Spike schneller
+aufnehmen kann als die konfigurierte Rampe. Um die 12 s herum
+liegt der gelbe Cursor nahe am Soll-Peak von 200 VUs — das ist
+der Moment, in dem das Target am stärksten beansprucht wird.
+Wenn das Profil endet, springt der Cursor zurück zur Basis und die
+Polyline friert ein; öffne den Abschnitt **Ramp-Grafik** des
+druckoptimierten Reports, um dieselben Daten in voller Auflösung
+zu sehen.
+
+#### 10.8.4 Ohne InfluxDB
+
+Wenn du lasttest ohne InfluxDB startest
+(`LASTTEST_INFLUXDB_ENABLED=false` oder ein bloßer `docker run`),
+rendert die Soll-Linie weiterhin und der Header-Streifen zeigt
+weiterhin die verstrichene Dauer. Die Ist-Polyline ist schlicht
+nicht verfügbar — dasselbe gilt für den druckoptimierten Report
+(siehe
+[Abschnitt 14.3](#143-ramp-grafik-zeigt-nur-die-soll-linie)).
 
 ---
 
@@ -1644,14 +2197,6 @@ in Lila/Orange in der Ramp-Grafik.
 9. **Detaillierte Metriken** — erweiterte k6-Metrik-Tabellen,
    aufgeschlüsselt pro Endpunkt und pro Statuscode.
 
-10. **Generiertes Skript** — das exakte k6-Skript, das ausgeführt
-    wurde. In dein Terminal kopieren, um den Lauf außerhalb von
-    lasttest zu reproduzieren; Details in
-    [Abschnitt 12](#12-das-generierte-k6-skript).
-
-11. **Konsolenausgabe und rohes JSON** — dieselben Blöcke wie in der
-    Haupt-UI, für Druck formatiert.
-
 ### 11.3 Die Ramp-Grafik (Lastverlauf)
 
 Wenn der Test abschließt, zeigt der Report eine **Ramp-Grafik**, die
@@ -1729,8 +2274,9 @@ das resultierende PDF auf Papier und Bildschirm lesbar ist.
 
 ### 12.1 Skript ansehen
 
-Klappe den Bereich **Generiertes k6-Testskript** am unteren Rand des
-Reports aus. Du siehst eine eigenständige JavaScript-Datei, die:
+Das generierte k6-Skript liegt im Dashboard unter dem
+Run-Detail-Tab **k6-Skript**. Du siehst dort eine eigenständige
+JavaScript-Datei, die:
 
 - nur die k6-Standardmodule importiert,
 - Base-URL, VUs und Dauer aus dem Formular setzt,
@@ -1759,7 +2305,7 @@ sprechen.
 Dasselbe Skript läuft auf jedem Host mit installiertem k6:
 
 ```bash
-# aus dem Report
+# aus dem Dashboard-Tab "k6-Skript" kopiert oder per /api/test-runs/{id}/script geladen
 k6 run -e BASE_URL="https://example.test" lasttest-<run-id>.js
 
 # wenn du das Skript nur lokal hast und die ursprüngliche Base-URL
@@ -1830,7 +2376,7 @@ isolieren und eine verwaltete Time-Series-Datenbank verwenden.
 | `PKIX path building failed: unable to find valid certification path to requested target` | Das Target-API verwendet ein TLS-Zertifikat, das von der JVM nicht vertraut wird (self-signed, interne CA, fehlendes Intermediate) | Siehe [Abschnitt 14.1 — Eigene TLS-Zertifikate vertrauen](#141-eigene-tls-zertifikate-vertrauen) |
 | k6-Lauf-Logs enthalten `x509: certificate signed by unknown authority` (Import hat aber funktioniert) | Der Backend-TrustStore ist korrekt, aber k6 selbst kennt die Custom-CA noch nicht | `SSL_CERT_FILE` setzen — siehe [Abschnitt 14.1.1](#1411-die-k6-seite-ssl_cert_file) |
 | Die Ramp-Grafik zeigt nur die Soll-Linie, keine Ist-Linie | InfluxDB ist nicht erreichbar oder es wurden keine Daten geschrieben | Siehe [Abschnitt 14.2](#142-influxdb-ist-nicht-erreichbar) und [14.3](#143-ramp-grafik-zeigt-nur-die-soll-linie) |
-| Rechtsklick auf ein Run-Badge tut nichts | Cursor außerhalb des Badges, Browser-Extension unterdrückt kontextmenu, oder Mid-Transition-Render | Siehe [Abschnitt 14.4](#144-rechtsklick-menü-erscheint-nicht) |
+| Rechtsklick auf eine Run-Zeile tut nichts | Cursor außerhalb der Zeile, Browser-Extension unterdrückt contextmenu, oder Mid-Transition-Render | Siehe [Abschnitt 14.4](#144-rechtsklick-menü-erscheint-nicht) |
 | Toolbar-Sprach-Pille zeigt die falsche Sprache | Veralteter `localStorage`-Eintrag aus früherer Session, oder Browser blockiert Storage im Privatmodus | Siehe [Abschnitt 6.2](#62-einstellungs-schublade-sprachumstellung) — Sprache erneut wählen; fällt auf Englisch zurück, wenn `localStorage` nicht verfügbar ist |
 | k6-Lauf-Logs enthalten `could not create the 'influxdb' output: unknown query parameter: org` | InfluxDB-Image-Version ist 2.x; k6 v2 unterstützt nur InfluxDB v1 | Verwende das gebündelte Compose-File (es liefert InfluxDB 1.11) |
 
@@ -2018,31 +2564,31 @@ k6 → InfluxDB-Schreibpfad gebrochen ist.
 
 ### 14.4 Rechtsklick-Menü erscheint nicht
 
-Das Run-Badge-Kontextmenü wird mit `onContextMenu` auf dem
-Badge-Button geöffnet. Wenn ein Rechtsklick auf ein Badge nichts
-tut, gehe diese Checks durch:
+Das Run-Zeilen-Kontextmenü wird mit `onContextMenu` auf dem
+Zeilen-Button geöffnet. Wenn ein Rechtsklick auf eine Zeile
+nichts tut, gehe diese Checks durch:
 
-1. **Du hast die Detail-Karte geklickt, nicht das Badge.** Das Badge
-   lebt im Multi-Run-Dashboard-Grid (über der Detail-Karte).
+1. **Du hast die Detail-Karte geklickt, nicht die Zeile.** Die
+   Zeile lebt im `Letzte Läufe`-Panel (über der Detail-Karte).
    Rechtsklick dort.
-2. **Das Badge war fokussiert, aber du hast außerhalb davon
-   rechtsgeklickt.** Bewege den Cursor über das Badge selbst (den
+2. **Die Zeile war fokussiert, aber du hast außerhalb davon
+   rechtsgeklickt.** Bewege den Cursor über die Zeile selbst (den
    farbigen Chip mit Methode, Status und Pfad), bevor du
-   rechtsklickst. Das Menü öffnet an der Cursor-Position, also muss
-   der Cursor auf dem Badge sein.
+   rechtsklickst. Das Menü öffnet an der Cursor-Position, also
+   muss der Cursor auf der Zeile sein.
 3. **Dein Browser hat das Menü überschrieben.** Einige Kiosk- /
    Accessibility-Erweiterungen unterdrücken das Browser-Kontextmenü
    und damit auch lasttests eigenes Menü. Deaktiviere die
    Erweiterung für die lasttest-Origin oder nutze die
-   Tastatur-Alternative: Fokussiere das Badge mit `Tab` und drücke
+   Tastatur-Alternative: Fokussiere die Zeile mit `Tab` und drücke
    die Kontextmenü-Taste (`Menu` auf den meisten Tastaturen,
    `Shift + F10` ist der universelle Fallback).
 4. **Der Lauf ist in Mid-Transition.** Ein Lauf, der gerade in
    `STOPPING` übergegangen ist, rendert sehr schnell; wenn du
    während dieses Frames rechtsgeklickt hast, hat sich das Menü
    vielleicht gegen den vorherigen Status geöffnet und beim
-   Re-Render des Badges selbst geschlossen. Klick einmal auf das
-   Badge, um es neu zu fokussieren, dann rechtsklick erneut.
+   Re-Render der Zeile selbst geschlossen. Klick einmal auf die
+   Zeile, um sie neu zu fokussieren, dann rechtsklick erneut.
 
 Hilft nichts davon, öffne die Browser-Devtools und prüfe auf
 JavaScript-Fehler nach dem Rechtsklick — das Menü-Mount ist in
@@ -2069,13 +2615,16 @@ loggt.
 | **Run-ID** | UUID, die jedem Testlauf zugewiesen wird; in Deep-Links und zum Herunterladen des Skripts verwendet. |
 | **Spec** | Das OpenAPI- oder Swagger-Dokument, das die Ziel-API beschreibt. |
 | **Demo-API** | Der In-Process-Server, den lasttest unter `/demo-api/*` exponiert, damit du die volle Pipeline ohne externe Abhängigkeit üben kannst. |
-| **Run-Badge** | Die kompakte Karte im Multi-Run-Dashboard, die einen einzelnen Testlauf repräsentiert. Zeigt Methode, Status und Pfad; Linksklick fokussiert, Rechtsklick öffnet das Aktions-Menü. |
-| **Aktions-Menü (Run-Badge)** | Kontextmenü, das per Rechtsklick auf ein Run-Badge öffnet. Items passen sich dem Status des Laufs an (in-flight vs. terminal). Bietet Stop, Force Abort, Erneut ausführen, Kopier-Aktionen, Export. |
+| **Run-Row** | Eine einzelne Zeile im `Letzte Läufe`-Panel, die einen Testlauf repräsentiert. Zeigt Methode, Status-Badge, Pfad, einen `× N`-Test-Zähler, einen Meta-String und einen relativen `when`-Stempel; Linksklick fokussiert, Rechtsklick öffnet das Aktions-Menü. |
+| **`× N`-Test-Zähler** | Kleiner Chip neben dem Operations-Namen jeder Run-Zeile, der anzeigt, wie oft dasselbe `(method, path)`-Paar bereits getestet wurde. Aus `/api/operations/stats` gespeist, alle 5 s gepollt, fällt auf `neu` beim Cold-Start zurück. |
+| **Aktions-Menü (Run-Row)** | Kontextmenü, das per Rechtsklick auf eine Run-Zeile öffnet. Items passen sich dem Status des Laufs an (in-flight vs. terminal). Bietet Stop, Force Abort, Erneut ausführen, Kopier-Aktionen, Export. |
+| **Timeline-Tab** | Run-Detail-Tab, der die Lauf-Historie eines `(method, path)`-Endpunkts als Heatmap + Gantt darstellt; ermöglicht das Springen zu historischen Runs per Klick. |
+| **Live-Ramp-Grafik** | SVG-Chart auf dem Übersicht-Tab, das die geplante Last (Soll) gegen die tatsächlich gemessene Last (Ist) während des Laufs vergleicht; dieselbe Grafik erscheint im druckoptimierten Report als **Ramp-Grafik**. |
 | **Payload-Pool** | Geordnete Liste von Datensätzen (Parameterwerte + Request-Body + Bearer-Token) an einem einzelnen Endpunkt. k6 durchläuft den Pool entsprechend der gewählten Strategie (sequenziell oder zufällig). |
 | **Payload-Strategie** | Wie der Runner pro Iteration den nächsten Payload aus dem Pool wählt: `sequential` (round-robin, mit Wrap-Around) oder `random` (uniformer Pick). Bei einem Ein-Zeilen-Pool sind beide identisch. |
 | **Settings-Schublade** | Slide-in-Modal, geöffnet vom Zahnrad in der oberen Toolbar. Exponiert aktuell den Sprach-Abschnitt zum Wechseln zwischen Englisch und Deutsch. Persistiert die Wahl in `localStorage`. |
 | **Doc-Popup** | Zentriertes Markdown-Modal, geöffnet aus der Toolbar (User Guide / README). Zweisprachig, mit Live-Suche (`Ctrl/⌘ + F`), Vor- / Zurück-Treffer-Navigation und Esc zum Schließen. |
-| **STOPPING** | Transienter Zustand eines Testlaufs, nachdem der Nutzer *Stop (graceful)* geklickt hat, aber bevor k6 tatsächlich beendet ist. Das Badge wird weiter gepollt, bis es zu `STOPPED` oder `ABORTED` transitiert. |
+| **STOPPING** | Transienter Zustand eines Testlaufs, nachdem der Nutzer *Stop (graceful)* geklickt hat, aber bevor k6 tatsächlich beendet ist. Die Zeile wird weiter gepollt, bis sie zu `STOPPED` oder `ABORTED` transitiert. |
 | **STOPPED** | Terminal-Zustand nach einer graceful `SIGTERM`-Abbruch. Bis zum Stop ausgewertete Thresholds werden weiterhin gemeldet. |
 | **ABORTED** | Terminal-Zustand nach einer forcierten `SIGKILL`-Abbruch (oder einer `STOPPING → force`-Eskalation). Nur Teilkennzahlen können vorhanden sein; die Threshold-Bewertung ist nicht aussagekräftig. |
-| **Erneut ausführen** | Aktion, die den `CreateTestRunRequest` eines existierenden Terminal-Laufs mit einer frischen Run-ID erneut einreiht. Ausgelöst aus dem Rechtsklick-Menü auf Terminal-Badges. |
+| **Erneut ausführen** | Aktion, die den `CreateTestRunRequest` eines existierenden Terminal-Laufs mit einer frischen Run-ID erneut einreiht. Ausgelöst aus dem Rechtsklick-Menü auf Terminal-Zeilen. |

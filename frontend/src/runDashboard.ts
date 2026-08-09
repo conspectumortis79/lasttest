@@ -145,6 +145,25 @@ export function isTerminalRun(status: string): boolean {
 }
 
 /**
+ * True when the `<TestRunSummary>` block should render the
+ * compact status pill above the run's detail area. The pill is
+ * suppressed for `RUNNING` and `QUEUED` runs because their CSS
+ * modifier (`.status.running` / `.status.queued`) has no specific
+ * background colour and would otherwise render in the default
+ * gray — visually conflicting with the colour-coded
+ * `RunStatusView` pills below. The in-flight state is still
+ * communicated by the three progress cells
+ * (RUNNING SINCE / REMAINING / STARTED). `STOPPING` keeps the
+ * pill because the cells do not surface the "k6 is winding
+ * down" hint on their own. Terminal runs are owned by
+ * `RunStatusView`; the local pill would just duplicate the
+ * state, so it is hidden there as well.
+ */
+export function showsStatusPill(status: string): boolean {
+  return !isTerminalRun(status) && status !== 'RUNNING' && status !== 'QUEUED'
+}
+
+/**
  * Picks the id of the run the dashboard should focus on after the
  * run map changes. The rule:
  *   - keep the current focus if it is still present and not yet
@@ -188,4 +207,37 @@ export function pickActiveRunIdAfterStart(
 ): string | undefined {
   if (runs[startedId] !== undefined) return startedId
   return pickActiveRunId(runs, currentId)
+}
+
+/**
+ * Merge the dashboard's in-session run map with the runs
+ * fetched for the per-endpoint timeline tab into a single map
+ * the right-click menu can resolve from.
+ *
+ * Why this exists: historical runs (e.g. from previous
+ * sessions) only live in the timeline fetch and never in the
+ * parent's `runs` map — that map is only hydrated for runs
+ * the user started in the current browser session, there is
+ * no initial `GET /api/test-runs` in `App.tsx`. When the user
+ * right-clicks a Gantt bar or a list item in
+ * [EndpointTimelineTab], the menu was looked up via
+ * `runsMap[runMenu.runId]` and returned `undefined` for any
+ * historical run, which made [RunContextMenu]'s defensive
+ * `if (!run) { onClose(); return null }` close the menu
+ * immediately — hiding every action (focus / rerun / share /
+ * cleanup) for exactly the runs the timeline tab is there to
+ * surface.
+ *
+ * Timeline wins on id collisions because the right-click
+ * happened on a timeline item and its snapshot is the most
+ * recent fetch the tab has seen. Same id on both sides is
+ * the same `TestRun` in practice, so this is defensive.
+ */
+export function mergeTimelineMenuRuns(
+  dashboardRuns: Record<string, TestRun>,
+  timelineRuns: TestRun[],
+): Record<string, TestRun> {
+  const merged: Record<string, TestRun> = { ...dashboardRuns }
+  for (const run of timelineRuns) merged[run.id] = run
+  return merged
 }
