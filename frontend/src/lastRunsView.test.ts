@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   durationFor,
   humaniseDelta,
+  loadProfileSummaryFor,
   metaLineFor,
   operationMethodAndPath,
   relativeWhenFor,
@@ -11,7 +12,7 @@ import {
   statusBadgeLabel,
   statusDotClass,
 } from './lastRunsView.ts'
-import type { TestRun } from './k6Report.ts'
+import type { ReportLoadProfile, TestRun } from './k6Report.ts'
 
 // `ReportOperation` and `ReportLoadProfile` carry a lot of fields
 // the helpers under test do not look at. The test fixtures
@@ -701,5 +702,183 @@ test('operationMethodAndPath returns empty strings when the configuration has no
     configuration: { ...base, operations: [] },
   })
   deepEqual(operationMethodAndPath(run), { method: '', path: '' })
+})
+
+// ---- loadProfileSummaryFor ----------------------------------------------
+//
+// The badge summary string is the only signal the run badge has
+// to communicate which load profile (with which values) the run
+// was started with. Each test below pins one of the five
+// supported executor types so a regression that drops a field
+// or swaps the arrow direction cannot ship silently.
+
+const constantVUs: ReportLoadProfile = {
+  type: 'constant-vus',
+  virtualUsers: 50,
+  durationSeconds: 30,
+}
+
+const sharedIterations: ReportLoadProfile = {
+  type: 'shared-iterations',
+  virtualUsers: 100,
+  iterations: 1000,
+}
+
+const rampingVUs: ReportLoadProfile = {
+  type: 'ramping-vus',
+  startVUs: 0,
+  stages: [
+    { target: 50, durationSeconds: 30 },
+    { target: 100, durationSeconds: 60 },
+  ],
+}
+
+const rampingVUsFlat: ReportLoadProfile = {
+  // A ramping-vus profile without stages: the run is treated as
+  // a flat ramp from startVUs to virtualUsers over
+  // durationSeconds. The badge should not render a misleading
+  // arrow notation.
+  type: 'ramping-vus',
+  startVUs: 0,
+  virtualUsers: 50,
+  durationSeconds: 60,
+}
+
+const constantArrivalRate: ReportLoadProfile = {
+  type: 'constant-arrival-rate',
+  rate: 50,
+  durationSeconds: 30,
+  timeUnitSeconds: 1,
+  preAllocatedVUs: 10,
+  maxVUs: 100,
+}
+
+const rampingArrivalRate: ReportLoadProfile = {
+  type: 'ramping-arrival-rate',
+  startRate: 10,
+  rate: 100,
+  stages: [
+    { target: 50, durationSeconds: 30 },
+    { target: 100, durationSeconds: 30 },
+  ],
+}
+
+const rampingArrivalRateFlat: ReportLoadProfile = {
+  type: 'ramping-arrival-rate',
+  startRate: 10,
+  rate: 100,
+  durationSeconds: 60,
+}
+
+test('loadProfileSummaryFor formats constant-vus with profile label and VUs + duration', () => {
+  // The constant-vus branch is the most common case (smoke
+  // test, load test, soak test all map to it). The badge must
+  // show the profile label so the user can tell it apart from
+  // a constant-arrival-rate run, the VUs, and the duration.
+  equal(loadProfileSummaryFor(constantVUs, 'en'), 'Constant · 50 VUs · 30 s')
+  equal(loadProfileSummaryFor(constantVUs, 'de'), 'Konstante · 50 VUs · 30 s')
+})
+
+test('loadProfileSummaryFor formats shared-iterations as Burst with iter and VUs', () => {
+  // shared-iterations is open-ended (no predictable wall
+  // duration), so the badge surfaces the iteration count and
+  // the VUs instead. Iteration counts use a thousands
+  // separator so a 1 000-iter run is easy to scan alongside
+  // a 1 000 000-iter one.
+  equal(loadProfileSummaryFor(sharedIterations, 'en'), 'Burst · 1,000 iter · 100 VUs')
+  equal(loadProfileSummaryFor(sharedIterations, 'de'), 'Burst · 1,000 Iter · 100 VUs')
+})
+
+test('loadProfileSummaryFor shows start→peak VUs and total duration for ramping-vus', () => {
+  // The arrow notation captures the ramp direction so the user
+  // sees whether the run starts cold (0→100) or holds an
+  // existing load (50→100). 30 s + 60 s = 90 s = 2 min.
+  equal(loadProfileSummaryFor(rampingVUs, 'en'), 'Ramping · 0→100 VUs · 2 min')
+})
+
+test('loadProfileSummaryFor falls back to flat notation when ramping-vus has no stages', () => {
+  // Edge case: a ramping-vus run started without a `stages`
+  // array (legacy fixture or programmatic start). The badge
+  // must not invent an arrow — it collapses to the flat
+  // "<vus> VUs" form so the user can still see the values.
+  equal(loadProfileSummaryFor(rampingVUsFlat, 'en'), 'Ramping · 50 VUs · 1 min')
+})
+
+test('loadProfileSummaryFor formats constant-arrival-rate as RPS with rate and duration', () => {
+  // The arrival-rate branch uses the same "Constant" label
+  // family but adds an "RPS" suffix so the badge never mixes
+  // up a 50-VUs run with a 50-r/s run.
+  equal(loadProfileSummaryFor(constantArrivalRate, 'en'), 'Constant RPS · 50 r/s · 30 s')
+  equal(loadProfileSummaryFor(constantArrivalRate, 'de'), 'Konstante RPS · 50 r/s · 30 s')
+})
+
+test('loadProfileSummaryFor shows startRate→peakRate for ramping-arrival-rate', () => {
+  // Same arrow notation as ramping-vus, but the unit is r/s
+  // instead of VUs. Peak comes from the stage targets so a
+  // spike-shaped profile (50, 50, 50) reads as "10→50 r/s",
+  // not "10→100 r/s". 30 s + 30 s = 60 s = 1 min.
+  equal(loadProfileSummaryFor(rampingArrivalRate, 'en'), 'Ramping RPS · 10→100 r/s · 1 min')
+})
+
+test('loadProfileSummaryFor falls back to flat notation when ramping-arrival-rate has no stages', () => {
+  equal(loadProfileSummaryFor(rampingArrivalRateFlat, 'en'), 'Ramping RPS · 100 r/s · 1 min')
+})
+
+test('loadProfileSummaryFor accepts both kebab-case and SCREAMING_SNAKE_CASE types', () => {
+  // The backend serialises legacy profiles with the
+  // SCREAMING_SNAKE_CASE form (`CONSTANT_VUS`). The helper
+  // normalises the discriminator so the badge does not collapse
+  // to "unknown profile" for older runs.
+  const legacy: ReportLoadProfile = {
+    type: 'CONSTANT_VUS',
+    virtualUsers: 5,
+    durationSeconds: 10,
+  }
+  equal(loadProfileSummaryFor(legacy, 'en'), 'Constant · 5 VUs · 10 s')
+})
+
+test('loadProfileSummaryFor returns the missing-profile label when the profile is null', () => {
+  // Edge case: a run without a configuration has no profile.
+  // The badge must surface a sentinel (not "?" / not
+  // "undefined") so the row stays informative.
+  const en = loadProfileSummaryFor(null, 'en')
+  const de = loadProfileSummaryFor(null, 'de')
+  ok(en.length > 0)
+  ok(de.length > 0)
+  ok(en !== de, 'translations differ between languages')
+})
+
+test('loadProfileSummaryFor returns a single-word label for unknown executor types', () => {
+  // Forward-compat: a future k6 executor (e.g. `externally-
+  // controlled`) ships before the frontend learns about it. The
+  // badge must still render *something* — the neutral
+  // "Profile" label — instead of crashing or rendering
+  // "undefined".
+  const future: ReportLoadProfile = {
+    type: 'externally-controlled' as never,
+    virtualUsers: 5,
+    durationSeconds: 10,
+  }
+  const en = loadProfileSummaryFor(future, 'en')
+  ok(en.length > 0)
+  ok(en !== 'undefined', 'must not render the string "undefined"')
+})
+
+test('loadProfileSummaryFor renders minute granularity for sub-hour durations', () => {
+  // 150 s = 2 min 30 s, but the compact formatter rounds to
+  // the nearest minute so the badge stays one line.
+  equal(
+    loadProfileSummaryFor({ ...constantVUs, durationSeconds: 150 }, 'en'),
+    'Constant · 50 VUs · 3 min',
+  )
+})
+
+test('loadProfileSummaryFor renders hour-only durations for whole-hour runs', () => {
+  // 3 600 s = exactly 1 h. The compact formatter must surface
+  // the hour-only label rather than the redundant "1 h 0 min".
+  equal(
+    loadProfileSummaryFor({ ...constantVUs, durationSeconds: 3600 }, 'en'),
+    'Constant · 50 VUs · 1 h',
+  )
 })
 

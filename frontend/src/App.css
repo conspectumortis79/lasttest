@@ -1470,6 +1470,32 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   transition: padding-right .14s ease;
 }
 
+/* Third line on the badge: the load profile the run was
+   started with (e.g. "Smoke · 1 VU · 30 s"). Sits under the
+   endpoint path so a quick scan of the grid answers "which
+   endpoint was hit" and "with which profile" in one glance.
+   Kept visually quieter than the path (smaller, muted) so the
+   HTTP method/path still lead the eye — the profile is the
+   second-most useful piece of context, not the primary one. */
+.run-badge-profile {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .68rem;
+  color: #8ea1bd;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Same right-padding as the path so the two ellipsis-clip at
+     the same x-coordinate. The full string is also exposed
+     via the `title` attribute so the truncated tail is
+     reachable without opening the run detail. */
+  padding-right: 38px;
+  letter-spacing: .01rem;
+}
+.run-badge:hover .run-badge-profile,
+.run-badge:focus-visible .run-badge-profile {
+  color: #b6c3d8;
+}
+
 /* ---- Inline icon action on a run badge ------------------------- */
 /* Two affordances share the right edge of the badge: the cancel
    (stop square) for in-flight runs, and the remove (X) for
@@ -2168,7 +2194,8 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
    Tab navigation in the run detail card. Replaces the previous
    "stack everything" layout with a horizontal tab strip similar
    to the mockup. Tabs: Übersicht · Timeline · Aktionen ·
-   k6-Konsole · Schwellen · Konfiguration · Fehler-Diagnose.
+   k6-Konsole · Schwellen · Konfiguration · Fehler-Diagnose ·
+   k6 Script · K6 Bericht öffnen (external).
    ==================================================================== */
 .run-detail-tabs {
   display: flex;
@@ -2194,8 +2221,18 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
   z-index: 5;
 }
 .run-detail-tab {
-  padding: 10px 12px;
-  font-size: 12.5px;
+  /* Font size bumped from 12.5px to 14px so the tab strip is
+     readable at a glance; padding trimmed from 10px/12px to
+     8px/10px so all 9 tabs still fit on a single line inside
+     the 1060px <main> column at desktop widths (>= 1024px).
+     Verified with mockup-tabs-fit-check.html + Playwright
+     measurement: total button width ~931px, container ~1032px,
+     slack ~100px. `flex-wrap: wrap` on the parent still wraps
+     onto two rows on viewports narrower than ~970px instead of
+     overflowing horizontally. */
+  padding: 8px 10px;
+  font-size: 14px;
+  font-weight: 600;
   color: #93a2b8;
   cursor: pointer;
   border-bottom: 2px solid transparent;
@@ -2205,6 +2242,7 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
   border-left: 0;
   border-right: 0;
   font-family: inherit;
+  white-space: nowrap;
 }
 .run-detail-tab:hover { color: #dbe5f3; }
 .run-detail-tab.active {

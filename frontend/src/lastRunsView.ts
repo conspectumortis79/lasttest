@@ -12,7 +12,7 @@
 // handled at the panel level (it opens the same `RunContextMenu`
 // the old grid used); the helpers below stay agnostic of that.
 
-import type { TestRun } from './k6Report.ts'
+import type { ReportLoadProfile, TestRun } from './k6Report.ts'
 import { translate, type SupportedLanguage } from './i18n.ts'
 
 /**
@@ -88,6 +88,156 @@ export function operationMethodAndPath(run: TestRun): { method: string, path: st
     method: operations[0]?.method ?? '',
     path: operations[0]?.path ?? '',
   }
+}
+
+/**
+ * Known executor types after normalisation (kebab-case,
+ * lower-case). Mirrors the table in `k6Report.ts#profileSummary`
+ * so the badge summary stays in lockstep with the report's
+ * load-profile rendering.
+ */
+type NormalisedProfileType =
+  | 'constant-vus'
+  | 'ramping-vus'
+  | 'shared-iterations'
+  | 'constant-arrival-rate'
+  | 'ramping-arrival-rate'
+  | 'unknown'
+
+function normalisedProfileType(profile: ReportLoadProfile): NormalisedProfileType {
+  const raw = String(profile.type ?? '').toLowerCase().replace(/_/g, '-')
+  switch (raw) {
+    case 'constant-vus': return 'constant-vus'
+    case 'ramping-vus': return 'ramping-vus'
+    case 'shared-iterations': return 'shared-iterations'
+    case 'constant-arrival-rate': return 'constant-arrival-rate'
+    case 'ramping-arrival-rate': return 'ramping-arrival-rate'
+    default: return 'unknown'
+  }
+}
+
+function shortProfileLabel(type: NormalisedProfileType, lang: SupportedLanguage): string {
+  return translate(lang, `profile.badge.short.${type}`)
+}
+
+/**
+ * Builds the compact "profile · values" string rendered on each
+ * run badge so the user can see — without opening the run
+ * detail — which load profile (with which configuration values)
+ * the run was started with. The shape mirrors the mockup's
+ * one-line meta, but is more explicit about the profile type so
+ * the user can tell a constant-vus run from a ramping-vus run
+ * at a glance.
+ *
+ * Falls back to a single dash when the run has no configuration
+ * attached (legacy fixtures, synthetic test runs) and to a
+ * neutral "unknown profile" label when the executor is unknown
+ * to this build (forward-compat with future k6 executors). The
+ * returned string is intentionally short — the badge has to fit
+ * next to the HTTP method pill and the path, so a long sentence
+ * would force the badge to expand past the grid cell.
+ */
+export function loadProfileSummaryFor(
+  profile: ReportLoadProfile | null | undefined,
+  lang: SupportedLanguage,
+): string {
+  if (!profile) return translate(lang, 'profile.badge.summary.missing')
+  const type = normalisedProfileType(profile)
+  const label = shortProfileLabel(type, lang)
+  switch (type) {
+    case 'constant-vus':
+      return translate(lang, 'profile.badge.summary.constant-vus', {
+        profile: label,
+        vus: profile.virtualUsers ?? '?',
+        duration: formatProfileSeconds(profile.durationSeconds, lang),
+      })
+    case 'shared-iterations':
+      return translate(lang, 'profile.badge.summary.shared-iterations', {
+        profile: label,
+        iterations: formatInteger(profile.iterations) ?? '?',
+        vus: profile.virtualUsers ?? '?',
+      })
+    case 'ramping-vus': {
+      const stages = profile.stages ?? []
+      const start = profile.startVUs ?? 0
+      const peak = stages.reduce((max, stage) => Math.max(max, stage.target), start)
+      const duration = profile.durationSeconds ?? stages.reduce((sum, s) => sum + s.durationSeconds, 0)
+      // When the profile has no `stages` array the run is
+      // conceptually a single-stage ramp from `startVUs` to
+      // `virtualUsers` over `durationSeconds`; collapse the
+      // arrow notation into a flat "<vus> VUs" label so the
+      // badge does not render "0→50 VUs" for what is really a
+      // constant-vus-like profile.
+      if (stages.length === 0) {
+        return translate(lang, 'profile.badge.summary.ramping-vus.flat', {
+          profile: label,
+          vus: profile.virtualUsers ?? peak,
+          duration: formatProfileSeconds(duration, lang),
+        })
+      }
+      return translate(lang, 'profile.badge.summary.ramping-vus', {
+        profile: label,
+        start,
+        peak,
+        duration: formatProfileSeconds(duration, lang),
+      })
+    }
+    case 'constant-arrival-rate':
+      return translate(lang, 'profile.badge.summary.constant-arrival-rate', {
+        profile: label,
+        rate: profile.rate ?? '?',
+        duration: formatProfileSeconds(profile.durationSeconds, lang),
+      })
+    case 'ramping-arrival-rate': {
+      const stages = profile.stages ?? []
+      const startRate = profile.startRate ?? 0
+      const peakRate = stages.reduce((max, stage) => Math.max(max, stage.target), startRate)
+      const duration = profile.durationSeconds ?? stages.reduce((sum, s) => sum + s.durationSeconds, 0)
+      if (stages.length === 0) {
+        return translate(lang, 'profile.badge.summary.ramping-arrival-rate.flat', {
+          profile: label,
+          rate: profile.rate ?? peakRate,
+          duration: formatProfileSeconds(duration, lang),
+        })
+      }
+      return translate(lang, 'profile.badge.summary.ramping-arrival-rate', {
+        profile: label,
+        startRate,
+        peakRate,
+        duration: formatProfileSeconds(duration, lang),
+      })
+    }
+    case 'unknown':
+    default:
+      return translate(lang, 'profile.badge.short.unknown')
+  }
+}
+
+/**
+ * Locale-aware duration formatter for the badge. Mirrors the
+ * shape used by the meta line so the badge and the list row do
+ * not disagree about how a 90-second run is written — the badge
+ * uses the same `{seconds} s` / `{minutes} min` tokens so the
+ * string lands in roughly the same column width on both views.
+ */
+function formatProfileSeconds(seconds: number | undefined, lang: SupportedLanguage): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return '–'
+  if (seconds < 60) return translate(lang, 'lastRuns.meta.seconds', { seconds: Math.round(seconds) })
+  if (seconds < 3600) {
+    const minutes = Math.round(seconds / 60)
+    return translate(lang, 'lastRuns.meta.minutes', { minutes })
+  }
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.round((seconds - hours * 3600) / 60)
+  if (minutes === 0) return translate(lang, 'lastRuns.meta.hours', { hours })
+  return translate(lang, 'lastRuns.meta.hoursMinutes', { hours, minutes })
+}
+
+/** Formats a number with a thin-space thousands separator so
+ *  shared-iterations counts stay scannable on the badge. */
+function formatInteger(value: number | undefined): string | undefined {
+  if (value == null || !Number.isFinite(value)) return undefined
+  return Math.round(value).toLocaleString('en-US')
 }
 
 /**

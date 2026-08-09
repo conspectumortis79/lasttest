@@ -160,6 +160,14 @@ paths:
         '200': { description: OK }
 `
 
+// Pure helpers from `lastRunsView.ts` — imported here because
+// the run-grid badge renders the same identifiers (status dot,
+// method/path display name) as the "Last runs" list view. The
+// helpers are intentionally tiny, side-effect-free and
+// locale-aware, so the badge can reuse them without duplicating
+// the formatting decisions.
+import { loadProfileSummaryFor } from './lastRunsView.ts'
+
 // Formats a (possibly undefined) elapsed-seconds value as the
 // compact `M:SS` string the badge shows next to the spinner.
 // `undefined` (run not started yet) is rendered as `--:--` so
@@ -1197,6 +1205,27 @@ function LoadTestApp() {
                     )}
                   </span>
                   <span className="run-badge-path">{path}</span>
+                  {/* Third line on the badge: the load profile the
+                      run was started with (and the values it ran
+                      with). The user can now tell at a glance which
+                      endpoint was hit and which profile was used
+                      without opening the run detail. The line uses
+                      a dedicated element so it can be styled
+                      independently — smaller font, muted colour —
+                      and clipped with an ellipsis when the badge
+                      column is narrower than the profile name (a
+                      load/stress profile summary easily fits; a
+                      long path does not). The full string is
+                      available as a `title` tooltip so the truncated
+                      tail is still reachable without leaving the
+                      dashboard. */}
+                  <span
+                    className="run-badge-profile"
+                    title={loadProfileSummaryFor(candidate.configuration?.loadProfile, language)}
+                    data-testid={`run-badge-profile-${candidate.id}`}
+                  >
+                    {loadProfileSummaryFor(candidate.configuration?.loadProfile, language)}
+                  </span>
                 </div>
                 {/* Inline action buttons on the right edge of the
                     badge — appear on hover/focus so the default
@@ -1488,7 +1517,7 @@ function RunDetail({ run, runNow, handlers, timelineRefreshTick, runs }: { run: 
         onFocus={onPointerEnter}
         onMouseDown={onTabMouseDown}
         onClick={() => selectTab('timeline')}>
-        {translate(language, 'detail.tab.timeline')} <span className="badge actions-badge">{translate(language, 'detail.tab.timeline.badge')}</span>
+        {translate(language, 'detail.tab.timeline')}
       </button>
       <button type="button" role="tab" aria-selected={activeTab === 'actions'}
         className={`run-detail-tab ${activeTab === 'actions' ? 'active' : ''}`}

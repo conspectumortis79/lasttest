@@ -2786,6 +2786,12 @@ test('shows parallel runs in the dashboard and lets the user switch between them
   await expect(firstBadge.locator('.run-badge-method')).toBeVisible()
   await expect(firstBadge.locator('.run-badge-path')).toBeVisible()
   await expect(firstBadge.locator('.run-badge-status')).toBeVisible()
+  // The third line on the badge surfaces the load profile the
+  // run was started with — the user can now tell at a glance
+  // which endpoint was hit AND with which profile (smoke,
+  // load, stress, ...) without opening the run detail.
+  await expect(firstBadge.locator('.run-badge-profile')).toBeVisible()
+  await expect(firstBadge.locator('.run-badge-profile')).not.toBeEmpty()
 
   // Both runs must be reachable through the API; we verify the
   // list endpoint exposes them so the dashboard can re-hydrate
