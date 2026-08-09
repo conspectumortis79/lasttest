@@ -88,7 +88,10 @@ class LocalK6TestRunServiceCoverageTest {
                 ),
         )
 
-    private fun service(executor: Executor = Executor { }): LocalK6TestRunService =
+    private fun service(
+        executor: Executor = Executor { },
+        readerExecutor: Executor = executor,
+    ): LocalK6TestRunService =
         LocalK6TestRunService(
             importer =
                 object : SpecificationImporter {
@@ -106,8 +109,12 @@ class LocalK6TestRunServiceCoverageTest {
                     ): String = "export default function () {}"
                 },
             executor = executor,
+            readerExecutor = readerExecutor,
             k6Command = "k6",
             influxDbProperties = InfluxDbProperties(enabled = false),
+            runRepository = InMemoryTestRunRepository(),
+            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            timeSeriesWriter = InMemoryTimeSeriesWriter(),
         )
 
     // ------------------------------------------------------------------
@@ -561,27 +568,32 @@ class LocalK6TestRunServiceCoverageTest {
         // first `Thread.sleep(50)`. The interrupt then reliably
         // surfaces the catch block.
         val threadStarted = java.util.concurrent.CountDownLatch(1)
-        val escalationThread = java.util.concurrent.atomic.AtomicReference<Thread?>(null)
+        val escalationThread =
+            java.util.concurrent.atomic
+                .AtomicReference<Thread?>(null)
         val escalationFinished = java.util.concurrent.CountDownLatch(1)
-        val escalationExitReason = java.util.concurrent.atomic.AtomicReference<String?>(null)
+        val escalationExitReason =
+            java.util.concurrent.atomic
+                .AtomicReference<String?>(null)
         val capturingExecutor =
             Executor { task ->
-                val t = Thread({
-                    try {
-                        task.run()
-                        escalationExitReason.set("completed")
-                    } catch (t2: Throwable) {
-                        escalationExitReason.set("threw: ${t2.javaClass.simpleName}: ${t2.message}")
-                        throw t2
-                    } finally {
-                        println(
-                            "[DEBUG] escalation lambda finished: " +
-                                "exitReason=${escalationExitReason.get()}, " +
-                                "thread.interrupted=${Thread.currentThread().isInterrupted}",
-                        )
-                        escalationFinished.countDown()
-                    }
-                }, "escalation-capture")
+                val t =
+                    Thread({
+                        try {
+                            task.run()
+                            escalationExitReason.set("completed")
+                        } catch (t2: Throwable) {
+                            escalationExitReason.set("threw: ${t2.javaClass.simpleName}: ${t2.message}")
+                            throw t2
+                        } finally {
+                            println(
+                                "[DEBUG] escalation lambda finished: " +
+                                    "exitReason=${escalationExitReason.get()}, " +
+                                    "thread.interrupted=${Thread.currentThread().isInterrupted}",
+                            )
+                            escalationFinished.countDown()
+                        }
+                    }, "escalation-capture")
                 escalationThread.set(t)
                 t.start()
                 threadStarted.countDown()
@@ -749,8 +761,12 @@ class LocalK6TestRunServiceCoverageTest {
                             ): String = "export default function () {}"
                         },
                     executor = syncExecutor,
+                    readerExecutor = syncExecutor,
                     k6Command = "python3",
                     influxDbProperties = InfluxDbProperties(enabled = false),
+                    runRepository = InMemoryTestRunRepository(),
+                    statisticsRepository = InMemoryOperationStatisticsRepository(),
+                    timeSeriesWriter = InMemoryTimeSeriesWriter(),
                 )
             val run =
                 svc.create(
@@ -983,8 +999,12 @@ class LocalK6TestRunServiceCoverageTest {
                     ): String = "export default function () {}"
                 },
             executor = executor,
+            readerExecutor = executor,
             k6Command = command,
             influxDbProperties = InfluxDbProperties(enabled = false),
+            runRepository = InMemoryTestRunRepository(),
+            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            timeSeriesWriter = InMemoryTimeSeriesWriter(),
         )
 
     @Test
@@ -1260,8 +1280,12 @@ class LocalK6TestRunServiceCoverageTest {
                             ): String = "export default function () {}"
                         },
                     executor = capturingExecutor,
+                    readerExecutor = capturingExecutor,
                     k6Command = scriptFile.absolutePath,
                     influxDbProperties = InfluxDbProperties(enabled = false),
+                    runRepository = InMemoryTestRunRepository(),
+                    statisticsRepository = InMemoryOperationStatisticsRepository(),
+                    timeSeriesWriter = InMemoryTimeSeriesWriter(),
                 )
             val run =
                 svc.create(
@@ -1864,8 +1888,12 @@ class LocalK6TestRunServiceCoverageTest {
                             ): String = "export default function () {}"
                         },
                     executor = asyncExecutor,
+                    readerExecutor = asyncExecutor,
                     k6Command = scriptFile.absolutePath,
                     influxDbProperties = InfluxDbProperties(enabled = false),
+                    runRepository = InMemoryTestRunRepository(),
+                    statisticsRepository = InMemoryOperationStatisticsRepository(),
+                    timeSeriesWriter = InMemoryTimeSeriesWriter(),
                 )
             val run =
                 svc.create(

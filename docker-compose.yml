@@ -9,6 +9,12 @@ services:
       # Place your company's internal root CA at this path before starting
       # the container; the file itself is .gitignore'd.
       - ./certs/custom-ca.pem:/etc/lasttest/custom-ca.pem:ro
+      # H2 embedded database — the named volume persists test runs,
+      # operation statistics (× N), ramp-chart time series, and the
+      # demo request log across container restarts. The default
+      # data dir is /data, set by the Dockerfile via LASTTEST_DATA_DIR.
+      # Override LASTTEST_DATA_DIR if you want to relocate it.
+      - h2-data:/data
     environment:
       LASTTEST_PUBLIC_URL: http://localhost:8286/
       # TrustStore for the target API's TLS certificate. Leave PASSWORD
@@ -91,6 +97,14 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # Initial-mount für den "lasttest"-Dashboard-Provider (siehe
+      # grafana/provisioning/dashboards/dashboards.yml). Ohne diesen
+      # Mount zeigt der Provider auf /var/lib/grafana/dashboards, das
+      # beim ersten Container-Start noch nicht existiert — Folge:
+      # "stat /var/lib/grafana/dashboards: no such file or directory".
+      # Das Repo-Verzeichnis enthält eine .gitkeep als Marker und ist
+      # der Ablageort für eigene Dashboard-JSONs.
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       influxdb:
         condition: service_healthy
@@ -99,3 +113,4 @@ services:
 volumes:
   influxdb-data:
   grafana-data:
+  h2-data:

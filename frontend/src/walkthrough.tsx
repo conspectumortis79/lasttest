@@ -11,9 +11,6 @@ import { useState, type ReactNode } from 'react'
 import { translate, type SupportedLanguage } from './i18n.ts'
 import { STEPS, ZONE_COLOR, annotationText, type WalkthroughStepId } from './walkthroughData.ts'
 
-export { STEPS, ZONE_COLOR, annotationText } from './walkthroughData.ts'
-export type { WalkthroughStep, WalkthroughStepId, WalkthroughAnnotation } from './walkthroughData.ts'
-
 /**
  * Selection of the four annotations whose emphasis on the
  * illustration differs. The colour palette is fixed so the same

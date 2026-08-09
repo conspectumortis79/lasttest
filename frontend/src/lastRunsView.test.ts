@@ -2,7 +2,9 @@ import { deepEqual, equal, ok } from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   durationFor,
+  humaniseDelta,
   metaLineFor,
+  operationMethodAndPath,
   relativeWhenFor,
   runDisplayName,
   statusBadgeClass,
@@ -122,6 +124,20 @@ test('runDisplayName joins multiple operation paths with a comma', () => {
   equal(runDisplayName(run), 'GET /a, /b')
 })
 
+test('runDisplayName falls back to a dash when the first operation has no method', () => {
+  // The wire model allows for synthetic fixtures where the
+  // first operation's method is empty. The label must surface
+  // the dash rather than rendering an ugly `undefined /path`.
+  // We rebuild a config with a blanked-out method to avoid
+  // having to construct a full ReportOperation literal.
+  const base = configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 30 }, ['/api/orders'])
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: { ...base, operations: [{ ...base.operations[0], method: '' }] },
+  })
+  equal(runDisplayName(run), '– /api/orders')
+})
+
 test('metaLineFor renders VUs and duration in seconds for short runs', () => {
   const run = runWith({
     status: 'COMPLETED',
@@ -155,6 +171,17 @@ test('metaLineFor sums stage durations for ramping-vus runs', () => {
   })
   // 30 + 60 + 30 = 120 s = 2 min.
   equal(metaLineFor(run, 'en'), '50 VUs · 2 min')
+})
+
+test('metaLineFor formats hour-only durations without a trailing minutes segment', () => {
+  // 3 600 s = exactly 1 h. The helper must surface the
+  // hour-only label rather than rendering the redundant
+  // "1 h 0 min" pair.
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: configWith({ type: 'constant-vus', virtualUsers: 50, durationSeconds: 3600 }),
+  })
+  equal(metaLineFor(run, 'en'), '50 VUs · 1 h')
 })
 
 test('metaLineFor adds a status suffix for RUNNING, FAILED and QUEUED', () => {
@@ -250,8 +277,13 @@ test('relativeWhenFor returns a humanised "ago" string for finished runs', () =>
   ok(relativeWhenFor(runWith({ ...base, finishedAt: '2026-01-01T10:00:00Z' }), now, 'en').length > 0)
   // ~5 minutes ago
   ok(relativeWhenFor(runWith({ ...base, finishedAt: '2026-01-01T11:55:00Z' }), now, 'en').length > 0)
-  // just now
+  // just now (30 s ago — inside the "< 45 s" bucket)
   ok(relativeWhenFor(runWith({ ...base, finishedAt: '2026-01-01T11:59:30Z' }), now, 'en').length > 0)
+  // ~60 s ago — inside the special "45-89 s" bucket that rounds
+  // up to a single minute. Without this pin the bucket branch
+  // stays uncovered and the branch coverage counter falls below
+  // 100 %.
+  ok(relativeWhenFor(runWith({ ...base, finishedAt: '2026-01-01T11:59:00Z' }), now, 'en').length > 0)
   // days ago
   ok(relativeWhenFor(runWith({ ...base, finishedAt: '2025-12-30T12:00:00Z' }), now, 'en').length > 0)
 })
@@ -260,6 +292,30 @@ test('relativeWhenFor returns a dash when the run has no finishedAt', () => {
   // Belt-and-braces: a finishedAt-less terminal run is a data
   // anomaly, but the row should not render an empty cell.
   equal(relativeWhenFor(runWith({ status: 'COMPLETED' }), Date.now(), 'en'), '—')
+})
+
+test('humaniseDelta rounds the 45-90 s bucket up to one minute', () => {
+  // Direct pin for the only branch that the indirect
+  // `relativeWhenFor` test could not exercise: 60 s sits in the
+  // special "45–89 s" bucket and must round up to "1 min" rather
+  // than rendering as "0 min". Each other bucket is covered by
+  // `relativeWhenFor`; this test pins the 60 s case so the branch
+  // coverage counter reaches 100 %.
+  equal(humaniseDelta(60 * 1000, 'en'), '1 min')
+  // Boundary: 44 999 ms still falls into the just-now bucket; 90 000 ms
+  // jumps to "1 min" via the regular minutes branch.
+  ok(humaniseDelta(44 * 1000, 'en').length > 0)
+})
+
+test('relativeWhenFor returns a dash when an in-flight run has no startedAt', () => {
+  // RUNNING/STOPPING runs without a `startedAt` cannot have an
+  // elapsed clock; the helper must mirror the QUEUED branch and
+  // render an em-dash instead of an unparseable timestamp. This
+  // covers the `elapsedSecondsFrom` "no startedAt" branch that
+  // would otherwise remain un-covered.
+  for (const status of ['RUNNING', 'STOPPING']) {
+    equal(relativeWhenFor(runWith({ status: status as 'RUNNING' | 'STOPPING' }), Date.now(), 'en'), '—')
+  }
 })
 
 test('duration and relativeWhen agree on zero elapsed for un-started runs', () => {
@@ -591,3 +647,59 @@ test('durationFor falls back to elapsed only for in-flight runs without a config
     '1:30',
   )
 })
+
+test('durationFor shows just the elapsed when the profile has no predictable planned duration', () => {
+  // shared-iterations runs (and any other open-ended profile)
+  // have no planned total, so the "<elapsed> / ~<planned>"
+  // template is replaced by the bare elapsed clock.
+  const run = runWith({
+    status: 'RUNNING',
+    startedAt: '2026-01-01T00:00:00Z',
+    configuration: configWith(
+      { type: 'shared-iterations', virtualUsers: 50, iterations: 1000 },
+      ['/api/orders'],
+    ),
+  })
+  equal(durationFor(run, 90, 'en'), '1:30')
+})
+
+test('operationMethodAndPath returns the primary endpoints method and path', () => {
+  // The per-endpoint × N badge in the run list uses this
+  // helper to look up the counter for the (method, path)
+  // pair. The dashboard shows the badge for the run's primary
+  // operation (the first one in the configuration's
+  // operations array); secondary operations are deliberately
+  // ignored so the counter matches what the user is looking at.
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: configWith(
+      { type: 'constant-vus', virtualUsers: 10, durationSeconds: 30 },
+      ['/api/orders'],
+    ),
+  })
+  deepEqual(operationMethodAndPath(run), { method: 'GET', path: '/api/orders' })
+})
+
+test('operationMethodAndPath returns empty strings when the run has no configuration', () => {
+  // Synthetic / unknown runs (e.g. legacy fixtures) carry no
+  // configuration. The caller treats the empty strings as
+  // "no lookup key" and falls back to the "neu" badge. The
+  // helper must not crash on the missing operations array.
+  const run = runWith({ status: 'COMPLETED' })
+  deepEqual(operationMethodAndPath(run), { method: '', path: '' })
+})
+
+test('operationMethodAndPath returns empty strings when the configuration has no operations', () => {
+  // Edge case the dashboard occasionally sees when a malformed
+  // payload arrives: configuration present, operations array
+  // empty. The helper must surface the same "no lookup key"
+  // signal rather than crash. We strip the operations from a
+  // full config rather than building the literal by hand.
+  const base = configWith({ type: 'constant-vus', virtualUsers: 10, durationSeconds: 30 }, ['/x'])
+  const run = runWith({
+    status: 'COMPLETED',
+    configuration: { ...base, operations: [] },
+  })
+  deepEqual(operationMethodAndPath(run), { method: '', path: '' })
+})
+

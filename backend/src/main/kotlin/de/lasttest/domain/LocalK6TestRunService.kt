@@ -14,7 +14,9 @@ import de.lasttest.api.TestRun
 import de.lasttest.api.TestRunConfiguration
 import de.lasttest.api.TestRunOperationConfiguration
 import de.lasttest.api.TestRunStatus
+import de.lasttest.config.AsyncConfiguration
 import de.lasttest.config.InfluxDbProperties
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.nio.file.Files
@@ -76,9 +78,26 @@ interface TestRunService {
 class LocalK6TestRunService(
     private val importer: SpecificationImporter,
     private val generator: K6ScriptGenerator,
+    @Qualifier(AsyncConfiguration.TEST_RUN_EXECUTOR)
     private val executor: Executor,
+    /**
+     * Pool dedicated to the per-run stdout reader task. Kept
+     * separate from [executor] so each k6 process only occupies
+     * ONE slot on the main pool (the blocking `waitFor()` task)
+     * — the reader drains a pipe on the side and reclaims its
+     * thread on EOF. With this split `MAX_PARALLEL_RUNS` in
+     * [AsyncConfiguration] finally means "up to N parallel
+     * k6 processes", not "up to N/2". The two executors are
+     * wired by Spring; tests pass a noop (or a separate sync
+     * executor) so they can drive the reader deterministically.
+     */
+    @Qualifier(AsyncConfiguration.K6_READER_EXECUTOR)
+    private val readerExecutor: Executor,
     @Value("\${lasttest.k6-command:k6}") private val k6Command: String,
     private val influxDbProperties: InfluxDbProperties,
+    private val runRepository: TestRunRepository,
+    private val statisticsRepository: OperationStatisticsRepository,
+    private val timeSeriesWriter: TimeSeriesWriter,
 ) : TestRunService {
     private val runs = ConcurrentHashMap<String, TestRun>()
     private val scripts = ConcurrentHashMap<String, String>()
@@ -348,6 +367,8 @@ class LocalK6TestRunService(
         val started = Instant.now().toString()
         runs[run.id] = run.copy(status = TestRunStatus.RUNNING, startedAt = started)
         val directory = Files.createTempDirectory("lasttest-${run.id}")
+        val totalDurationSeconds = run.configuration?.loadProfile?.durationSeconds ?: 600
+        val targetVus = run.configuration?.loadProfile?.virtualUsers ?: 0
         try {
             val scriptFile = directory.resolve("test.js")
             val summaryFile = directory.resolve("summary.json")
@@ -358,20 +379,96 @@ class LocalK6TestRunService(
             // Drain stdout concurrently so cancel() can destroy the
             // process at any time without losing the partial output
             // and without blocking waitFor() on a slow pipe close.
-            // The reader runs on the same executor to keep a single
-            // thread pool for the service. We read raw bytes rather
-            // than line-by-line so the captured output matches what
-            // k6 actually wrote (including the final newline, if
-            // any).
+            // The reader runs on [readerExecutor] (a cached pool
+            // injected by Spring — see AsyncConfiguration), not on
+            // the main [executor]. This split is what makes
+            // `MAX_PARALLEL_RUNS` a real cap on the number of k6
+            // processes rather than a cap on the number of
+            // executor slots: each run takes one slot on the main
+            // pool (the blocking `waitFor()` task) and a transient
+            // slot on the cached pool (the short-lived reader).
+            // We read raw bytes rather than line-by-line so the
+            // captured output matches what k6 actually wrote
+            // (including the final newline, if any).
             val output = java.io.ByteArrayOutputStream()
-            executor.execute {
+            val runStartMs = System.currentTimeMillis()
+            // Live-tail throttle: every k6 line that contains a
+            // status heartbeat (or any other line the user might
+            // want to see in the k6-Konsole tab) costs us one
+            // `runs[id] = ...` write. The polling client reads
+            // the snapshot roughly every second, so anything
+            // faster than that is wasted CPU. We coalesce
+            // updates to a 250 ms window which is responsive
+            // enough for a human watching the k6-Konsole tab
+            // yet still cheaper than the polling cadence. The
+            // flag + lock guard the writer so only one update is
+            // in flight per window.
+            val liveTailLock =
+                java.util.concurrent.locks
+                    .ReentrantLock()
+            val liveTailDirty =
+                java.util.concurrent.atomic
+                    .AtomicBoolean(false)
+            readerExecutor.execute {
                 try {
                     process.inputStream.use { stream ->
-                        val buffer = ByteArray(4096)
+                        // Read byte-by-byte so we can also split on
+                        // newlines and feed the live-VU detector
+                        // without consuming the raw byte stream a
+                        // second time (k6 only writes to stdout once).
+                        val lineBuffer = java.io.ByteArrayOutputStream()
+                        val vuPattern = Regex("""running\s+\([^)]+\),\s*(\d+)/(\d+)\s*VUs""")
+                        val buf = ByteArray(1)
                         while (true) {
-                            val read = stream.read(buffer)
-                            if (read <= 0) break
-                            synchronized(output) { output.write(buffer, 0, read) }
+                            val n = stream.read(buf)
+                            if (n <= 0) break
+                            val byte = buf[0]
+                            synchronized(output) { output.write(byte.toInt()) }
+                            if (byte == '\n'.code.toByte()) {
+                                val line = String(lineBuffer.toByteArray(), Charsets.UTF_8)
+                                lineBuffer.reset()
+                                // Every complete line makes the
+                                // dashboard's k6-Konsole tab
+                                // potentially more useful. Push
+                                // the latest tail into the run
+                                // snapshot (throttled) so the
+                                // polling client picks it up on
+                                // the next tick instead of having
+                                // to wait for the process to exit.
+                                // Before this hook, [consoleOutput]
+                                // was only written in the finally
+                                // branch — so the k6-Konsole tab
+                                // sat on "Noch keine Ausgabe"
+                                // for the entire run.
+                                if (line.isNotEmpty()) {
+                                    liveTailDirty.set(true)
+                                    if (liveTailLock.tryLock()) {
+                                        try {
+                                            publishLiveTail(run.id, output, liveTailLock) { liveTailDirty.set(it) }
+                                        } finally {
+                                            liveTailLock.unlock()
+                                        }
+                                    }
+                                }
+                                val match = vuPattern.find(line) ?: continue
+                                val activeVUs = match.groupValues[1].toIntOrNull() ?: continue
+                                val elapsedSec = ((System.currentTimeMillis() - runStartMs) / 1000L).toInt().coerceAtLeast(0)
+                                val plannedVus =
+                                    if (totalDurationSeconds > 0) {
+                                        (elapsedSec.toDouble() / totalDurationSeconds * targetVus).coerceAtMost(targetVus.toDouble())
+                                    } else {
+                                        targetVus.toDouble()
+                                    }
+                                timeSeriesWriter.record(
+                                    runId = run.id,
+                                    timestampSeconds = (runStartMs / 1000L) + elapsedSec,
+                                    plannedVus = plannedVus,
+                                    actualVus = activeVUs.toDouble(),
+                                    actualRps = 0.0,
+                                )
+                            } else {
+                                lineBuffer.write(byte.toInt())
+                            }
                         }
                     }
                 } catch (_: java.io.IOException) {
@@ -523,8 +620,90 @@ class LocalK6TestRunService(
         }
     }
 
+    /**
+     * Coalesces a live k6 output tail into the in-flight run
+     * snapshot so the dashboard's k6-Konsole tab updates while
+     * the test is still running. Called from the stdout-reader
+     * thread whenever a new line completes; the [lock] argument
+     * enforces "one publish at a time" and the
+     * [isStillDirty] lambda lets the function re-arm itself
+     * when more bytes arrived while we were publishing. The
+     * publish is rate-limited to one per 250 ms — anything
+     * faster than the polling cadence is wasted CPU.
+     */
+    private fun publishLiveTail(
+        runId: String,
+        output: java.io.ByteArrayOutputStream,
+        lock: java.util.concurrent.locks.ReentrantLock,
+        setDirty: (Boolean) -> Unit,
+    ) {
+        val now = System.currentTimeMillis()
+        val lastPublish = lastLiveTailPublishMs.put(runId, now) ?: 0L
+        val snapshot: String
+        synchronized(output) {
+            val raw = output.toString(Charsets.UTF_8)
+            snapshot =
+                if (raw.length <= LIVE_OUTPUT_MAX_LENGTH) {
+                    raw
+                } else {
+                    // The k6-Konsole tab only needs the tail — the
+                    // head is the early-startup noise the user has
+                    // already scrolled past. We also annotate the
+                    // truncation so the user knows there is older
+                    // output in the run's terminal `consoleOutput`.
+                    "…[${raw.length - LIVE_OUTPUT_MAX_LENGTH} Zeichen übersprungen]…\n" + raw.takeLast(LIVE_OUTPUT_MAX_LENGTH)
+                }
+        }
+        val current = runs[runId] ?: return
+        runs[runId] = current.copy(consoleOutput = snapshot)
+        val deadline = lastPublish + LIVE_TAIL_THROTTLE_MS
+        if (now < deadline) return
+        // Re-arm in a background thread so the next batch of
+        // bytes can be published without blocking the reader.
+        Thread {
+            try {
+                Thread.sleep(LIVE_TAIL_THROTTLE_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return@Thread
+            }
+            if (!lock.tryLock()) return@Thread
+            try {
+                setDirty(false)
+                // We are done; the caller is free to set the
+                // flag again on the next line.
+            } finally {
+                lock.unlock()
+            }
+        }.start()
+    }
+
     private companion object {
         const val MAX_ERROR_LENGTH = 4000
+
+        /**
+         * Tail size of the live k6-Konsole snapshot. Larger than
+         * [MAX_ERROR_LENGTH] so the in-flight view shows a
+         * useful amount of context, but still bounded so a
+         * noisy k6 run cannot blow up the heap.
+         */
+        const val LIVE_OUTPUT_MAX_LENGTH = 50_000
+
+        /**
+         * Minimum spacing between two live-tail publishes for
+         * the same run. Smaller than the polling interval so
+         * the user never sees a "stuck" tail; large enough that
+         * a chatty k6 run does not burn a CPU on snapshot copies.
+         */
+        const val LIVE_TAIL_THROTTLE_MS: Long = 250
+
+        /**
+         * Per-run last-publish timestamp for the throttler. A
+         * ConcurrentHashMap because the reader thread, the
+         * executor's "flush" thread, and the polling HTTP
+         * request can all touch the same key.
+         */
+        val lastLiveTailPublishMs: java.util.concurrent.ConcurrentMap<String, Long> = java.util.concurrent.ConcurrentHashMap()
         const val DEFAULT_PARAMETER_VALUE = "test"
 
         /**

@@ -22,7 +22,7 @@ import { renderMarkdown } from './markdown.ts'
 import type { SupportedLanguage } from './i18n.ts'
 import { translate } from './i18n.ts'
 import { UserGuideWalkthrough } from './UserGuideWalkthrough.tsx'
-import type { WalkthroughStepId } from './walkthrough.tsx'
+import type { WalkthroughStepId } from './walkthroughData.ts'
 import {
   ACTIVE_CLASS,
   HIGHLIGHT_CLASS,

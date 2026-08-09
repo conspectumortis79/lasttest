@@ -26,15 +26,9 @@ repositories {
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
-    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("io.swagger.parser.v3:swagger-parser:2.1.37")
-    // H2 is used as the embedded database for persisting test runs,
-    // time-series samples, per-operation statistics, and the demo
-    // request log. The file-based mode keeps the data on the host
-    // (mounted as a Docker volume) so it survives container restarts.
-    runtimeOnly("com.h2database:h2")
 
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")

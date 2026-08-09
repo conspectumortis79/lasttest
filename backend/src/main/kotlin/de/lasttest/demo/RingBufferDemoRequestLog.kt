@@ -1,15 +1,27 @@
 package de.lasttest.demo
 
+import de.lasttest.domain.DemoRequestLogEntity
+import de.lasttest.domain.DemoRequestLogRepository
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.util.ArrayDeque
 
 /**
  * In-memory ring buffer that holds the most recent
- * [MAX_ENTRIES] demo requests. The deque acts as the ring:
- * [ArrayDeque.addLast] appends at the tail, [ArrayDeque.pollFirst]
- * drops the head when the buffer is full. Synchronisation lives on
- * the instance monitor so the interceptor (writer) and the
- * controller (reader) never see a half-applied state.
+ * [MAX_ENTRIES] demo requests, with a side-write to the H2
+ * `demo_request_log` table for persistence across container
+ * restarts. The deque acts as the ring: [ArrayDeque.addLast]
+ * appends at the tail, [ArrayDeque.pollFirst] drops the head when
+ * the buffer is full. Synchronisation lives on the instance
+ * monitor so the interceptor (writer) and the controller (reader)
+ * never see a half-applied state.
+ *
+ * The H2 write is a side effect: the live dashboard reads the
+ * ring buffer because the query is on the hot path and the deque
+ * can serve a "last N" snapshot in O(N). The H2 row is a write
+ * behind so a container restart can still surface historical
+ * entries via the new repository; the controller's `requests()`
+ * method stays on the ring buffer for latency.
  *
  * Storage is intentionally bounded — the demo traffic is meant to
  * confirm "did the request arrive" for the last few seconds, not
@@ -19,13 +31,18 @@ import java.util.ArrayDeque
  *
  * SOLID notes:
  *  - S — the class owns exactly one responsibility: bounded
- *    in-memory storage. Path filtering and HTTP serialisation live
- *    elsewhere.
+ *    in-memory storage with a persistent side-write. Path
+ *    filtering and HTTP serialisation live elsewhere.
  *  - D — implements [DemoRequestLog]; the interceptor and
  *    controller depend on that interface, not on this class.
+ *  - D — the persistence layer is injected via the constructor;
+ *    tests can plug in a no-op repository if H2 is not available.
  */
 @Service
-internal class RingBufferDemoRequestLog : DemoRequestLog {
+internal class RingBufferDemoRequestLog(
+    private val repository: DemoRequestLogRepository,
+) : DemoRequestLog {
+    private val log = LoggerFactory.getLogger(RingBufferDemoRequestLog::class.java)
     private val buffer = ArrayDeque<DemoRequestLogEntry>(MAX_ENTRIES)
 
     override fun record(entry: DemoRequestLogEntry) {
@@ -34,6 +51,25 @@ internal class RingBufferDemoRequestLog : DemoRequestLog {
                 buffer.pollFirst()
             }
             buffer.addLast(entry)
+        }
+        // Persist in H2 so a container restart can show historical
+        // traffic. The write is best-effort: a transient DB error
+        // is logged and swallowed so the live dashboard never blocks
+        // on a write failure. The in-memory entry is still
+        // available for the current session.
+        try {
+            val entity =
+                DemoRequestLogEntity().apply {
+                    timestamp = java.time.Instant.parse(entry.timestamp)
+                    method = entry.method
+                    path = entry.path
+                    statusCode = entry.status
+                    latencyMs = 0L
+                    runId = entry.runId
+                }
+            repository.save(entity)
+        } catch (exception: Exception) {
+            log.warn("DemoRequestLogEntity konnte nicht gespeichert werden: {}", exception.message)
         }
     }
 

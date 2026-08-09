@@ -62,8 +62,12 @@ class LocalK6TestRunServiceBranchesTest {
                     ): String = "export default function () {}"
                 },
             executor = Executor { /* noop — wir testen hier nicht execute() */ },
+            readerExecutor = Executor { /* noop — wir testen hier nicht execute() */ },
             k6Command = "k6",
             influxDbProperties = InfluxDbProperties(enabled = influxDbEnabled),
+            runRepository = InMemoryTestRunRepository(),
+            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            timeSeriesWriter = InMemoryTimeSeriesWriter(),
         )
 
     // --- resolveLoadProfile: legacy fallback branches ---
