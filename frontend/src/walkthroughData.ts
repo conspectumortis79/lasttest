@@ -17,6 +17,18 @@ export type WalkthroughStep = {
   titleKey: `walk.${WalkthroughStepId}.title`
   introKey: `walk.${WalkthroughStepId}.intro`
   annotations: WalkthroughAnnotation[]
+  /**
+   * Optional secondary SVG illustration shown below the primary
+   * one. Used by the step 4 ("Test Runs") tab, which has too
+   * many new features — the Letzte Läufe row list and the run
+   * detail tab strip — to fit in a single schematic. The
+   * design constraint is "max 2 SVGs per step". When this
+   * field is set, the [UserGuideWalkthrough] component renders
+   * the secondary illustration right below the primary one
+   * inside the same illustration card, and the second batch
+   * of annotations points at the secondary SVG.
+   */
+  secondarySvg?: 'step4-detail'
 }
 
 export const STEPS: WalkthroughStep[] = [
@@ -56,11 +68,21 @@ export const STEPS: WalkthroughStep[] = [
     id: 'step4',
     titleKey: 'walk.step4.title',
     introKey: 'walk.step4.intro',
+    secondarySvg: 'step4-detail',
+    // Annotations 1–4 belong to the primary SVG (the Letzte
+    // Läufe row list). Annotations 5–8 belong to the secondary
+    // SVG (the run detail tab strip plus the overview tab).
+    // The numbers are contiguous [1..8] per the walkthrough
+    // test in [walkthrough.test.ts].
     annotations: [
       { n: 1, titleKey: 'walk.step4.ann.1.title', bodyKey: 'walk.step4.ann.1.body' },
       { n: 2, titleKey: 'walk.step4.ann.2.title', bodyKey: 'walk.step4.ann.2.body' },
       { n: 3, titleKey: 'walk.step4.ann.3.title', bodyKey: 'walk.step4.ann.3.body' },
       { n: 4, titleKey: 'walk.step4.ann.4.title', bodyKey: 'walk.step4.ann.4.body' },
+      { n: 5, titleKey: 'walk.step4.ann.5.title', bodyKey: 'walk.step4.ann.5.body' },
+      { n: 6, titleKey: 'walk.step4.ann.6.title', bodyKey: 'walk.step4.ann.6.body' },
+      { n: 7, titleKey: 'walk.step4.ann.7.title', bodyKey: 'walk.step4.ann.7.body' },
+      { n: 8, titleKey: 'walk.step4.ann.8.title', bodyKey: 'walk.step4.ann.8.body' },
     ],
   },
   {

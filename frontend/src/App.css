@@ -707,9 +707,39 @@ button:disabled { opacity: .5; cursor: wait; }
      illustration's height depends on whatever the SVG content
      happens to draw, and the card visibly grows / shrinks
      between tabs. The cap keeps the card from becoming
-     comically tall on very wide viewports. */
+     comically tall on very wide viewports.
+
+     A step with a secondary SVG (currently only step 4) lifts
+     the aspect-ratio cap and grows the card vertically
+     instead — the stack inside uses its own flex column so the
+     two SVGs render one below the other at the same width.
+     The [is-dual] class is wired by the JSX, not stripped by
+     selectors, so the regular 5-step-with-1-SVG case never
+     pays the cost of the dual layout. */
   aspect-ratio: 2 / 1;
   max-height: 300px;
+}
+.walkthrough-illustration:has(.walkthrough-illustration-stack > .walk-svg:nth-child(2)) {
+  /* Dual-SVG variant: drop the 2:1 ratio and let the stack
+     define the height. The cap is wide enough to fit two
+     2:1 SVGs side-by-side at the same width, so the card
+     never grows past a comfortable area on tall viewports. */
+  aspect-ratio: auto;
+  max-height: 620px;
+}
+.walkthrough-illustration-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+}
+.walkthrough-illustration-stack .walk-svg {
+  /* Each SVG in the stack keeps its own 2:1 aspect ratio so
+     the primary and the secondary illustration look identical
+     to the eye. The gap above mimics the visual rhythm of the
+     single-SVG cards. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .walk-svg {
   display: block;

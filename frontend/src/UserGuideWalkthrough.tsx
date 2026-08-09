@@ -1,15 +1,25 @@
-// Interactive walkthrough popup. Shows four tabbed steps, each
-// with a schematic SVG of the corresponding front-end card and a
-// list of numbered annotations on the right. The illustrations
-// are deliberately schematic: the goal is to map UI zones to
-// explanations, not to reproduce a pixel-perfect screenshot.
+// Interactive walkthrough popup. Shows tabbed steps, each
+// with one or two schematic SVGs of the corresponding front-end
+// card and a list of numbered annotations on the right. The
+// illustrations are deliberately schematic: the goal is to map
+// UI zones to explanations, not to reproduce a pixel-perfect
+// screenshot.
 //
-// All four steps are rendered into the DOM at all times (with
-// the inactive three hidden via the `hidden` attribute) so the
-// DocPopup search can scan every step's text content and switch
-// to the step that contains the match. Each step container
-// carries a `data-step` attribute that the search uses to map a
-// highlighted `<mark>` back to its owning step.
+// Step 4 ("Test Runs") is the only step that carries two
+// stacked SVGs (the Letzte Läufe row list and the run detail
+// tab strip). The data driven approach is `step.secondarySvg`
+// in [walkthroughData.ts]; the renderer looks the secondary
+// SVG up in [SECONDARY_SVG_RENDERERS] and stacks it below the
+// primary one. The illustration column is capped at "max 2
+// SVGs per step" by the design constraint documented in
+// `walkthroughData.ts`.
+//
+// All steps are rendered into the DOM at all times (with the
+// inactive ones hidden via the `hidden` attribute) so the
+// DocPopup search can scan every step's text content and
+// switch to the step that contains the match. Each step
+// container carries a `data-step` attribute that the search
+// uses to map a highlighted `<mark>` back to its owning step.
 import { useEffect, useState, type ReactNode } from 'react'
 import { translate, type SupportedLanguage } from './i18n.ts'
 import { STEPS, ZONE_COLOR, annotationText, type WalkthroughStepId } from './walkthroughData.ts'
@@ -141,84 +151,199 @@ function Step3Svg() {
     <circle cx={28} cy={28} r="14" fill="#22304a" />
     <text x={28} y={33} textAnchor="middle" fontSize="14" fontWeight="800" fill="#79e6c8">3</text>
     <text x={56} y={29} fontSize="13" fontWeight="700" fill="#e8edf5">Load Profile</text>
-    <text x={56} y={45} fontSize="10" fill="#93a2b8">How many virtual users, how long, how fast</text>
+    <text x={56} y={45} fontSize="10" fill="#93a2b8">Pick a preset or tune VUs, duration & RPS</text>
+    {/* Preset row */}
+    <rect x="14" y="60" width={VIEW_W - 28} height="22" rx="5" fill="#0d1322" stroke="#233049" strokeWidth="1" />
+    <text x="22" y="74" fontSize="9" fontWeight="800" fill="#93a2b8">PRESET</text>
+    <rect x="80" y="65" width="44" height="13" rx="6" fill="#2a2660" stroke="#7d63ff" strokeWidth="0.8" />
+    <text x="102" y="74" textAnchor="middle" fontSize="8" fontWeight="700" fill="#fff">Smoke</text>
+    <rect x="128" y="65" width="44" height="13" rx="6" fill="transparent" stroke="#233049" strokeWidth="0.8" />
+    <text x="150" y="74" textAnchor="middle" fontSize="8" fill="#dbe5f3">Load</text>
+    <rect x="176" y="65" width="44" height="13" rx="6" fill="transparent" stroke="#233049" strokeWidth="0.8" />
+    <text x="198" y="74" textAnchor="middle" fontSize="8" fill="#dbe5f3">Stress</text>
+    <rect x="224" y="65" width="44" height="13" rx="6" fill="transparent" stroke="#233049" strokeWidth="0.8" />
+    <text x="246" y="74" textAnchor="middle" fontSize="8" fill="#dbe5f3">Spike</text>
+    <rect x="272" y="65" width="44" height="13" rx="6" fill="transparent" stroke="#233049" strokeWidth="0.8" />
+    <text x="294" y="74" textAnchor="middle" fontSize="8" fill="#dbe5f3">Soak</text>
+    <rect x="320" y="65" width="44" height="13" rx="6" fill="transparent" stroke="#233049" strokeWidth="0.8" />
+    <text x="342" y="74" textAnchor="middle" fontSize="8" fill="#dbe5f3">Burst</text>
+    <rect x="368" y="65" width="62" height="13" rx="6" fill="transparent" stroke="#233049" strokeWidth="0.8" />
+    <text x="399" y="74" textAnchor="middle" fontSize="8" fill="#dbe5f3">Arrival-Rate</text>
+    {/* Type pill */}
+    <rect x="438" y="65" width="104" height="13" rx="6" fill="transparent" stroke="#7d63ff" strokeWidth="0.8" />
+    <text x="490" y="74" textAnchor="middle" fontSize="8" fill="#7d63ff">constant-vus</text>
     {/* Three knobs */}
-    <rect x="14" y="60" width="160" height="100" rx="6" fill="#0d1322" stroke="#233049" strokeWidth="1" />
-    <text x="22" y="78" fontSize="9" fill="#93a2b8">Virtual users (VUs)</text>
-    <text x="22" y="100" fontSize="22" fontWeight="700" fill="#79e6c8">50</text>
-    <text x="22" y="118" fontSize="8" fill="#93a2b8">Concurrent users driving k6</text>
-    <rect x="22" y="130" width="40" height="14" rx="3" fill="#233049" />
-    <text x="42" y="140" textAnchor="middle" fontSize="8" fill="#dbe5f3">−</text>
-    <rect x="68" y="130" width="40" height="14" rx="3" fill="#233049" />
-    <text x="88" y="140" textAnchor="middle" fontSize="8" fill="#dbe5f3">+</text>
-    <rect x="14" y="60" width="500" height="100" rx="6" fill="#0d1322" stroke="#233049" strokeWidth="1" opacity="0" />
-    <rect x="180" y="60" width="160" height="100" rx="6" fill="#0d1322" stroke="#233049" strokeWidth="1" />
-    <text x="188" y="78" fontSize="9" fill="#93a2b8">Duration</text>
-    <text x="188" y="100" fontSize="22" fontWeight="700" fill="#79e6c8">2m</text>
-    <text x="188" y="118" fontSize="8" fill="#93a2b8">Total run time</text>
-    <rect x="346" y="60" width="180" height="100" rx="6" fill="#0d1322" stroke="#233049" strokeWidth="1" />
-    <text x="354" y="78" fontSize="9" fill="#93a2b8">Target RPS</text>
-    <text x="354" y="100" fontSize="22" fontWeight="700" fill="#79e6c8">200</text>
-    <text x="354" y="118" fontSize="8" fill="#93a2b8">Requests per second</text>
+    <rect x="14" y="90" width="160" height="74" rx="6" fill="#0d1322" stroke="#233049" strokeWidth="1" />
+    <text x="22" y="106" fontSize="9" fill="#93a2b8">Virtual users (VUs)</text>
+    <text x="22" y="126" fontSize="20" fontWeight="700" fill="#79e6c8">50</text>
+    <text x="22" y="142" fontSize="8" fill="#93a2b8">Parallel users hammering k6</text>
+    <rect x="22" y="150" width="32" height="11" rx="3" fill="#233049" />
+    <text x="38" y="158" textAnchor="middle" fontSize="8" fill="#dbe5f3">−</text>
+    <rect x="58" y="150" width="32" height="11" rx="3" fill="#233049" />
+    <text x="74" y="158" textAnchor="middle" fontSize="8" fill="#dbe5f3">+</text>
+    <rect x="180" y="90" width="160" height="74" rx="6" fill="#0d1322" stroke="#233049" strokeWidth="1" />
+    <text x="188" y="106" fontSize="9" fill="#93a2b8">Duration</text>
+    <text x="188" y="126" fontSize="20" fontWeight="700" fill="#79e6c8">2m</text>
+    <text x="188" y="142" fontSize="8" fill="#93a2b8">Total run time</text>
+    <rect x="346" y="90" width="180" height="74" rx="6" fill="#0d1322" stroke="#233049" strokeWidth="1" />
+    <text x="354" y="106" fontSize="9" fill="#93a2b8">Target RPS</text>
+    <text x="354" y="126" fontSize="20" fontWeight="700" fill="#79e6c8">200</text>
+    <text x="354" y="142" fontSize="8" fill="#93a2b8">Requests per second (0 = open)</text>
     {/* Ramp chart */}
-    <rect x="14" y="170" width={VIEW_W - 28} height="80" rx="5" fill="#080d14" stroke="#233049" strokeWidth="1" />
-    <text x="22" y="184" fontSize="9" fill="#93a2b8">LOAD CURVE</text>
-    <path d="M 22 245 L 80 245 L 100 220 L 180 220 L 200 200 L 360 200 L 380 180 L 540 180" stroke="#7d63ff" strokeWidth="2" fill="none" />
+    <rect x="14" y="172" width={VIEW_W - 28} height="68" rx="5" fill="#080d14" stroke="#233049" strokeWidth="1" />
+    <text x="22" y="186" fontSize="9" fill="#93a2b8">LOAD CURVE</text>
+    <path d="M 22 234 L 80 234 L 100 216 L 180 216 L 200 200 L 360 200 L 380 184 L 540 184" stroke="#7d63ff" strokeWidth="2" fill="none" />
     <text x="22" y="200" fontSize="8" fill="#93a2b8">0s</text>
     <text x="540" y="200" textAnchor="end" fontSize="8" fill="#93a2b8">120s</text>
+    <text x="22" y="222" fontSize="8" fill="#93a2b8">Stages / Arrival-Rate wechseln das Schema</text>
     {/* Annotations */}
-    <CalloutLine x1={94} y1={100} x2={180} y2={220} color={ZONE_COLOR.input} />
-    <AnnotationBadge n={1} x={94} y={220} color={ZONE_COLOR.input} />
-    <CalloutLine x1={260} y1={100} x2={260} y2={40} color={ZONE_COLOR.action} />
-    <AnnotationBadge n={2} x={260} y={40} color={ZONE_COLOR.action} />
-    <CalloutLine x1={436} y1={100} x2={460} y2={240} color={ZONE_COLOR.status} />
-    <AnnotationBadge n={3} x={460} y={240} color={ZONE_COLOR.status} />
+    <CalloutLine x1={94} y1={126} x2={260} y2={20} color={ZONE_COLOR.input} />
+    <AnnotationBadge n={1} x={160} y={20} color={ZONE_COLOR.input} />
+    <CalloutLine x1={260} y1={126} x2={300} y2={20} color={ZONE_COLOR.action} />
+    <AnnotationBadge n={2} x={300} y={20} color={ZONE_COLOR.action} />
+    <CalloutLine x1={436} y1={126} x2={460} y2={258} color={ZONE_COLOR.status} />
+    <AnnotationBadge n={3} x={460} y={258} color={ZONE_COLOR.status} />
   </svg>
 }
 
-// Step 4 — Test runs card
+// Step 4 primary — the Letzte Läufe row list. Replaces the
+// old badge grid that the project shipped before the
+// LastRunsPanel release. The row shows the status stripe, the
+// method + path, the × N test counter, the meta line, the
+// elapsed/planned duration and the relative "when" stamp.
+// Annotations 1–4 in [walkthroughData.ts] point at this SVG.
 function Step4Svg() {
-  return <svg viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} className="walk-svg" role="img" aria-label="Step 4 schematic">
+  return <svg viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} className="walk-svg" role="img" aria-label="Step 4 schematic — Letzte Läufe row list">
     <rect x="6" y="6" width={VIEW_W - 12} height={VIEW_H - 12} rx="8" fill="#121a27d9" stroke="#263348" strokeWidth="1" />
     <circle cx={28} cy={28} r="14" fill="#22304a" />
     <text x={28} y={33} textAnchor="middle" fontSize="14" fontWeight="800" fill="#79e6c8">4</text>
-    <text x={56} y={29} fontSize="13" fontWeight="700" fill="#e8edf5">Test Runs</text>
-    <text x={56} y={45} fontSize="10" fill="#93a2b8">Live, terminal and failed runs in one place</text>
-    {/* Run grid */}
-    <rect x="14" y="60" width="260" height="40" rx="6" fill="#0d1322" stroke="#233049" strokeWidth="1" />
-    <rect x="14" y="60" width="3" height="40" fill="#d4a72c" />
-    <rect x="22" y="68" width="28" height="20" rx="3" fill="#266a59" />
-    <text x="36" y="82" textAnchor="middle" fontSize="9" fontWeight="800" fill="#fff">GET</text>
-    <text x="58" y="80" fontSize="9" fontWeight="800" fill="#d4a72c">RUNNING</text>
-    <text x="58" y="92" fontSize="8" fontFamily="monospace" fill="#dbe5f3">/api/v1/crocodiles</text>
-    <rect x="14" y="108" width="260" height="40" rx="6" fill="#0d1322" stroke="#233049" strokeWidth="1" />
-    <rect x="14" y="108" width="3" height="40" fill="#5a4293" />
-    <rect x="22" y="116" width="28" height="20" rx="3" fill="#266a59" />
-    <text x="36" y="130" textAnchor="middle" fontSize="9" fontWeight="800" fill="#fff">GET</text>
-    <text x="58" y="128" fontSize="9" fontWeight="800" fill="#c5b8ff">STOPPED</text>
-    <text x="58" y="140" fontSize="8" fontFamily="monospace" fill="#dbe5f3">/health</text>
-    {/* Right detail */}
-    <rect x="284" y="60" width={VIEW_W - 298} height="160" rx="6" fill="#0d1322" stroke="#233049" strokeWidth="1" />
-    <text x="292" y="78" fontSize="9" fontWeight="800" fill="#c5b8ff">STOPPED</text>
-    <text x="292" y="92" fontSize="8" fill="#93a2b8">Exit-Code 0 · Stopped (SIGTERM) um 14:23</text>
-    <rect x="292" y="100" width="220" height="22" rx="3" fill="#1a1d3a" stroke="#5a4293" strokeWidth="1" />
-    <text x="302" y="115" fontSize="9" fill="#c5b8ff">Vom Benutzer gestoppt — die geplante Laufzeit wurde nicht erreicht.</text>
-    <text x="302" y="140" fontSize="8" fontWeight="800" fill="#93a2b8">METRIKEN</text>
-    <text x="302" y="155" fontSize="9" fill="#dbe5f3">Requests 12,841 · p95 182 ms · Fehlerquote 0,5 %</text>
-    <text x="302" y="170" fontSize="9" fill="#dbe5f3">Durchsatz 11,83 /s · Daten empfangen 7,27 KiB</text>
-    <rect x="292" y="180" width="100" height="20" rx="3" fill="#2a2660" stroke="#7d63ff" strokeWidth="1" />
-    <text x="342" y="194" textAnchor="middle" fontSize="9" fontWeight="600" fill="#fff">⛔ Force Abort</text>
-    <rect x="402" y="180" width="100" height="20" rx="3" fill="#1a2638" stroke="#233049" strokeWidth="1" />
-    <text x="452" y="194" textAnchor="middle" fontSize="9" fill="#dbe5f3">⏹ Stop</text>
-    {/* Annotations */}
-    <CalloutLine x1={144} y1={80} x2={300} y2={40} color={ZONE_COLOR.status} />
-    <AnnotationBadge n={1} x={300} y={40} color={ZONE_COLOR.status} />
-    <CalloutLine x1={450} y1={86} x2={510} y2={130} color={ZONE_COLOR.output} />
-    <AnnotationBadge n={2} x={510} y={130} color={ZONE_COLOR.output} />
-    <CalloutLine x1={290} y1={200} x2={140} y2={245} color={ZONE_COLOR.action} />
-    <AnnotationBadge n={3} x={140} y={245} color={ZONE_COLOR.action} />
-    <CalloutLine x1={442} y1={200} x2={420} y2={245} color={ZONE_COLOR.input} />
-    <AnnotationBadge n={4} x={420} y={245} color={ZONE_COLOR.input} />
+    <text x={56} y={29} fontSize="13" fontWeight="700" fill="#e8edf5">Letzte Läufe</text>
+    <text x={56} y={45} fontSize="10" fill="#93a2b8">Every run of this session, newest first</text>
+    {/* Header line */}
+    <text x="20" y="64" fontSize="9" fontWeight="800" fill="#93a2b8">RECENT RUNS</text>
+    <rect x={VIEW_W - 94} y="56" width="80" height="14" rx="3" fill="#111b29" stroke="#2c3a52" strokeWidth="1" />
+    <text x={VIEW_W - 54} y="66" textAnchor="middle" fontSize="9" fill="#93a2b8">Filter</text>
+    <line x1="20" y1="74" x2={VIEW_W - 20} y2="74" stroke="#2c3a52" strokeWidth="1" />
+    {/* Row 1 — COMPLETED (active row) */}
+    <rect x="20" y="80" width={VIEW_W - 40} height="42" rx="4" fill="#15233a" stroke="#2c3a52" strokeWidth="1" />
+    <rect x="20" y="80" width="3" height="42" fill="#22c55e" />
+    <circle cx="36" cy="101" r="4" fill="#22c55e" />
+    <rect x="48" y="92" width="32" height="14" rx="3" fill="#0b3a25" stroke="#22c55e" strokeWidth="0.8" />
+    <text x="64" y="102" textAnchor="middle" fontSize="8" fontWeight="800" fill="#8fe8c1">GET</text>
+    <rect x="86" y="92" width="76" height="14" rx="8" fill="#0d3320" />
+    <text x="124" y="102" textAnchor="middle" fontSize="8" fontWeight="800" fill="#8fe8c1">COMPLETED</text>
+    <text x="170" y="102" fontSize="9" fontFamily="monospace" fill="#dbe5f3">/products/me</text>
+    <rect x="284" y="92" width="32" height="14" rx="3" fill="#1f2a3d" />
+    <text x="300" y="102" textAnchor="middle" fontSize="9" fill="#93a2b8">× 4</text>
+    <text x="170" y="115" fontSize="9" fill="#93a2b8">10 VUs · 30 s · <tspan fill="#fb923c">right-click</tspan> for actions</text>
+    <text x="460" y="100" textAnchor="end" fontSize="9" fontFamily="monospace" fill="#dbe5f3">00:32 / ~00:30</text>
+    <text x="528" y="100" textAnchor="end" fontSize="9" fill="#93a2b8">just now</text>
+    {/* Row 2 — RUNNING */}
+    <rect x="20" y="128" width={VIEW_W - 40} height="42" rx="4" fill="#0d1322" stroke="#2c3a52" strokeWidth="1" />
+    <rect x="20" y="128" width="3" height="42" fill="#fb923c" />
+    <circle cx="36" cy="149" r="4" fill="#fb923c" />
+    <rect x="48" y="140" width="36" height="14" rx="3" fill="#3a2a0b" stroke="#fb923c" strokeWidth="0.8" />
+    <text x="66" y="150" textAnchor="middle" fontSize="8" fontWeight="800" fill="#fb923c">POST</text>
+    <rect x="90" y="140" width="60" height="14" rx="8" fill="#3a2a0b" />
+    <text x="120" y="150" textAnchor="middle" fontSize="8" fontWeight="800" fill="#fb923c">RUNNING …</text>
+    <text x="158" y="150" fontSize="9" fontFamily="monospace" fill="#dbe5f3">/products/search</text>
+    <rect x="284" y="140" width="32" height="14" rx="3" fill="#1f2a3d" />
+    <text x="300" y="150" textAnchor="middle" fontSize="9" fill="#93a2b8">× 7</text>
+    <text x="158" y="163" fontSize="9" fill="#93a2b8">20 VUs · 60 s · <tspan fill="#fb923c">right-click</tspan> for actions</text>
+    <text x="460" y="148" textAnchor="end" fontSize="9" fontFamily="monospace" fill="#dbe5f3">00:18 / ~01:00</text>
+    <text x="528" y="148" textAnchor="end" fontSize="9" fill="#93a2b8">2 min ago</text>
+    {/* Row 3 — FAILED */}
+    <rect x="20" y="176" width={VIEW_W - 40} height="42" rx="4" fill="#0d1322" stroke="#2c3a52" strokeWidth="1" />
+    <rect x="20" y="176" width="3" height="42" fill="#ef4444" />
+    <circle cx="36" cy="197" r="4" fill="#ef4444" />
+    <rect x="48" y="188" width="32" height="14" rx="3" fill="#3a0b0b" stroke="#ef4444" strokeWidth="0.8" />
+    <text x="64" y="198" textAnchor="middle" fontSize="8" fontWeight="800" fill="#ffb5c3">GET</text>
+    <rect x="86" y="188" width="60" height="14" rx="8" fill="#3a0b0b" />
+    <text x="116" y="198" textAnchor="middle" fontSize="8" fontWeight="800" fill="#ffb5c3">FAILED</text>
+    <text x="154" y="198" fontSize="9" fontFamily="monospace" fill="#dbe5f3">/products/admin/stats</text>
+    <rect x="334" y="188" width="32" height="14" rx="3" fill="#1f2a3d" />
+    <text x="350" y="198" textAnchor="middle" fontSize="9" fill="#93a2b8">× 2</text>
+    <text x="154" y="211" fontSize="9" fill="#93a2b8">10 VUs · 30 s · <tspan fill="#fb923c">right-click</tspan> for actions</text>
+    <text x="460" y="196" textAnchor="end" fontSize="9" fontFamily="monospace" fill="#dbe5f3">exit 1</text>
+    <text x="528" y="196" textAnchor="end" fontSize="9" fill="#93a2b8">5 min ago</text>
+    {/* Footer hint */}
+    <text x="20" y="238" fontSize="9" fill="#93a2b8">Click = focus · Right-click = actions menu</text>
+    <text x={VIEW_W - 20} y="238" textAnchor="end" fontSize="9" fill="#7d63ff">Items adapt to status</text>
+    {/* Annotations 1–4 */}
+    <CalloutLine x1={70} y1={101} x2={50} y2={40} color={ZONE_COLOR.status} />
+    <AnnotationBadge n={1} x={50} y={40} color={ZONE_COLOR.status} />
+    <CalloutLine x1={300} y1={102} x2={420} y2={40} color={ZONE_COLOR.output} />
+    <AnnotationBadge n={2} x={420} y={40} color={ZONE_COLOR.output} />
+    <CalloutLine x1={460} y1={100} x2={500} y2={265} color={ZONE_COLOR.input} />
+    <AnnotationBadge n={3} x={500} y={265} color={ZONE_COLOR.input} />
+    <CalloutLine x1={460} y1={128} x2={100} y2={265} color={ZONE_COLOR.action} />
+    <AnnotationBadge n={4} x={100} y={265} color={ZONE_COLOR.action} />
+  </svg>
+}
+
+// Step 4 secondary — the run detail tab strip plus a peek at
+// the Übersicht tab body. The card and the tab strip are the
+// new addition since the LastRunsPanel rewrite: the run
+// detail is now a tab strip with 9 entries (8 tabs + the
+// external "k6-Bericht öffnen" open-in-new-tab affordance).
+// The body under the strip shows the Übersicht tab summary so
+// the user sees where the live ramp chart lives. Annotations
+// 5–8 in [walkthroughData.ts] point at this SVG.
+function Step4DetailSvg() {
+  return <svg viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} className="walk-svg" role="img" aria-label="Step 4 schematic — run detail tab strip">
+    <rect x="6" y="6" width={VIEW_W - 12} height={VIEW_H - 12} rx="8" fill="#121a27d9" stroke="#263348" strokeWidth="1" />
+    <circle cx={28} cy={28} r="14" fill="#22304a" />
+    <text x={28} y={33} textAnchor="middle" fontSize="14" fontWeight="800" fill="#79e6c8">4b</text>
+    <text x={56} y={29} fontSize="13" fontWeight="700" fill="#e8edf5">Run-Detail: Tab strip</text>
+    <text x={56} y={45} fontSize="10" fill="#93a2b8">8 tabs + ext. k6 report — Overview is default</text>
+    {/* Tab strip */}
+    <rect x="14" y="58" width={VIEW_W - 28} height="22" rx="4" fill="#0d1322" stroke="#233049" strokeWidth="1" />
+    {/* Active tab: Overview */}
+    <rect x="20" y="62" width="60" height="14" rx="2" fill="#2a2660" stroke="#7d63ff" strokeWidth="1" />
+    <text x="50" y="72" textAnchor="middle" fontSize="9" fontWeight="700" fill="#fff">Overview</text>
+    {/* Other tabs (from the RunDetail tab list in App.tsx) */}
+    <text x="88" y="72" textAnchor="middle" fontSize="9" fill="#93a2b8">Timeline</text>
+    <text x="138" y="72" textAnchor="middle" fontSize="9" fill="#93a2b8">Actions</text>
+    <text x="187" y="72" textAnchor="middle" fontSize="9" fill="#93a2b8">k6 console</text>
+    <text x="247" y="72" textAnchor="middle" fontSize="9" fill="#93a2b8">Thresholds</text>
+    <text x="298" y="72" textAnchor="middle" fontSize="9" fill="#93a2b8">Config</text>
+    <text x="335" y="72" textAnchor="middle" fontSize="9" fill="#f87171">Failure</text>
+    <text x="382" y="72" textAnchor="middle" fontSize="9" fill="#93a2b8">k6 script</text>
+    <text x="442" y="72" textAnchor="middle" fontSize="9" fill="#7d63ff">↗ k6 report</text>
+    {/* Tab body — Overview preview */}
+    <rect x="14" y="86" width={VIEW_W - 28} height={VIEW_H - 100} rx="4" fill="#080d14" stroke="#33425b" strokeWidth="1" />
+    {/* Summary row */}
+    <rect x="20" y="92" width="120" height="28" rx="3" fill="#0d1322" stroke="#233049" strokeWidth="1" />
+    <text x="28" y="103" fontSize="8" fill="#93a2b8">DURATION</text>
+    <text x="28" y="115" fontSize="11" fontWeight="700" fill="#79e6c8">00:32 / 00:30</text>
+    <rect x="146" y="92" width="120" height="28" rx="3" fill="#0d1322" stroke="#233049" strokeWidth="1" />
+    <text x="154" y="103" fontSize="8" fill="#93a2b8">EXIT CODE</text>
+    <text x="154" y="115" fontSize="11" fontWeight="700" fill="#8fe8c1">0</text>
+    <rect x="272" y="92" width="120" height="28" rx="3" fill="#0d1322" stroke="#233049" strokeWidth="1" />
+    <text x="280" y="103" fontSize="8" fill="#93a2b8">STATUS</text>
+    <text x="280" y="115" fontSize="11" fontWeight="700" fill="#8fe8c1">COMPLETED</text>
+    <rect x="398" y="92" width="142" height="28" rx="3" fill="#0d1322" stroke="#233049" strokeWidth="1" />
+    <text x="406" y="103" fontSize="8" fill="#93a2b8">ENDPOINTS</text>
+    <text x="406" y="115" fontSize="11" fontWeight="700" fill="#79e6c8">3 · 12 841 req</text>
+    {/* Ramp chart */}
+    <text x="20" y="136" fontSize="9" fontWeight="800" fill="#93a2b8">LOAD (target / actual)</text>
+    <rect x="20" y="140" width={VIEW_W - 40} height="48" rx="3" fill="#0d1322" stroke="#233049" strokeWidth="1" />
+    <path d="M 28 184 L 100 184 L 130 170 L 250 170 L 280 162 L 400 162 L 430 154 L 540 154" stroke="#7d63ff" strokeWidth="1.6" fill="none" />
+    <path d="M 28 184 L 100 184 L 130 170 L 250 170 L 280 162 L 400 162 L 430 154 L 540 154" stroke="#f59e0b" strokeWidth="1.6" fill="none" strokeDasharray="3 3" />
+    <text x="32" y="155" fontSize="7" fill="#7d63ff">target</text>
+    <text x="60" y="155" fontSize="7" fill="#f59e0b">actual</text>
+    <text x="530" y="186" textAnchor="end" fontSize="7" fill="#93a2b8">120 s</text>
+    {/* Hint under chart */}
+    <text x="20" y="206" fontSize="9" fill="#93a2b8">Live polls /time-series only while RUNNING — finished runs are silent on the wire.</text>
+    {/* Annotations 5–8 */}
+    <CalloutLine x1={50} y1={69} x2={50} y2={30} color={ZONE_COLOR.input} />
+    <AnnotationBadge n={5} x={50} y={30} color={ZONE_COLOR.input} />
+    <CalloutLine x1={300} y1={106} x2={420} y2={30} color={ZONE_COLOR.output} />
+    <AnnotationBadge n={6} x={420} y={30} color={ZONE_COLOR.output} />
+    <CalloutLine x1={200} y1={72} x2={300} y2={265} color={ZONE_COLOR.action} />
+    <AnnotationBadge n={7} x={300} y={265} color={ZONE_COLOR.action} />
+    <CalloutLine x1={442} y1={72} x2={140} y2={265} color={ZONE_COLOR.status} />
+    <AnnotationBadge n={8} x={140} y={265} color={ZONE_COLOR.status} />
   </svg>
 }
 
@@ -300,6 +425,15 @@ const SVG_RENDERERS: Record<WalkthroughStepId, () => ReactNode> = {
   step5: Step5Svg,
 }
 
+// Secondary SVG renderers keyed by the value of
+// [WalkthroughStep.secondarySvg]. A step is only listed here
+// when its [walkthroughData.ts] entry sets `secondarySvg`. The
+// lookup uses a literal "step4-detail" key today so adding a
+// new secondary illustration is a one-line edit in two files.
+const SECONDARY_SVG_RENDERERS: Record<'step4-detail', () => ReactNode> = {
+  'step4-detail': Step4DetailSvg,
+}
+
 export function UserGuideWalkthrough({ language, strings, focusStepId, onActiveStepChange }: UserGuideWalkthroughProps) {
   const [activeId, setActiveId] = useState<WalkthroughStepId>('step1')
 
@@ -346,14 +480,21 @@ export function UserGuideWalkthrough({ language, strings, focusStepId, onActiveS
 
     {/*
       Every step is rendered into the DOM so the DocPopup search
-      can scan all four tabs' text at once. The inactive three
-      carry the `hidden` attribute (which maps to `display: none`
-      in user-agent stylesheets) so they take no space and the
+      can scan every tab's text at once. The inactive ones carry
+      the `hidden` attribute (which maps to `display: none` in
+      user-agent stylesheets) so they take no space and the
       search's scrollIntoView lands on the visible step's match
       after the focus effect flips the active id.
+
+      A step that sets `secondarySvg` gets a second SVG stacked
+      below its primary one. Both SVGs share the same
+      aspect-ratio / max-height rules in
+      `.walkthrough-illustration` so the visual cap stays
+      consistent across the five steps.
     */}
     {STEPS.map(step => {
       const Renderer = SVG_RENDERERS[step.id]
+      const SecondaryRenderer = step.secondarySvg ? SECONDARY_SVG_RENDERERS[step.secondarySvg] : null
       const isActive = step.id === activeId
       return <div
         key={step.id}
@@ -366,7 +507,12 @@ export function UserGuideWalkthrough({ language, strings, focusStepId, onActiveS
         <h3 className="walkthrough-title">{translate(language, step.titleKey)}</h3>
         <p className="walkthrough-intro">{translate(language, step.introKey)}</p>
         <div className="walkthrough-grid">
-          <div className="walkthrough-illustration">{Renderer()}</div>
+          <div className="walkthrough-illustration">
+            <div className="walkthrough-illustration-stack">
+              {Renderer()}
+              {SecondaryRenderer && <SecondaryRenderer />}
+            </div>
+          </div>
           <ol className="walkthrough-annotations">
             {step.annotations.map(ann => {
               const { title, body } = annotationText(language, ann)
