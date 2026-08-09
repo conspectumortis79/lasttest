@@ -126,7 +126,11 @@ type RenderHandle = {
   listIds: () => string[]
   selectedIds: () => string[]
   relativeTimesByItem: () => Map<string, string>
+  statusBadgeFor: (runId: string) => string | undefined
+  bottomTextFor: (runId: string) => string | undefined
   unmount: () => void
+  setRunsMap: (next: Record<string, TestRun>) => void
+  getRunsMap: () => Record<string, TestRun>
 }
 
 function renderTimeline(
@@ -136,8 +140,8 @@ function renderTimeline(
   timelineRuns: TestRun[] = makeRuns(),
 ): RenderHandle {
   const runs = timelineRuns
-  const runsMap: Record<string, TestRun> = {}
-  for (const run of runs) runsMap[run.id] = run
+  const initialRunsMap: Record<string, TestRun> = {}
+  for (const run of runs) initialRunsMap[run.id] = run
 
   // The component fetches `/api/operations/runs?...` on
   // mount. We return the same runs the parent owns so the
@@ -158,16 +162,22 @@ function renderTimeline(
   const root = createRoot(container)
 
   // The component re-renders when the parent changes
-  // `focusRunCreatedAt`. We keep the latest value in a ref
-  // and re-render the whole tree on demand so the test can
-  // simulate "parent swapped the active run" without having
-  // to rebuild the React tree by hand.
+  // `focusRunCreatedAt` or its `runs` map. We keep the
+  // latest values in refs and re-render the whole tree on
+  // demand so the test can simulate "parent swapped the
+  // active run" or "parent updated a run's status" without
+  // having to rebuild the React tree by hand.
   let setFocus: (next: string | null) => void = () => {}
+  let setRunsMapState: (next: Record<string, TestRun>) => void = () => {}
   let currentFocus = focusRunCreatedAt
+  let currentRunsMap: Record<string, TestRun> = initialRunsMap
   function Wrapper() {
     const [focus, setFocusState] = useState<string | null>(focusRunCreatedAt)
+    const [runsMap, setRunsMapStateLocal] = useState<Record<string, TestRun>>(initialRunsMap)
     setFocus = setFocusState
+    setRunsMapState = setRunsMapStateLocal
     currentFocus = focus
+    currentRunsMap = runsMap
     const props: EndpointTimelineProps = {
       method: 'GET',
       path: '/things',
@@ -221,6 +231,46 @@ function renderTimeline(
     return result
   }
 
+  function statusBadgeFor(runId: string): string | undefined {
+    // The list item renders the run's status as the visible
+    // text inside `.status-badge`. Returning the trimmed text
+    // lets the regression test assert the exact user-visible
+    // label ("Running …" / "Stopped" / "Aborted" / …) without
+    // having to peek at the i18n dict or the status class
+    // name. `undefined` when the run is not in the list
+    // (e.g. it was hidden or removed).
+    const target = queryListItems().find(el => el.getAttribute('data-run-id') === runId)
+    if (target == null) return undefined
+    const badge = target.querySelector('.status-badge')
+    return badge?.textContent?.trim()
+  }
+
+  function setRunsMap(next: Record<string, TestRun>): void {
+    // Pushes a new `runs` prop into the wrapper, simulating
+    // the parent re-rendering with an updated runs map
+    // (e.g. after a cancel response or a polling tick).
+    // Wrapped in `act` so React commits the resulting state
+    // before the test continues — without it the assertions
+    // would race the next render.
+    act(() => {
+      setRunsMapState(next)
+    })
+  }
+
+  function bottomTextFor(runId: string): string | undefined {
+    // The list item renders the run's "exit code or error"
+    // hint in the bottom-right cell. RUNNING/QUEUED reads
+    // "läuft …" / "running …", terminal runs read "exit N" or
+    // "siehe Diagnose" / "see diagnostics" or just "–". The
+    // text is the user-visible signal that the timeline still
+    // thinks the run is in flight; the cancel-regression test
+    // uses it to pin the bug down without having to assert on
+    // CSS classes.
+    const target = queryListItems().find(el => el.getAttribute('data-run-id') === runId)
+    if (target == null) return undefined
+    return target.querySelector('.rid')?.textContent?.trim()
+  }
+
   return {
     root,
     container,
@@ -270,6 +320,9 @@ function renderTimeline(
     listIds,
     selectedIds,
     relativeTimesByItem,
+    statusBadgeFor,
+    bottomTextFor,
+    getRunsMap: () => currentRunsMap,
     unmount() {
       act(() => {
         root.unmount()
@@ -285,6 +338,7 @@ function renderTimeline(
     // parent swapping the active run.
     __setFocus: setFocus,
     __getFocus: () => currentFocus,
+    setRunsMap,
   } as RenderHandle & { __setFocus: (next: string | null) => void, __getFocus: () => string | null }
 }
 
@@ -534,6 +588,173 @@ test('every past run list item shows the endpoint method+path and the load-profi
       // direction-less "1 VUs · 1 s".
       ok(profileEl!.textContent?.startsWith('Constant'), `expected profile summary to start with "Constant", got "${profileEl!.textContent}"`)
     }
+  } finally {
+    handle.unmount()
+  }
+})
+
+test('cancelling a RUNNING run from the timeline reflects the new status without a re-fetch', async () => {
+  // Regression test for the user-reported bug: the user opens
+  // the Timeline tab for an endpoint with a RUNNING run,
+  // right-clicks it, picks "Stop (graceful)" (or "Force
+  // abort"), and the timeline keeps showing the run as
+  // "Running …" / "läuft …" forever — even though the
+  // backend has already settled the run and the parent's
+  // `runs` map has the terminal snapshot.
+  //
+  // Root cause: the tab fetches /api/operations/runs on
+  // mount and on `refreshTick` bumps; a cancel from the
+  // right-click menu hits the backend and updates the
+  // parent's `runs` map, but the tab's local `timelineRuns`
+  // state is never re-synced. The user sees the stale
+  // "Running" badge until they navigate away and back.
+  //
+  // The fix: when the parent's `runs` map changes, the
+  // tab mirrors the parent's view onto its local state for
+  // every run both maps know about. The parent is the
+  // source of truth for status transitions on the runs the
+  // parent manages; the fetched view is only used for runs
+  // the parent has never seen (typically historical runs
+  // loaded after a page reload).
+  //
+  // The test drives both halves of the bug: the cancel
+  // callback fires (so the menu wiring is exercised) AND
+  // the parent's `runs` map is updated to the terminal
+  // snapshot (so the timeline's sync effect has something
+  // to mirror). The assertion is on the user-visible badge
+  // text and on the bottom-row "läuft …" hint — exactly
+  // the strings the user reported as stuck.
+  const stopCalls: Array<{ runId: string, force: boolean }> = []
+  const handlers: RunActionHandlers = {
+    ...HANDLERS,
+    onStop: (runId, force) => { stopCalls.push({ runId, force }) },
+  }
+  const runs: TestRun[] = [
+    { id: 'run-1', status: 'RUNNING', createdAt: '2026-01-01T10:00:00Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+  ]
+  const handle = renderTimeline('run-1', '2026-01-01T10:00:00Z', handlers, runs)
+  try {
+    await handle.waitForRuns()
+    // Sanity check the initial state: the run is in flight
+    // and the timeline shows it that way.
+    equal(handle.statusBadgeFor('run-1'), 'Running …', 'pre-cancel badge should read "Running …"')
+    equal(handle.bottomTextFor('run-1'), 'running …', 'pre-cancel bottom hint should read "running …"')
+
+    // User right-clicks the running run and picks the
+    // graceful stop entry.
+    handle.rightClickListItem('run-1')
+    handle.clickMenuItem('Stop (graceful)')
+    deepEqual(stopCalls, [{ runId: 'run-1', force: false }], 'Stop (graceful) must route to onStop with force=false')
+
+    // The parent (App.tsx) receives the cancel response and
+    // writes the updated TestRun into its `runs` map. The
+    // graceful-stop branch in [LocalK6TestRunService.cancel]
+    // flips the in-memory status to STOPPING before the
+    // executor settles on STOPPED, so the cancel response
+    // carries status=STOPPING.
+    const runsMap = handle.getRunsMap()
+    handle.setRunsMap({
+      ...runsMap,
+      'run-1': { ...runsMap['run-1'], status: 'STOPPING', cancelledAt: '2026-01-01T10:00:30Z', cancelledByForce: false },
+    })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+
+    // The timeline must follow the parent's snapshot.
+    // STOPPING is the in-flight status the user sees between
+    // the click and the executor settling the run; the
+    // badge text comes from the i18n dict via
+    // [runStatusBadgeLabel] and is the user-visible signal
+    // that the cancel went through.
+    equal(handle.statusBadgeFor('run-1'), 'Stopping …', 'post-cancel badge should read "Stopping …" — not "Running …"')
+    ok(handle.bottomTextFor('run-1') !== 'running …', `post-cancel bottom hint must drop "running …", got "${handle.bottomTextFor('run-1')}"`)
+
+    // The executor eventually settles the run. The parent's
+    // polling flips the status to STOPPED. The timeline
+    // must follow the second transition too — the user
+    // expects the badge to walk all the way from "Running"
+    // through "Stopping …" to "Stopped" without a manual
+    // re-fetch.
+    const runsMap2 = handle.getRunsMap()
+    handle.setRunsMap({
+      ...runsMap2,
+      'run-1': { ...runsMap2['run-1'], status: 'STOPPED', finishedAt: '2026-01-01T10:00:35Z', exitCode: 0 },
+    })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+
+    equal(handle.statusBadgeFor('run-1'), 'Stopped', 'post-exit badge should read "Stopped"')
+    equal(handle.bottomTextFor('run-1'), 'exit 0', 'post-exit bottom hint should read "exit 0"')
+  } finally {
+    handle.unmount()
+  }
+})
+
+test('force-aborting a RUNNING run from the timeline shows "Aborted" without a re-fetch', async () => {
+  // Companion to the graceful-stop test: the same mirror
+  // logic must work for the force-abort path. SIGKILL
+  // skips the STOPPING intermediate state and lands
+  // directly on ABORTED, which the timeline must show
+  // immediately (otherwise the user sees "Running …" for a
+  // run that the backend has already killed).
+  const stopCalls: Array<{ runId: string, force: boolean }> = []
+  const handlers: RunActionHandlers = {
+    ...HANDLERS,
+    onStop: (runId, force) => { stopCalls.push({ runId, force }) },
+  }
+  const runs: TestRun[] = [
+    { id: 'run-1', status: 'RUNNING', createdAt: '2026-01-01T10:00:00Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+  ]
+  const handle = renderTimeline('run-1', '2026-01-01T10:00:00Z', handlers, runs)
+  try {
+    await handle.waitForRuns()
+    equal(handle.statusBadgeFor('run-1'), 'Running …', 'pre-cancel badge should read "Running …"')
+
+    handle.rightClickListItem('run-1')
+    handle.clickMenuItem('Force abort')
+    deepEqual(stopCalls, [{ runId: 'run-1', force: true }], 'Force abort must route to onStop with force=true')
+
+    // Force abort lands directly on ABORTED — the cancel
+    // controller's response carries the in-memory snapshot
+    // which the service sets to ABORTED (not STOPPING) on
+    // the force branch.
+    const runsMap = handle.getRunsMap()
+    handle.setRunsMap({
+      ...runsMap,
+      'run-1': { ...runsMap['run-1'], status: 'ABORTED', cancelledAt: '2026-01-01T10:00:30Z', cancelledByForce: true, finishedAt: '2026-01-01T10:00:30Z' },
+    })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+
+    equal(handle.statusBadgeFor('run-1'), 'Aborted', 'post-force-abort badge should read "Aborted"')
+    ok(handle.bottomTextFor('run-1') !== 'running …', `post-force-abort bottom hint must drop "running …", got "${handle.bottomTextFor('run-1')}"`)
+  } finally {
+    handle.unmount()
+  }
+})
+
+test('natural completion while the user watches the timeline updates the badge without a re-fetch', async () => {
+  // Companion regression: the same mirror logic also fixes
+  // the "I left the timeline open and the run finished but
+  // the badge is still showing Running" case. The parent
+  // polls every second and updates its `runs` map; the
+  // timeline must follow the parent's snapshot so the user
+  // sees the transition play out.
+  const runs: TestRun[] = [
+    { id: 'run-1', status: 'RUNNING', createdAt: '2026-01-01T10:00:00Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+  ]
+  const handle = renderTimeline('run-1', '2026-01-01T10:00:00Z', HANDLERS, runs)
+  try {
+    await handle.waitForRuns()
+    equal(handle.statusBadgeFor('run-1'), 'Running …')
+
+    // The parent polls and finds the run is now COMPLETED.
+    // The timeline must follow without a manual refresh.
+    const runsMap = handle.getRunsMap()
+    handle.setRunsMap({
+      ...runsMap,
+      'run-1': { ...runsMap['run-1'], status: 'COMPLETED', finishedAt: '2026-01-01T10:00:30Z', exitCode: 0 },
+    })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+
+    equal(handle.statusBadgeFor('run-1'), 'Passed', 'natural completion must update the badge to "Passed"')
   } finally {
     handle.unmount()
   }

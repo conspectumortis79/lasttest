@@ -542,3 +542,66 @@ paths:
     for (const id of sessionRunIds) await forceAbortRun(id)
   }
 })
+
+test('graceful stop from the timeline list transitions the badge from RUNNING to STOPPED (cancel regression)', async ({ page }) => {
+  // End-to-end regression for the user-reported bug: cancelling
+  // a RUNNING run from the per-endpoint timeline list used to
+  // keep the badge stuck on "Running" / "läuft …" forever. The
+  // tab's local state was never re-synced with the parent's
+  // `runs` map, so the user saw the pre-cancel snapshot until
+  // they navigated away and back.
+  //
+  // The fix (in [EndpointTimelineTab] and `App.tsx`) keeps the
+  // tab's `timelineRuns` in lockstep with the parent's map on
+  // every render, and bumps the tab's `refreshTick` after a
+  // cancel as a belt-and-braces fallback. This test exercises
+  // the full round-trip — start a run, switch to the timeline
+  // tab, right-click the running item, pick "Stop (graceful)",
+  // and assert that the badge text in the timeline follows the
+  // transition all the way to STOPPED.
+  await importDemo(page)
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('30')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  let runId = ''
+  try {
+    const badge = page.locator('.run-badge').first()
+    await expect(badge).toBeVisible({ timeout: 15_000 })
+    await expect(badge).toHaveClass(/run-badge-running|run-badge-stopping/, { timeout: 30_000 })
+    runId = await runIdFromBadge(page)
+
+    // Switch to the Timeline tab and wait for the run to show
+    // up in the list — the tab fetches /api/operations/runs on
+    // mount and the new run is persisted to H2 by [create],
+    // so the list item must appear within a few seconds.
+    await page.getByRole('tab', { name: /Timeline/ }).click()
+    await expect(page.locator('.timeline-tab')).toBeVisible()
+    const timelineListItem = page.locator(`.timeline-tab-list-item[data-run-id="${runId}"]`)
+    await expect(timelineListItem).toBeVisible({ timeout: 5_000 })
+    // Sanity: the run is in flight in the timeline.
+    await expect(timelineListItem.locator('.status-badge')).toHaveText(/Running|Läuft/, { timeout: 5_000 })
+
+    // Right-click and pick the graceful stop entry. The menu
+    // must offer the entry (the run is in flight) and the
+    // click must route through `onStop` with `force=false`.
+    await timelineListItem.click({ button: 'right' })
+    const menu = page.locator('.run-context-menu')
+    await expect(menu).toBeVisible()
+    await menu.getByRole('menuitem', { name: 'Stop (graceful)' }).click()
+
+    // The badge in the timeline must follow the parent's
+    // snapshot: STOPPING first (the in-flight intermediate),
+    // then STOPPED once the executor settles the run. The
+    // pre-fix code froze on "Running" / "läuft …" forever.
+    await expect(timelineListItem.locator('.status-badge')).toHaveText(/Stopping|Wird gestoppt/, { timeout: 10_000 })
+    await expect(timelineListItem.locator('.status-badge')).toHaveText(/Stopped|Gestoppt/, { timeout: 30_000 })
+    // The bottom-row "läuft …" hint must also drop — it is
+    // the same user-visible signal the user reported as
+    // stuck in the original bug.
+    const ridCell = timelineListItem.locator('.rid')
+    await expect(ridCell).not.toHaveText(/läuft|running/, { timeout: 5_000 })
+  } finally {
+    if (runId) await forceAbortRun(runId)
+  }
+})

@@ -223,6 +223,62 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
     return () => { cancelled = true }
   }, [method, path, language, refreshTick])
 
+  // Mirror the parent's `runs` map onto `timelineRuns` so a
+  // status change in the parent shows up in the Gantt and the
+  // list without waiting for the next /api/operations/runs
+  // refresh.
+  //
+  // Why this exists: the user reported that cancelling a
+  // run from the timeline's right-click menu keeps the
+  // badge stuck on "Running …" / "läuft …" — the cancel
+  // hits the backend and the parent (App.tsx) merges the
+  // updated TestRun into its `runs` map, but the tab's
+  // local `timelineRuns` is sourced from a separate fetch
+  // that only re-runs on `method` / `path` / `language` /
+  // `refreshTick` changes. Until one of those changes, the
+  // tab keeps rendering the pre-cancel snapshot.
+  //
+  // The parent is the source of truth for status transitions
+  // on runs the parent knows about (typically anything the
+  // user has started in this session or anything the
+  // polling loop has touched). We therefore prefer the
+  // parent's snapshot over the fetched snapshot for every
+  // run id that appears in both maps. Runs the parent has
+  // never seen (historical rows loaded after a page reload)
+  // keep their fetched values — the parent has nothing
+  // better to offer.
+  //
+  // The merge is idempotent: when the parent and the fetch
+  // agree on every field the effect returns the same
+  // reference, so React skips the re-render. The check is
+  // deliberately field-by-field rather than reference-based
+  // because the parent and the fetch produce two distinct
+  // objects that are usually equal in content but never
+  // in identity.
+  useEffect(() => {
+    setTimelineRuns(current => {
+      if (current.length === 0) return current
+      let changed = false
+      const next = current.map(run => {
+        const updated = runsMap[run.id]
+        if (updated === undefined) return run
+        if (
+          updated.status === run.status &&
+          updated.startedAt === run.startedAt &&
+          updated.finishedAt === run.finishedAt &&
+          updated.exitCode === run.exitCode &&
+          updated.cancelledAt === run.cancelledAt &&
+          updated.cancelledByForce === run.cancelledByForce
+        ) {
+          return run
+        }
+        changed = true
+        return { ...run, ...updated }
+      })
+      return changed ? next : current
+    })
+  }, [runsMap])
+
   // Centre of the timeline window — either the focused run or
   // "now". Every offset below is computed relative to this
   // anchor so the user can navigate the history without losing
@@ -538,7 +594,7 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
               <span className="vulist" title={loadProfileSummaryFor(run.configuration?.loadProfile, language)}>
                 {loadProfileSummaryFor(run.configuration?.loadProfile, language)}
               </span>
-              <span className="rid">{exitOrError(run)}</span>
+              <span className="rid">{exitOrError(run, language)}</span>
             </div>
           </div>
         })}
@@ -705,9 +761,21 @@ function relativeWhen(iso: string, now: number, language: SupportedLanguage): st
   return translate(language, 'when.days', { n: days })
 }
 
-function exitOrError(run: TestRun): string {
-  if (run.status === 'RUNNING' || run.status === 'QUEUED') return 'läuft …'
+function exitOrError(run: TestRun, language: SupportedLanguage): string {
+  // Resolves the bottom-row hint from the i18n dict so the
+  // formatter switches language in lock-step with the rest
+  // of the dashboard. The previous version hard-coded the
+  // German strings ("läuft …" / "siehe Diagnose") which
+  // meant the English chrome of the timeline tab rendered
+  // German hints when the user picked English — a small
+  // but visible inconsistency. The exit-code label is left
+  // as a plain `exit N` because that is the form every
+  // shell / CI log uses; a localised `Exit code {code}`
+  // would be a separate design decision.
+  if (run.status === 'RUNNING' || run.status === 'QUEUED') {
+    return translate(language, 'detail.timeline.runningHint')
+  }
   if (run.exitCode != null) return `exit ${run.exitCode}`
-  if (run.error) return 'siehe Diagnose'
+  if (run.error) return translate(language, 'detail.timeline.seeDiagnostics')
   return '–'
 }

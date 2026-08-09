@@ -835,6 +835,19 @@ function LoadTestApp() {
       if (response.ok) {
         const updated = (await response.json()) as TestRun
         setRuns(current => ({ ...current, [updated.id]: updated }))
+        // Bump the per-endpoint timeline tab's refresh tick so
+        // the tab's locally-fetched snapshot also picks up the
+        // cancel. Without this bump the tab would still show
+        // the pre-cancel status until the user navigates away
+        // and back — the user reported this as "after I cancel
+        // a run in the timeline, it still shows as running".
+        // The tab's own sync effect (see
+        // [EndpointTimelineTab]) keeps the displayed status in
+        // lockstep with the parent's `runs` map on every render,
+        // so the bump is the belt-and-braces fallback for the
+        // case where the user re-mounted the tab after a page
+        // reload and the parent's `runs` map is still empty.
+        setTimelineRefreshTick(tick => tick + 1)
       }
     } catch (cause) {
       setRunActionError(cause instanceof Error ? cause.message : translate(language, 'error.cancelFailedNoStatus'))

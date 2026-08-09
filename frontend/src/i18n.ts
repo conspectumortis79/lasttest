@@ -725,6 +725,8 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'detail.timeline.focus': '◀ Focus ▶',
     'detail.timeline.empty.title': 'No runs in window',
     'detail.timeline.empty.hint': 'No runs were started for this endpoint in the last {window}. Start a k6 run and it will appear here.',
+    'detail.timeline.runningHint': 'running …',
+    'detail.timeline.seeDiagnostics': 'see diagnostics',
 
     // === Thresholds-Tab ===
     'detail.thresholds.title': 'Thresholds ({n})',
@@ -1513,6 +1515,8 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'detail.timeline.focus': '◀ Fokus ▶',
     'detail.timeline.empty.title': 'Keine Läufe im Fenster',
     'detail.timeline.empty.hint': 'Für diesen Endpunkt wurden in den letzten {window} keine Läufe gestartet. Starte einen k6-Lauf, dann erscheint er hier.',
+    'detail.timeline.runningHint': 'läuft …',
+    'detail.timeline.seeDiagnostics': 'siehe Diagnose',
 
     // === Thresholds-Tab ===
     'detail.thresholds.title': 'Schwellen ({n})',
