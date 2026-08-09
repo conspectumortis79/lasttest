@@ -462,30 +462,38 @@ function runStatusBadgeClass(status: string): string {
   }
 }
 
-function runStatusBadgeLabel(status: string, language: string): string {
-  const map: Record<string, Record<string, string>> = {
-    COMPLETED: { en: 'Bestanden', de: 'Bestanden' },
-    FAILED: { en: 'Fehlgeschlagen', de: 'Fehlgeschlagen' },
-    ABORTED: { en: 'Abgebrochen', de: 'Abgebrochen' },
-    STOPPED: { en: 'Gestoppt', de: 'Gestoppt' },
-    STOPPING: { en: 'Wird gestoppt', de: 'Wird gestoppt' },
-    QUEUED: { en: 'In Warteschlange', de: 'In Warteschlange' },
-    RUNNING: { en: 'Läuft …', de: 'Läuft …' },
-  }
-  return map[status]?.[language] ?? map[status]?.en ?? status
+function runStatusBadgeLabel(status: string, language: SupportedLanguage): string {
+  // Resolves the human-readable status label from the i18n dict
+  // (key shape: `status.badge.completed` / `status.badge.failed`
+  // / ...). The legacy implementation was an in-place
+  // `Record<string, ...>` with German-only values — every
+  // English label was actually German in disguise, which is
+  // exactly the bug the user reported. Switching to the central
+  // dict keeps the two languages in lock-step with the rest of
+  // the dashboard. Unknown statuses fall through to the raw
+  // value (e.g. "QUEUED" stays "QUEUED" in English).
+  const key = `status.badge.${status.toLowerCase()}` as Parameters<typeof translate>[1]
+  const translated = translate(language, key)
+  return translated === key ? status : translated
 }
 
-function relativeWhen(iso: string, now: number, language: string): string {
+function relativeWhen(iso: string, now: number, language: SupportedLanguage): string {
+  // Each branch resolves the human label through the i18n dict
+  // (`when.justNow`, `when.minutes`, `when.hours`, `when.days`)
+  // so the formatter switches language in lock-step with the
+  // rest of the dashboard. The previous version used inline
+  // `language === 'de' ? ... : ...` ternaries which made it
+  // easy to forget a branch.
   const diff = now - Date.parse(iso)
   if (!Number.isFinite(diff) || diff < 0) return '–'
   const minutes = Math.round(diff / 60000)
-  if (minutes < 1) return language === 'de' ? 'gerade eben' : 'just now'
-  if (minutes < 60) return language === 'de' ? `vor ${minutes} Min` : `${minutes}m ago`
+  if (minutes < 1) return translate(language, 'when.justNow')
+  if (minutes < 60) return translate(language, 'when.minutes', { n: minutes })
   const hours = Math.round(minutes / 60)
-  if (hours < 24) return language === 'de' ? `vor ${hours} Std` : `${hours}h ago`
+  if (hours < 24) return translate(language, 'when.hours', { n: hours })
   const days = Math.round(hours / 24)
-  if (days === 1) return language === 'de' ? 'gestern' : 'yesterday'
-  return language === 'de' ? `vor ${days} T` : `${days}d ago`
+  if (days === 1) return translate(language, 'when.yesterday')
+  return translate(language, 'when.days', { n: days })
 }
 
 function vusLabel(run: TestRun): string {
