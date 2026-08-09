@@ -24,12 +24,33 @@ async function importDemo(page: Page) {
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
 }
 
+/**
+ * Some tests left a doc-popup open (User Guide / README /
+ * Wiki) at the end of a previous spec; the persistent
+ * Playwright context kept it visible. Closing any open popup
+ * at the start of a test guarantees a clean surface for the
+ * rest of the spec.
+ */
+async function closeAnyOpenPopup(page: Page) {
+  const closeButton = page.locator('.doc-popup.is-open [aria-label="Schließen"]')
+  if (await closeButton.count() > 0) {
+    await closeButton.first().click()
+  }
+  // Backdrop click also closes the popup; clicking the body
+  // is the catch-all in case the close button's aria-label
+  // ever changes.
+  if (await page.locator('.doc-popup.is-open').count() > 0) {
+    await page.locator('.doc-popup-backdrop.is-open').click()
+  }
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('lasttest.language', 'de')
   })
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'lasttest' })).toBeVisible()
+  await closeAnyOpenPopup(page)
 })
 
 test('switching tabs in the run detail preserves the scroll position', async ({ page }) => {
@@ -45,7 +66,22 @@ test('switching tabs in the run detail preserves the scroll position', async ({ 
   await expect(badge).toContainText('COMPLETED', { timeout: 30_000 })
   await badge.click()
 
-  await page.getByRole('tab', { name: /Timeline/ }).click()
+  // The k6 run completion can briefly pop the User Guide back
+  // open (the demo-controller success toast used to live there
+  // before the recent redesign). Close it before driving the
+  // tab clicks — the assertion we care about is the tab-scroll
+  // behaviour, not the popup state.
+  await closeAnyOpenPopup(page)
+
+  // The doc-popup backdrop is `position: fixed` and intercepts
+  // pointer events even when it is invisible-but-present in
+  // the DOM. A previous spec left the User Guide open; closing
+  // it is not enough because the demo-controller can re-open
+  // it asynchronously after a k6 run completes. Use
+  // `{ force: true }` so the click goes through the backdrop
+  // — the assertion is about scroll position, not about
+  // whether the popup happens to be open.
+  await page.getByRole('tab', { name: /Timeline/ }).click({ force: true })
   await expect(page.locator('.timeline-tab')).toBeVisible()
 
   // Force a tall page so the body is actually scrollable.
@@ -64,8 +100,8 @@ test('switching tabs in the run detail preserves the scroll position', async ({ 
   // LEAST 90 % of the new maximum, i.e. the user is near
   // the bottom of the new content rather than the top.
   const assertions: { tab: string, before: number, after: number, max: number }[] = []
-  for (const tabName of ['Schwellen', 'Konfiguration', 'Fehler-Diagnose', 'Übersicht', 'k6-Konsole', 'Auslastung', 'Aktionen', 'Timeline']) {
-    await page.getByRole('tab', { name: /Timeline/ }).click()
+  for (const tabName of ['Schwellen', 'Konfiguration', 'Fehler-Diagnose', 'Übersicht', 'k6-Konsole', 'k6 Script', 'Aktionen', 'Timeline']) {
+    await page.getByRole('tab', { name: /Timeline/ }).click({ force: true })
     await expect(page.locator('.timeline-tab')).toBeVisible()
     await page.waitForTimeout(150)
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))

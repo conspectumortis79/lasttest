@@ -329,32 +329,6 @@ class LocalK6TestRunExecutionTest {
             this == TestRunStatus.STOPPED ||
             this == TestRunStatus.ABORTED
 
-    private fun service(command: String): LocalK6TestRunService =
-        LocalK6TestRunService(
-            importer =
-                object : SpecificationImporter {
-                    override fun import(content: String): ImportedSpecification = specification()
-                },
-            generator =
-                object : K6ScriptGenerator {
-                    override fun generateForRun(
-                        specification: ImportedSpecification,
-                        baseUrl: String,
-                        runId: String,
-                        operationIds: Set<String>,
-                        operationConfigurations: List<OperationConfiguration>,
-                        loadProfile: de.lasttest.api.LoadProfile,
-                    ): String = "export default function () {}"
-                },
-            executor = Executor(Runnable::run),
-            readerExecutor = Executor(Runnable::run),
-            k6Command = command,
-            influxDbProperties = de.lasttest.config.InfluxDbProperties(enabled = false),
-            runRepository = InMemoryTestRunRepository(),
-            statisticsRepository = InMemoryOperationStatisticsRepository(),
-            timeSeriesWriter = InMemoryTimeSeriesWriter(),
-        )
-
     private fun request(): CreateTestRunRequest =
         CreateTestRunRequest(
             specification = "openapi document",
@@ -385,4 +359,214 @@ class LocalK6TestRunExecutionTest {
         check(file.toFile().setExecutable(true))
         return file.toString()
     }
+
+    // ---- terminal-state persistence ------------------------------------
+    //
+    // The dashboard's "Erneut starten" action on a historical
+    // run reads back from H2. For that to work, the service must
+    // overwrite the initial QUEUED row with the terminal state
+    // (status, exitCode, finishedAt) when the k6 process ends —
+    // otherwise a container restart would resurrect the row in
+    // its QUEUED state and the timeline would show the wrong
+    // badge. The per-endpoint × N counter must also tick up so
+    // the dashboard's badge does not freeze.
+
+    @Test
+    fun `execute overwrites the persisted row with the terminal status when k6 finishes successfully`() {
+        val command =
+            executable(
+                "ok.sh",
+                """
+                #!/bin/sh
+                exit 0
+                """.trimIndent(),
+            )
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val service = service(command, repository = repository, statistics = statistics)
+
+        val created = service.create(request())
+        val completed = assertNotNull(service.find(created.id))
+        assertEquals(TestRunStatus.COMPLETED, completed.status)
+
+        val saved = repository.findById(created.id).orElse(null)
+        assertNotNull(saved)
+        assertEquals(TestRunStatus.COMPLETED, saved.status)
+        assertNotNull(saved.finishedAt, "terminal entity must carry the finishedAt timestamp")
+        assertEquals(0, saved.exitCode)
+    }
+
+    @Test
+    fun `execute overwrites the persisted row when k6 fails and writes the error to the entity`() {
+        val command =
+            executable(
+                "bad.sh",
+                """
+                #!/bin/sh
+                printf 'k6 failed'
+                exit 7
+                """.trimIndent(),
+            )
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val service = service(command, repository = repository, statistics = statistics)
+
+        val created = service.create(request())
+        val failed = assertNotNull(service.find(created.id))
+        assertEquals(TestRunStatus.FAILED, failed.status)
+
+        val saved = repository.findById(created.id).orElse(null)
+        assertNotNull(saved)
+        assertEquals(TestRunStatus.FAILED, saved.status)
+        assertEquals(7, saved.exitCode)
+    }
+
+    @Test
+    fun `execute ticks the per-endpoint counter up by one on a successful run`() {
+        // The × N counter in the operation list is a
+        // denormalised [OperationStatisticsEntity] that the
+        // service updates on every terminal transition. A
+        // regression where the service forgets to call
+        // [updateOperationStatistics] would freeze the badge
+        // at its initial value (0 or whatever the test setup
+        // seeded) and the dashboard would silently lie about
+        // how many tests the user has run.
+        val command =
+            executable(
+                "ok.sh",
+                """
+                #!/bin/sh
+                exit 0
+                """.trimIndent(),
+            )
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val service = service(command, repository = repository, statistics = statistics)
+
+        val created = service.create(request())
+
+        // The terminal transition has to complete before we
+        // assert on the counter. The synchronous executor
+        // used by [service] makes this race-free, but a
+        // belt-and-braces find() guards against a future
+        // refactor that switches to an async pool.
+        assertEquals(TestRunStatus.COMPLETED, service.find(created.id)?.status)
+
+        val counter = statistics.findById(OperationStatisticsEntity.Key("GET", "/pets")).orElse(null)
+        assertNotNull(counter, "execute() must insert a per-endpoint counter row on terminal state")
+        assertEquals(1L, counter.testCount)
+        assertEquals(created.id, counter.lastRunId)
+        assertEquals(TestRunStatus.COMPLETED, counter.lastStatus)
+    }
+
+    @Test
+    fun `execute increments the per-endpoint counter on every run instead of overwriting it`() {
+        // Two runs against the same (method, path) must
+        // produce a counter of 2, not 1. The upsert reads the
+        // previous row before writing the new one — a
+        // regression that swaps findById for a hard
+        // `testCount = 1L` would silently break the badge.
+        val command =
+            executable(
+                "ok.sh",
+                """
+                #!/bin/sh
+                exit 0
+                """.trimIndent(),
+            )
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val service = service(command, repository = repository, statistics = statistics)
+
+        val first = service.create(request())
+        assertEquals(TestRunStatus.COMPLETED, service.find(first.id)?.status)
+        val second = service.create(request())
+        assertEquals(TestRunStatus.COMPLETED, service.find(second.id)?.status)
+
+        val counter = statistics.findById(OperationStatisticsEntity.Key("GET", "/pets")).orElse(null)
+        assertNotNull(counter)
+        assertEquals(2L, counter.testCount, "the second run must increment the counter, not overwrite it")
+        // The most-recent-run fields must follow the second
+        // run — a regression that forgets to overwrite them
+        // would leave the badge pointing at a stale run.
+        assertEquals(second.id, counter.lastRunId)
+    }
+
+    @Test
+    fun `execute does not crash when the run has no operations and skips the counter update`() {
+        // The [OperationStatisticsEntity] rows are keyed by
+        // (method, path) of the first operation. A run
+        // without any selected operation cannot contribute
+        // to the counter, so the helper must skip the update
+        // instead of throwing on a missing key. We
+        // exercise this by passing an `operationIds` set
+        // that does not match any operation in the spec —
+        // an empty set is treated as "all" by
+        // [LocalK6TestRunService.buildRunConfiguration], so
+        // a non-matching id is the right way to force the
+        // operations list to be empty.
+        val command =
+            executable(
+                "ok.sh",
+                """
+                #!/bin/sh
+                exit 0
+                """.trimIndent(),
+            )
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val service = service(command, repository = repository, statistics = statistics)
+        val emptyRequest =
+            de.lasttest.api.CreateTestRunRequest(
+                specification = "openapi document",
+                baseUrl = "https://example.test",
+                operationIds = setOf("does-not-exist"),
+                loadProfile =
+                    de.lasttest.api.LoadProfile(
+                        type = de.lasttest.api.LoadProfileType.CONSTANT_VUS,
+                        virtualUsers = 1,
+                        durationSeconds = 1,
+                    ),
+            )
+
+        val created = service.create(emptyRequest)
+        assertEquals(TestRunStatus.COMPLETED, service.find(created.id)?.status)
+
+        // The run is still persisted even without a counter
+        // row — the operations list is per-run, the
+        // statistics are per-endpoint, and a run with no
+        // target endpoint simply does not contribute.
+        assertNotNull(repository.findById(created.id).orElse(null))
+        assertEquals(0, statistics.count(), "a run with no operations must not insert a counter row")
+    }
+
+    private fun service(
+        command: String,
+        repository: TestRunRepository = InMemoryTestRunRepository(),
+        statistics: OperationStatisticsRepository = InMemoryOperationStatisticsRepository(),
+    ): LocalK6TestRunService =
+        LocalK6TestRunService(
+            importer =
+                object : SpecificationImporter {
+                    override fun import(content: String): ImportedSpecification = specification()
+                },
+            generator =
+                object : K6ScriptGenerator {
+                    override fun generateForRun(
+                        specification: ImportedSpecification,
+                        baseUrl: String,
+                        runId: String,
+                        operationIds: Set<String>,
+                        operationConfigurations: List<de.lasttest.api.OperationConfiguration>,
+                        loadProfile: de.lasttest.api.LoadProfile,
+                    ): String = "export default function () {}"
+                },
+            executor = Executor(Runnable::run),
+            readerExecutor = Executor(Runnable::run),
+            k6Command = command,
+            influxDbProperties = de.lasttest.config.InfluxDbProperties(enabled = false),
+            runRepository = repository,
+            statisticsRepository = statistics,
+            timeSeriesWriter = InMemoryTimeSeriesWriter(),
+        )
 }

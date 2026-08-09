@@ -1,6 +1,6 @@
 // Regression test for the run-detail tab i18n coverage.
 //
-// Walks every run-detail tab (Übersicht / Load / Timeline /
+// Walks every run-detail tab (Übersicht / k6 Script / Timeline /
 // Actions / k6 console / Thresholds / Configuration / Failure
 // diagnosis) in both German and English and asserts that no
 // German literal leaks into the English view (and vice versa).
@@ -54,8 +54,8 @@ async function startAndOpenTimeline(page: Page) {
 }
 
 const TAB_BY_LANG = {
-  de: ['Übersicht', 'Auslastung', 'Timeline', 'Aktionen', 'k6-Konsole', 'Schwellen', 'Konfiguration', 'Fehler-Diagnose'],
-  en: ['Overview', 'Load', 'Timeline', 'Actions', 'k6 console', 'Thresholds', 'Configuration', 'Failure diagnosis'],
+  de: ['Übersicht', 'k6 Script', 'Timeline', 'Aktionen', 'k6-Konsole', 'Schwellen', 'Konfiguration', 'Fehler-Diagnose'],
+  en: ['Overview', 'k6 script', 'Timeline', 'Actions', 'k6 console', 'Thresholds', 'Configuration', 'Failure diagnosis'],
 } as const
 
 test('every run-detail tab is translated in both German and English', async ({ page }) => {

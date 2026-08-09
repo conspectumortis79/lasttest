@@ -23,12 +23,19 @@ For every imported spec, lasttest lets you:
    Stress, Spike, Soak, Burst** and **Arrival-Rate**.
 3. **Run the test** and watch the status cycle through
    `QUEUED → RUNNING → COMPLETED` (or `FAILED`, `STOPPED`, `ABORTED`).
-   Every run shows up as a **badge** in the multi-run dashboard.
-   A **right-click on a badge** opens an action menu — see
-   [§5](#5-the-run-badge-action-menu-right-click).
-4. **Open the report** in a new tab. It contains a printable summary, the
-   generated k6 script and — when InfluxDB is running — a **ramp-grafik**
-   that compares the planned load (*Soll*) with the measured load (*Ist*).
+   Every run shows up as a **row** in the multi-run dashboard
+   (`Letzte Läufe` panel) with a **× N** badge that summarises how
+   often that endpoint has been tested before. A **right-click on a
+   row** opens an action menu — see
+   [§5](#5-the-run-row-action-menu-right-click).
+4. **Inspect the run** through the run-detail tab strip (Übersicht
+   · Timeline · Aktionen · k6-Konsole · Schwellen · Konfiguration
+   · Fehler-Diagnose) and open the printable report in a new tab.
+   The report contains a summary, the generated k6 script and — when
+   InfluxDB is running — a **ramp-grafik** that compares the
+   planned load (*Soll*) with the measured load (*Ist*). The live
+   ramp-grafik also lives on the **Übersicht** tab of the
+   dashboard so the user can watch *Soll vs Ist* in real time.
 
 ---
 
@@ -198,13 +205,16 @@ the **Settings drawer** where the language can be switched at any time.
 
 ---
 
-## 5. The run-badge action menu (right-click)
+## 5. The run-row action menu (right-click)
 
-Every k6 test run appears as a coloured badge in the **multi-run
-dashboard** (step 4). The badge shows the HTTP method, status and path.
-A single left-click focuses the run; a **right-click opens the action
-menu** at the cursor position. The menu adapts to the run's current
-status so it only offers actions that make sense:
+Every k6 test run appears as a **row** in the **multi-run dashboard**
+(`Letzte Läufe` panel — step 4). The row shows a status dot, the HTTP
+method, status badge, path, a **× N** counter that summarises how
+often the same endpoint has been tested before, a meta string
+(`VUs · duration`) and a relative `when` stamp. A single left-click
+focuses the run; a **right-click opens the action menu** at the
+cursor position. The menu adapts to the run's current status so it
+only offers actions that make sense:
 
 | Menu item | Visible when | Effect |
 | --- | --- | --- |
@@ -216,19 +226,111 @@ status so it only offers actions that make sense:
 | **Stop (graceful)** | `QUEUED`, `RUNNING`, `STOPPING` | Sends `SIGTERM`; k6 winds down, the run ends as `STOPPED` |
 | **Force abort** | `QUEUED`, `RUNNING`, `STOPPING` | Sends `SIGKILL`; the run ends immediately as `ABORTED` (metrics may be partial) |
 | **Rerun** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Re-runs the same scenario against the original base URL with a fresh run id |
-| **Remove from view** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Drops the badge from the in-memory dashboard. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs`. The remaining badges re-sort by their original `createdAt` so the dashboard stays in newest-first order. |
-| **Remove all other failed runs** | Terminal runs, when at least one other `FAILED` badge is present | Bulk-drops every other `FAILED` badge from the dashboard. Disabled (with a reason) when there is nothing to remove. `STOPPED` and `ABORTED` runs are intentionally preserved |
+| **Remove from view** | Terminal runs (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Drops the row from the in-memory dashboard. The backend still holds the run, so a page refresh re-hydrates it from `/api/test-runs`. The remaining rows re-sort by their original `createdAt` so the dashboard stays in newest-first order. |
+| **Remove all other failed runs** | Terminal runs, when at least one other `FAILED` row is present | Bulk-drops every other `FAILED` row from the dashboard. Disabled (with a reason) when there is nothing to remove. `STOPPED` and `ABORTED` runs are intentionally preserved |
 
 > 💡 **Worked example — rerun via right-click:** you ran a 30 s
 > `Smoke` profile against the demo and want to confirm the result is
-> reproducible. Right-click the green `COMPLETED` badge, pick **Rerun**
+> reproducible. Right-click the green `COMPLETED` row, pick **Rerun**
 > and lasttest POSTs `/api/test-runs/{id}/rerun`. The backend re-queues
 > the same `CreateTestRunRequest` it preserved when the original run
-> was started, k6 starts fresh, and the new badge appears in the
+> was started, k6 starts fresh, and the new row appears in the
 > dashboard with focus automatically moved to it.
 
 A click outside the menu (or `Esc`) closes it. The menu does not
 trigger on left-click; that stays reserved for focusing the run.
+
+### 5.1 The `Letzte Läufe` panel and the `× N` counter
+
+The multi-run dashboard is rendered as a list of rows (one per
+run), not as a grid of badges. Each row exposes:
+
+- a **status dot** (animated while the run is in flight) and the
+  matching status badge (`EINGEREIHT` / `LÄUFT` / `GESTOPPT` /
+  `BESTANDEN` / `FEHLGESCHLAGEN` / `ABGEBROCHEN`),
+- a human-readable identifier (`METHOD /path`),
+- a **× N** chip next to the operation name showing how many
+  times the same endpoint has been tested before — the data comes
+  from `/api/operations/stats` and is polled every 5 s; until the
+  first response arrives the chip shows `neu` (untested),
+- a one-line meta string (`VUs · duration`),
+- the **elapsed / planned** duration column,
+- a **relative `when` stamp** (`just now` / `5 min ago` /
+  `yesterday` …).
+
+A new run focuses the freshly-added row so the user immediately
+sees the live status without scrolling. The right-click menu
+contract from the old badge grid is preserved one-to-one (see
+above) and the existing keyboard shortcuts (`S` for Stop, `⇧S`
+for Force abort, …) still apply.
+
+## 5.2 The run-detail tab strip
+
+The detail card for a run is organised as a horizontal tab strip:
+
+| Tab | Purpose |
+| --- | --- |
+| **Übersicht** | Live status, metric cards, live ramp-grafik (Auslastung — Soll vs Ist) |
+| **Timeline** | Per-endpoint heat map + Gantt (see [§5.3](#53-the-per-endpoint-timeline)) |
+| **Aktionen** | Status-aware controls (Stop, Abort, Rerun, Copy, Open, Export, Remove) |
+| **k6-Konsole** | Full k6 stdout/stderr of the run |
+| **Schwellen** | Every configured k6 threshold with the measured value |
+| **Konfiguration** | API, load profile, operations, run metadata |
+| **Fehler-Diagnose** | Typed failure diagnosis for `FAILED` / `ABORTED` runs |
+| **↗ k6-Bericht öffnen** | Opens the printable report in a new tab |
+
+Switching tabs preserves the user's reading position so the
+detail card does not jump back to the top of the page on every
+click.
+
+## 5.3 The per-endpoint timeline
+
+The **Timeline** tab turns the run history of one specific
+(method, path) endpoint into a single visual story. It contains:
+
+- a **24 h / 7 d / 30 d / 90 d** window selector,
+- a **stat strip** with the run count, success / failure counts
+  and the timestamp of the last failed run,
+- a **heat map** of one cell per day, coloured by the day's
+  outcome (green = all `COMPLETED`, yellow = at least one
+  `STOPPED`, red = at least one `FAILED` / `ABORTED`),
+- a **Gantt-style single-row timeline** with one bar per run,
+  centred on the focused run (or "now" when none is focused);
+  clicking a bar jumps the chart to that run's `createdAt`,
+- a compact **list** of the most-recent runs in the window with
+  status badges, relative `when` stamps and a right-click menu
+  that mirrors the overview's actions.
+
+The data source is `/api/operations/runs?method=…&path=…`,
+polled on the same cadence as the run list. A right-click on a
+bar in the Gantt or on a list entry opens the same per-run
+context menu as on the overview rows.
+
+## 5.4 The live ramp-grafik (Auslastung — Soll vs Ist)
+
+While a run is in flight the **Übersicht** (Overview) tab shows a
+live SVG chart that compares the **Soll** (planned) curve —
+derived deterministically from the configured load profile —
+against the **Ist** (actual) curve streamed from the time-series
+container. The chart:
+
+- renders the planned line as a flat or stepped curve depending
+  on the executor (`constant-vus`, `ramping-vus`,
+  `constant-arrival-rate` …),
+- updates the actual polyline every few seconds while the run is
+  in flight,
+- shows a yellow cursor at the latest sample,
+- freezes the actual curve at the final measured values once the
+  run completes, so the same chart doubles as a post-mortem view,
+- labels the y-axis as `VUs` for VU-based executors and as
+  `Anfragen/s` for arrival-rate executors,
+- shows the elapsed duration (`läuft seit HH:MM:SS`) and the
+  number of received samples next to the title.
+
+Without InfluxDB the chart still renders the planned line; the
+`Ist` curve is simply not available. The same chart also appears
+in the printable report (`/?report=<id>`) as the **Ramp-Grafik**
+section.
 
 ---
 
@@ -289,16 +391,15 @@ often each row was actually sent.
 After a test run, the link "Open detailed k6 report in a new tab" opens
 a print-optimised result view. It contains the summary, thresholds,
 run and API configuration, the actually used endpoint parameters, the
-**ramp-grafik** with Soll/Ist comparison (when InfluxDB is running),
-detailed k6 metrics, and console / JSON raw data. Use "Print / Save as
-PDF" to archive this view directly as a PDF.
+**ramp-grafik** with Soll/Ist comparison (when InfluxDB is running)
+and detailed k6 metrics. Use "Print / Save as PDF" to archive this
+view directly as a PDF.
 
 ### 6.5 k6 script download
 
-Below the k6 JSON export, "Generated k6 test script" can be expanded.
-It shows the exact script that lasttest executed and offers a download
-as "Download k6 test script (.js)". The report also shows the matching
-manual start command, for example:
+On the dashboard, the run-detail tab **k6 script** exposes the
+generated script and offers a download as "Download k6 test script
+(.js)". It also shows the matching manual start command, for example:
 
 ```bash
 k6 run -e BASE_URL="https://example.test" lasttest-<run-id>.js
@@ -390,9 +491,13 @@ enabled explicitly.
 
 - **[`USER_GUIDE.md`](./USER_GUIDE.md)** — comprehensive, end-to-end
   English user manual covering the workflow, the demo API, the
-  configuration of every endpoint, running load tests, the report
-  view, the right-click run-badge menu, the settings drawer for
-  language switching, and troubleshooting.
+  configuration of every endpoint, running load tests, the `Letzte
+  Läufe` panel and its `× N` counter, the run-detail tab strip
+  (Übersicht · Timeline · Aktionen · k6-Konsole · Schwellen ·
+  Konfiguration · Fehler-Diagnose), the per-endpoint timeline
+  (heat map + Gantt), the live ramp-grafik (Auslastung — Soll vs
+  Ist), the printable report view, the right-click run-row menu,
+  the settings drawer for language switching, and troubleshooting.
 - The same guides are available **inside the running application** at
   the top toolbar's **User Guide** and **README** links. They open as
   searchable markdown popups (`Ctrl/⌘ + F` to search, `Enter` for
@@ -424,11 +529,15 @@ npm test
 ```
 
 The tests enforce 100 % lines, branches, and functions for the
-frontend logic. They cover the run-badge context-menu classifier
+frontend logic. They cover the run-row context-menu classifier
 (`in-flight` / `terminal` / `terminal-aborted`), the payload-pool
-helpers, the multi-run dashboard focus picker, the settings drawer /
-i18n dictionary parity (every key exists in both English and German)
-and the toolbar / status pills / report chrome.
+helpers, the multi-run dashboard focus picker, the per-endpoint
+timeline (`EndpointTimelineTab.tsx`) helpers (window slicing,
+day-bucket colouring, day-label resolution), the live ramp chart
+layout (`liveRampChartLayout.ts`), the operation-stats helper,
+the settings drawer / i18n dictionary parity (every key exists in
+both English and German) and the toolbar / status pills / report
+chrome.
 
 ### 10.3 Frontend E2E tests with Playwright
 
@@ -446,8 +555,13 @@ Chromium, and verifies:
 - Payload strategy selection
 - Load profile limits
 - Successful k6 execution, polling
-- Run-badge right-click menu (rerun, stop, copy actions)
+- Run-row right-click menu (rerun, stop, copy actions)
 - Multi-run dashboard focus transfer
+- Letzte-Läufe row list and `× N` counter
+- Timeline tab (heatmap, Gantt bars, window selector)
+- Run-detail tab strip (Übersicht · Timeline · Aktionen · k6
+  console · Thresholds · Configuration · Failure diagnosis)
+- Live ramp-grafik (Soll vs Ist)
 - Report in a new tab, print / PDF trigger
 - Settings drawer language switch
 - Unknown report IDs

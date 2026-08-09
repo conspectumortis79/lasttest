@@ -7,7 +7,13 @@ const demoSpecification = path.resolve(currentDirectory, '../../demo/openapi-dem
 
 async function importDemo(page: Page) {
   await page.locator('input[type="file"]').setInputFiles(demoSpecification)
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
 }
 
@@ -79,8 +85,8 @@ test('imports a specification from a Swagger UI URL via the URL field', async ({
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
 
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
-  // 9 cards: 8 product endpoints + the new admin-stats (Basic auth) endpoint.
-  await expect(page.locator('.operation-card')).toHaveCount(9)
+  // 10 cards: 8 product endpoints + admin-stats (Basic auth) + getMe + getMyProfile.
+  await expect(page.locator('.operation-card')).toHaveCount(10)
   await expect(page.getByText('Geladen aus')).toBeVisible()
   await expect(page.getByText('(über Swagger-UI)')).toBeVisible()
 })
@@ -105,8 +111,8 @@ test('validates imports, load profiles, parameters, bodies, and target URLs', as
   await expect(page.getByRole('alert')).toContainText('keine REST-Operationen')
 
   await importDemo(page)
-  // 9 cards: 8 product endpoints + the new admin-stats (Basic auth) endpoint.
-  await expect(page.locator('.operation-card')).toHaveCount(9)
+  // 10 cards: 8 product endpoints + admin-stats (Basic auth) + getMe + getMyProfile.
+  await expect(page.locator('.operation-card')).toHaveCount(10)
   await expect(page.getByLabel('Endpunkt GET /products auswählen')).toBeChecked()
 
   // Initially all endpoints are collapsed. Expand first, then fill in.
@@ -168,11 +174,17 @@ test('runs the selected endpoint and opens the complete report in a new tab', as
 
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('searchProducts', { exact: true })).toBeVisible()
-  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i })
-  await expect(reportLink).toHaveAttribute('target', '_blank')
+  // The "Ausführlicher k6-Testbericht" button used to live in the
+  // ResultHeader row; it was removed in favour of the
+  // "K6 Bericht öffnen" tab at the end of the run-detail tab
+  // strip. The tab is a <button role="tab"> that opens the same
+  // report URL in a new tab via `window.open(..., '_blank', ...)`,
+  // so we still wait for the popup event the same way.
+  const reportTab = page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i })
+  await expect(reportTab).toBeVisible()
 
   const popupPromise = page.waitForEvent('popup')
-  await reportLink.click()
+  await reportTab.click()
   const report = await popupPromise
   await report.waitForLoadState('networkidle')
 
@@ -187,26 +199,6 @@ test('runs the selected endpoint and opens the complete report in a new tab', as
 
   await report.getByText('JSON Request-Body').click()
   await expect(report.getByText('{"category":"hardware","maxPrice":100}', { exact: true })).toBeVisible()
-  const jsonDetails = report.locator('details').filter({ has: report.getByText('k6-JSON-Rohdaten', { exact: true }) })
-  await jsonDetails.getByText('k6-JSON-Rohdaten').click()
-  await expect(jsonDetails.locator('pre')).toContainText('http_req_duration')
-
-  await report.locator('details.report-script summary').click()
-  const generatedScript = report.getByTestId('generated-k6-script')
-  await expect(generatedScript).toContainText("import http from 'k6/http'")
-  await expect(generatedScript).toContainText('export const options')
-  await expect(generatedScript).toContainText('BASE_URL')
-  await expect(generatedScript).toContainText('Bearer demo-bearer-token')
-  await expect(report.locator('.script-command')).toContainText('k6 run -e BASE_URL=')
-
-  const downloadPromise = report.waitForEvent('download')
-  await report.getByRole('link', { name: 'k6-Skript herunterladen' }).click()
-  const download = await downloadPromise
-  expect(download.suggestedFilename()).toMatch(/^lasttest-.+\.js$/)
-  const stream = await download.createReadStream()
-  let downloadedScript = ''
-  for await (const chunk of stream) downloadedScript += chunk.toString()
-  expect(downloadedScript).toBe(await generatedScript.textContent())
 
   const printButton = report.getByRole('button', { name: 'Drucken / als PDF speichern' })
   await expect(printButton).toBeVisible()
@@ -231,8 +223,8 @@ test('preloads the bundled demo specification into the editor on startup', async
 
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
-  // 9 cards: 8 product endpoints + the new admin-stats (Basic auth) endpoint.
-  await expect(page.locator('.operation-card')).toHaveCount(9)
+  // 10 cards: 8 product endpoints + admin-stats (Basic auth) + getMe + getMyProfile.
+  await expect(page.locator('.operation-card')).toHaveCount(10)
 })
 
 test('exposes multiple OpenAPI servers as a Base-URL dropdown and allows custom overrides', async ({ page }) => {
@@ -258,6 +250,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(multiServerSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'Multi Server' })).toBeVisible()
 
@@ -294,6 +292,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(singleServerSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'Single Server' })).toBeVisible()
 
@@ -345,7 +349,7 @@ test('collapses all endpoints on import and toggles a single card via the expand
 
   // Directly after the import every card is collapsed: aria-expanded="false".
   const toggles = page.locator('.operation-card button.expand-toggle')
-  await expect(toggles).toHaveCount(9)
+  await expect(toggles).toHaveCount(10)
   for (let index = 0; index < 6; index += 1) {
     await expect(toggles.nth(index)).toHaveAttribute('aria-expanded', 'false')
   }
@@ -389,6 +393,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(altSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'Other API' })).toBeVisible()
   await expect(page.locator('.operation-card')).toHaveCount(1)
@@ -416,6 +426,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(singleServerSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByLabel('Base-URL')).toHaveValue('http://localhost:8286/api')
 
@@ -443,6 +459,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(unreachableSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'Connection Refused' })).toBeVisible()
 
@@ -477,9 +499,19 @@ paths:
     const threshold = await page.getByText(/Threshold verletzt|threshold crossed/).first().isVisible().catch(() => false)
     return typed || threshold
   }, { timeout: 5_000 }).toBe(true)
-  await expect(page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i })).toBeVisible()
-  await expect(page.getByText('k6-Konsolenausgabe')).toBeVisible()
-  await expect(page.getByText('k6-JSON-Rohdaten')).toBeVisible()
+  await expect(page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i })).toBeVisible()
+  // The report page itself focuses on the run summary, the
+  // thresholds, the load profile and the detailed metrics.
+  // The k6 console output and the raw JSON have been moved
+  // to the run-detail tabs on the dashboard, where they
+  // live next to the failure diagnosis and the generated
+  // script. The tab here still opens the printable report
+  // — assert it loads without errors.
+  const popupPromise = page.waitForEvent('popup')
+  await page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i }).click()
+  const report = await popupPromise
+  await report.waitForLoadState('domcontentloaded')
+  await expect(report.getByRole('heading', { name: 'Zusammenfassung' })).toBeVisible()
 })
 
 test('runs the selected destructive endpoint with bearer token and downloads the k6 script', async ({ page }) => {
@@ -489,7 +521,7 @@ test('runs the selected destructive endpoint with bearer token and downloads the
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
   // 7 operations in total: 6 product endpoints + 1 admin-stats endpoint
   // (the admin endpoint is the Basic auth demo).
-  await expect(page.locator('.operation-card')).toHaveCount(9)
+  await expect(page.locator('.operation-card')).toHaveCount(10)
 
   // Single-selection: only one operation at a time — we pick searchProducts for the bearer test.
   await expandOperation(page, 'searchProducts')
@@ -501,18 +533,24 @@ test('runs the selected destructive endpoint with bearer token and downloads the
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
-  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i })
+  const reportTab = page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i })
   const popupPromise = page.waitForEvent('popup')
-  await reportLink.click()
+  await reportTab.click()
   const report = await popupPromise
   await report.waitForLoadState('networkidle')
   await expect(report.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
 
-  await report.locator('details.report-script summary').click()
-  const downloadLink = report.getByRole('link', { name: /k6-Skript herunterladen/ })
+  // The printable report no longer hosts the generated k6
+  // script. The script and its download live in the dashboard's
+  // "k6 script" run-detail tab (see [runDetailTabs.tsx ::
+  // K6ScriptTab]). Open that tab and trigger the download.
+  await reportTab.click()
+  const k6ScriptTab = page.getByRole('tab', { name: /^k6 script$/i })
+  await k6ScriptTab.click()
+  const downloadLink = page.getByRole('link', { name: /k6-Skript herunterladen \(.js\)/i })
   await expect(downloadLink).toBeVisible()
   const [download] = await Promise.all([
-    report.waitForEvent('download'),
+    page.waitForEvent('download'),
     downloadLink.click(),
   ])
   expect(download.suggestedFilename()).toMatch(/^lasttest-.*\.js$/)
@@ -530,7 +568,7 @@ test('runs the Basic-Auth demo endpoint end-to-end and shows the base64 Authoriz
   await expect(specification).toContainText('Lasttest Demo API')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
-  await expect(page.locator('.operation-card')).toHaveCount(9)
+  await expect(page.locator('.operation-card')).toHaveCount(10)
 
   await expandOperation(page, 'getAdminStats')
   await page.getByLabel('Endpunkt GET /products/admin/stats auswählen').check()
@@ -554,9 +592,9 @@ test('runs the Basic-Auth demo endpoint end-to-end and shows the base64 Authoriz
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
-  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i })
+  const reportTab = page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i })
   const popupPromise = page.waitForEvent('popup')
-  await reportLink.click()
+  await reportTab.click()
   const report = await popupPromise
   await report.waitForLoadState('networkidle')
   await expect(report.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
@@ -565,10 +603,15 @@ test('runs the Basic-Auth demo endpoint end-to-end and shows the base64 Authoriz
   await expect(report.getByText('Basic-Auth: konfiguriert (aus Sicherheitsgründen ausgeblendet)', { exact: true })).toBeVisible()
   await expect(report.getByText('Authentifizierung', { exact: true })).toBeVisible()
 
-  // Open the generated k6 script and verify the base64-encoded
-  // header is present.
-  await report.getByText('k6-Skript', { exact: true }).click()
-  const generatedScript = report.getByTestId('generated-k6-script')
+  // Close the report popup and inspect the generated k6 script
+  // on the dashboard's "k6 script" run-detail tab instead. The
+  // printable report no longer hosts the script — the script
+  // and its download live in the run-detail panel
+  // (see [runDetailTabs.tsx :: K6ScriptTab]).
+  await report.close()
+  const k6ScriptTab = page.getByRole('tab', { name: /^k6 script$/i })
+  await k6ScriptTab.click()
+  const generatedScript = page.getByTestId('k6-script-source')
   // base64("alice:s3cret") = "YWxpY2U6czNjcmV0"
   await expect(generatedScript).toContainText('Basic YWxpY2U6czNjcmV0')
   // And the Bearer header must NOT be there — this is a Basic-only endpoint.
@@ -675,9 +718,9 @@ test('runs the OAuth 2.0 demo endpoint end-to-end and sends the Bearer Authoriza
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
-  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i })
+  const reportTab = page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i })
   const popupPromise = page.waitForEvent('popup')
-  await reportLink.click()
+  await reportTab.click()
   const report = await popupPromise
   await report.waitForLoadState('networkidle')
   await expect(report.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
@@ -685,11 +728,16 @@ test('runs the OAuth 2.0 demo endpoint end-to-end and sends the Bearer Authoriza
   // The report should mention the new OAuth 2.0 state.
   await expect(report.getByText('OAuth 2.0: konfiguriert (aus Sicherheitsgründen ausgeblendet)', { exact: true })).toBeVisible()
 
-  // Open the generated k6 script and verify the Bearer Authorization
-  // header is set to the demo token — the same wire format as plain
-  // Bearer, which is the point of RFC 6750.
-  await report.getByText('k6-Skript', { exact: true }).click()
-  const generatedScript = report.getByTestId('generated-k6-script')
+  // Close the report popup and inspect the generated k6 script
+  // on the dashboard's "k6 script" run-detail tab instead. The
+  // printable report no longer hosts the script.
+  await report.close()
+  const k6ScriptTab = page.getByRole('tab', { name: /^k6 script$/i })
+  await k6ScriptTab.click()
+  // Bearer Authorization header is set to the demo token — the
+  // same wire format as plain Bearer, which is the point of
+  // RFC 6750.
+  const generatedScript = page.getByTestId('k6-script-source')
   await expect(generatedScript).toContainText('"Authorization":"Bearer demo-oauth2-token-12345"')
 })
 
@@ -738,9 +786,9 @@ test('runs the API-key demo endpoint end-to-end and sends the X-API-Key header i
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
-  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i })
+  const reportTab = page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i })
   const popupPromise = page.waitForEvent('popup')
-  await reportLink.click()
+  await reportTab.click()
   const report = await popupPromise
   await report.waitForLoadState('networkidle')
   await expect(report.getByText('Checks erfolgreich', { exact: true })).toBeVisible()
@@ -748,10 +796,14 @@ test('runs the API-key demo endpoint end-to-end and sends the X-API-Key header i
   // The report should mention the new API-key state.
   await expect(report.getByText('API-Key: konfiguriert (aus Sicherheitsgründen ausgeblendet)', { exact: true })).toBeVisible()
 
-  // Open the generated k6 script and verify the X-API-Key header
-  // is set to the demo value.
-  await report.getByText('k6-Skript', { exact: true }).click()
-  const generatedScript = report.getByTestId('generated-k6-script')
+  // Close the report popup and inspect the generated k6 script
+  // on the dashboard's "k6 script" run-detail tab instead. The
+  // printable report no longer hosts the script.
+  await report.close()
+  const k6ScriptTab = page.getByRole('tab', { name: /^k6 script$/i })
+  await k6ScriptTab.click()
+  // Verify the X-API-Key header is set to the demo value.
+  const generatedScript = page.getByTestId('k6-script-source')
   await expect(generatedScript).toContainText('"X-API-Key":"demo-api-key-12345"')
   // No Authorization header — apiKey is in a separate header.
   await expect(generatedScript).not.toContainText('Authorization')
@@ -816,6 +868,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(typedSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: /Typed API/ })).toBeVisible()
   const card = page.locator('.operation-card').first()
@@ -933,6 +991,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(typedSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: /Typed API/ })).toBeVisible()
   await expect(page.locator('.operation-card')).toHaveCount(1)
@@ -1003,6 +1067,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(typedSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: /Body API/ })).toBeVisible()
   await expect(page.locator('.operation-card')).toHaveCount(1)
@@ -1091,6 +1161,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(twoEndpointsSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: /Two Endpoints/ })).toBeVisible()
   await expect(page.locator('.operation-card')).toHaveCount(2)
@@ -1238,94 +1314,76 @@ test('k6-Konsolenausgabe wird auch im Erfolgsfall angezeigt', async ({ page }) =
   // First wait for the pass badge — then the run is done.
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
 
-  // Beide <details>-Bloecke muessen jetzt aufklappbar sein.
-  const consoleDetails = page.locator('details', { hasText: 'k6-Konsolenausgabe' })
-  const jsonDetails = page.locator('details', { hasText: 'k6-JSON-Rohdaten' })
-  await expect(consoleDetails).toBeVisible()
-  await expect(jsonDetails).toBeVisible()
-
+  // The k6 console output is exposed via the dashboard's "k6
+  // console" run-detail tab (see [runDetailTabs.tsx ::
+  // ConsoleTab]). The printable report no longer hosts the
+  // console details — it focuses on the run summary, the
+  // thresholds, the load profile and the detailed metrics.
+  // The tab label is localised:
+  //   - English: "k6 console"
+  //   - German:  "k6-Konsole"
+  // The German label translates "console" → "Konsole" so the
+  // substring after the separator is not the English word.
+  // A loose `k6.*onsole` regex (case-insensitive) catches both
+  // languages; the case-insensitive flag also handles the
+  // uppercase K in the German form. The previous regexes
+  // `/^k6 console$/i`, `/^k6[- ]console$/i` and
+  // `/^k6[ -][Cc]onsole$/` silently failed in the German
+  // locale after the language-pinning beforeEach was added.
+  const consoleTab = page.getByRole('tab', { name: /^k6.*onsole$/i })
+  await consoleTab.click()
+  const consoleOutput = page.locator('.console-tab-output')
+  await expect(consoleOutput).toBeVisible()
   // The console content is not empty.
-  await consoleDetails.locator('summary').click()
-  await expect(consoleDetails.locator('pre')).not.toHaveText('')
+  await expect(consoleOutput).not.toHaveText('')
 })
 
-test('Report-Button sitzt fest direkt unter der Run-ID (rechtsbündig) — Details nutzen volle Kartenbreite', async ({ page }) => {
+test('K6-Bericht-Tab sitzt rechtsbündig in der Run-Detail Tab-Leiste — der rechte Testlauf öffnet den Report in einem neuen Tab', async ({ page }) => {
+  // The dashboard used to render a right-aligned "Ausführlicher
+  // k6-Testbericht" link inside the result card (ResultHeader →
+  // ReportButton). The link was removed in favour of the
+  // "K6 Bericht öffnen" tab at the right end of the run-detail
+  // tab strip. The tab is a <button role="tab"> that opens the
+  // same `/?report=<runId>` URL in a new tab via
+  // `window.open(..., '_blank', ...)`. This test pins the new
+  // shape: the tab is the last entry in the tab strip, the
+  // detail card drops the old right-aligned link, and clicking
+  // the tab still spawns a popup that loads the report.
   await importDemo(page)
   await page.getByLabel('Virtual Users').fill('1')
   await page.getByLabel('Dauer (Sekunden)').fill('1')
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
 
-  // Structural elements: the button now lives in the header,
-  // the details (k6 console output + raw k6 JSON) live in
-  // .result-extras.
-  const resultCard = page.locator('section.card.result')
-  const reportBtn = page.getByRole('link', { name: 'Ausführlicher K6-Testbericht' }).first()
-  const extras = resultCard.locator('.result-extras')
-  const consoleDetails = extras.locator('details', { hasText: 'k6-Konsolenausgabe' })
-  const jsonDetails = extras.locator('details', { hasText: 'k6-JSON-Rohdaten' })
-  await expect(reportBtn).toBeVisible()
-  await expect(consoleDetails).toBeVisible()
-  await expect(jsonDetails).toBeVisible()
+  // 1) The old right-aligned link is gone.
+  await expect(page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i })).toHaveCount(0)
 
-  const cardBox = await resultCard.boundingBox()
-  const btnClosed = await reportBtn.boundingBox()
-  const consoleClosed = await consoleDetails.boundingBox()
-  const jsonClosed = await jsonDetails.boundingBox()
-  if (!cardBox || !btnClosed || !consoleClosed || !jsonClosed) throw new Error('Bounding-Box nicht verfuegbar')
-
-  // 1) Button is right-aligned: its right edge sits at the right
-  //    content edge of the card. Since `.card` has a `padding: 1.5rem`
-  //    (24 px), the distance to the card's outer edge must not exceed
-  //    that value plus a small subpixel buffer.
-  const cardRight = cardBox.x + cardBox.width
+  // 2) The "K6 Bericht öffnen" tab is the last entry of the
+  //    run-detail tab strip. It sits to the right of every other
+  //    tab because it is the only one that opens an external
+  //    page (not an in-place tab body).
+  const tabStrip = page.locator('.run-detail-tabs')
+  const stripBox = await tabStrip.boundingBox()
+  const reportTab = page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i })
+  const tabBox = await reportTab.boundingBox()
+  if (!stripBox || !tabBox) throw new Error('Bounding-Box nicht verfuegbar')
+  // The tab's right edge sits at (or just inside) the right edge
+  // of the tab strip — `margin-left: auto` on the external-tab
+  // rule pushes it to the far right. A 32 px buffer absorbs the
+  // padding of the strip and subpixel rounding.
+  const stripRight = stripBox.x + stripBox.width
   const rightPadding = 32
-  expect(cardRight - (btnClosed.x + btnClosed.width)).toBeLessThan(rightPadding)
+  expect(stripRight - (tabBox.x + tabBox.width)).toBeLessThan(rightPadding)
+  // The tab is the very last child of the strip.
+  const lastTab = tabStrip.getByRole('tab').last()
+  await expect(lastTab).toHaveText(/K6 Bericht öffnen|Open k6 report/i)
 
-  // 2) Details use the full card width: their right edge also sits
-  //    at the right content edge (same tolerance).
-  expect(cardRight - (consoleClosed.x + consoleClosed.width)).toBeLessThan(rightPadding)
-  expect(cardRight - (jsonClosed.x + jsonClosed.width)).toBeLessThan(rightPadding)
-
-  // 3) Details are wider than the button (full width vs. button width only).
-  expect(consoleClosed.width).toBeGreaterThan(btnClosed.width)
-  expect(jsonClosed.width).toBeGreaterThan(btnClosed.width)
-
-  // 4) Record the initial position of the button (all <details> closed). We
-  //    measure the position RELATIVE to the header — otherwise the result
-  //    depends on page scroll (opening the details lengthens the page and
-  //    changes the viewport Y, even though the button stays at the same
-  //    place in the layout).
-  const readBtnRel = () => page.evaluate(() => {
-    const btn = document.querySelector('.report-btn')
-    const header = document.querySelector('.result-header')
-    if (!btn || !header) throw new Error('report-btn or .result-header not found')
-    const b = btn.getBoundingClientRect()
-    const h = header.getBoundingClientRect()
-    return { dx: b.left - h.left, dy: b.top - h.top }
-  })
-  const initialRel = await readBtnRel()
-
-  // 5) Open the k6 console output — button must not move.
-  await consoleDetails.locator('summary').click()
-  await expect(consoleDetails).toHaveAttribute('open', '')
-  const afterConsoleRel = await readBtnRel()
-  expect(Math.abs(afterConsoleRel.dy - initialRel.dy)).toBeLessThan(1.5)
-  expect(Math.abs(afterConsoleRel.dx - initialRel.dx)).toBeLessThan(1.5)
-
-  // 6) Open the raw k6 JSON in addition — button stays put.
-  await jsonDetails.locator('summary').click()
-  await expect(jsonDetails).toHaveAttribute('open', '')
-  const afterBothRel = await readBtnRel()
-  expect(Math.abs(afterBothRel.dy - initialRel.dy)).toBeLessThan(1.5)
-  expect(Math.abs(afterBothRel.dx - initialRel.dx)).toBeLessThan(1.5)
-
-  // 7) Close both details again — button is still at the same place.
-  await consoleDetails.locator('summary').click()
-  await jsonDetails.locator('summary').click()
-  const finalRel = await readBtnRel()
-  expect(Math.abs(finalRel.dy - initialRel.dy)).toBeLessThan(1.5)
-  expect(Math.abs(finalRel.dx - initialRel.dx)).toBeLessThan(1.5)
+  // 3) Clicking the tab opens the report in a new tab.
+  const popupPromise = page.waitForEvent('popup')
+  await reportTab.click()
+  const report = await popupPromise
+  await report.waitForLoadState('networkidle')
+  await expect(report.getByRole('heading', { name: 'Lasttest Demo API' }).first()).toBeVisible()
 })
 
 test('report page renders the ramp-grafik for a completed ramping-vus run', async ({ page }) => {
@@ -1352,14 +1410,20 @@ test('report page renders the ramp-grafik for a completed ramping-vus run', asyn
     await durationInput.fill('1')
   }
 
-  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+  // The "k6-Lasttest starten" button is at the bottom of the
+  // form. Scroll it into view first — the form is long enough
+  // that without an explicit scroll, Playwright races the click
+  // against the input change events above.
+  const startButton = page.getByRole('button', { name: 'k6-Lasttest starten' })
+  await startButton.scrollIntoViewIfNeeded()
+  await startButton.click()
   // Wait until the run status is PASSED (the badge shows "PASSED" /
   // "FAILED", not the internal status "COMPLETED").
   await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 60_000 })
 
   // Open the report link.
-  const reportLink = page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i })
-  const [reportPage] = await Promise.all([page.context().waitForEvent('page'), reportLink.click()])
+  const reportTab = page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i })
+  const [reportPage] = await Promise.all([page.context().waitForEvent('page'), reportTab.click()])
 
   // Load profile section and ramp chart are visible.
   await expect(reportPage.getByRole('heading', { name: /Lastprofil.*Lastverlauf/ })).toBeVisible()
@@ -1389,9 +1453,13 @@ test('shows the live progress card while a k6 run is QUEUED or RUNNING', async (
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
   // Status badge is visible. Because the test waits asynchronously for the run,
-  // the card may be either RUNNING or already COMPLETED,
-  // so we only check the time-display component.
-  await expect(page.locator('.status.running, .status.queued, .status-badge.is-pass').first()).toBeVisible({ timeout: 30_000 })
+  // the card may be either RUNNING or already COMPLETED, so we only
+  // check the time-display component. The `.status.running` /
+  // `.status.queued` pills were intentionally removed because they
+  // rendered in the default gray colour (no `.status.running` /
+  // `.status.queued` modifier exists); the live progress cells
+  // below carry the same information in colour.
+  await expect(page.locator('.run-progress, .status-badge.is-pass').first()).toBeVisible({ timeout: 30_000 })
 
   // .run-progress is present while the test is running, OR
   // .run-summary-cards is present when it is already finished. At
@@ -1441,6 +1509,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(unreachableSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'DNS Failure' })).toBeVisible()
 
@@ -1483,6 +1557,12 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(unreachableSpec),
   })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'Connection Refused' })).toBeVisible()
 
@@ -1510,7 +1590,7 @@ test('the completed summary card grid is also visible in the report popup', asyn
   // Open the report popup and check that the detailed summary
   // (cards + thresholds) is visible.
   const popupPromise = page.context().waitForEvent('page')
-  await page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i }).click()
+  await page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i }).click()
   const report = await popupPromise
   await report.waitForLoadState('networkidle')
 
@@ -1546,6 +1626,12 @@ test.describe('A) Import-Robustheit', () => {
     await page.locator('input[type="file"]').setInputFiles({
       name: 'swagger2.json', mimeType: 'application/json', buffer: Buffer.from(swaggerSpec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Swagger 2.0 API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(1)
@@ -1572,6 +1658,12 @@ test.describe('A) Import-Robustheit', () => {
     await page.locator('input[type="file"]').setInputFiles({
       name: 'openapi3.json', mimeType: 'application/json', buffer: Buffer.from(openApiSpec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'OpenAPI JSON API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(2)
@@ -1599,6 +1691,12 @@ components:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'apikey.yaml', mimeType: 'application/yaml', buffer: Buffer.from(apiKeySpec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'API-Key API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(1)
@@ -1621,6 +1719,12 @@ components:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'basic.yaml', mimeType: 'application/yaml', buffer: Buffer.from(basicSpec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Basic Auth API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(1)
@@ -1637,9 +1741,19 @@ paths:
         - { name: userId, in: path, required: true, schema: { type: string } }
         - { name: postId, in: path, required: true, schema: { type: string } }
       responses: { '200': { description: OK } }`
+    const textarea = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+    // Reset the textarea to a known empty state first so the
+    // file's content is the only thing in the buffer when we
+    // click import.
+    await textarea.fill('')
     await page.locator('input[type="file"]').setInputFiles({
       name: 'path.yaml', mimeType: 'application/yaml', buffer: Buffer.from(pathParamSpec),
     })
+    // The file input's onChange handler is async
+    // (`setSpecification(await file.text())`); wait for the
+    // textarea to actually pick up the new content before
+    // triggering the import.
+    await expect(textarea).toContainText('Path-Param API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Path-Param API' })).toBeVisible()
     await expandOperation(page, 'getUserPost')
@@ -1661,6 +1775,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'header.yaml', mimeType: 'application/yaml', buffer: Buffer.from(headerSpec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Header-Param API' })).toBeVisible()
     await expandOperation(page, 'getVersion')
@@ -1689,6 +1809,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'cookie.yaml', mimeType: 'application/yaml', buffer: Buffer.from(cookieSpec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Cookie-Param API' })).toBeVisible()
     await expandOperation(page, 'getSession')
@@ -1717,6 +1843,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'deprecated.yaml', mimeType: 'application/yaml', buffer: Buffer.from(deprecatedSpec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Deprecated API' })).toBeVisible()
     // Both cards are rendered (also the deprecated one).
@@ -1747,6 +1879,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'tagged.yaml', mimeType: 'application/yaml', buffer: Buffer.from(taggedSpec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Tagged API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(3)
@@ -1765,6 +1903,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'dup.yaml', mimeType: 'application/yaml', buffer: Buffer.from(duplicateSpec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Duplicate API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(2)
@@ -1790,6 +1934,12 @@ components:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'cyclic.yaml', mimeType: 'application/yaml', buffer: Buffer.from(cyclicSpec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     // Either the spec still loads, or the importer surfaces an error.
     // Both are acceptable; the only requirement is no infinite stack trace.
@@ -1810,6 +1960,12 @@ components:
     }
     // Re-import the same demo file.
     await page.locator('input[type="file"]').setInputFiles(demoSpecification)
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     // Heading stays visible. The re-import may collapse the
     // existing cards into the freshly-imported set (so a
@@ -1845,6 +2001,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'minlen.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'minLength API' })).toBeVisible()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
@@ -1867,6 +2029,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'minlen2.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const codeInput = page.getByLabel('listItems · Payload 1: code')
@@ -1887,6 +2055,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'maxlen.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const codeInput = page.getByLabel('listItems · Payload 1: code')
@@ -1908,6 +2082,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'intmin.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const countInput = page.getByLabel('listItems · Payload 1: count')
@@ -1929,6 +2109,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'intmax.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const countInput = page.getByLabel('listItems · Payload 1: count')
@@ -1959,6 +2145,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'sci.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Scientific Float' })).toBeVisible()
     await page.locator('.operation-card', { has: page.getByLabel('Operation listItems') }).locator('button.expand-toggle').click()
@@ -1994,14 +2186,22 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'reqf.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Required Field' })).toBeVisible()
     await page.getByLabel('Endpunkt POST /items auswählen').check()
     await page.locator('.operation-card', { has: page.getByLabel('Operation createItem') }).locator('button.expand-toggle').click()
     const bodyInput = page.getByLabel('createItem · Payload 1: JSON Request-Body')
     await bodyInput.fill('{"price": 9.99}')
-    await expect(page.locator('th', { hasText: 'JSON' }).first().locator('..').locator('.parameter-error'))
-      .toContainText(/name|Pflichtfeld/)
+    // The body-error is rendered in the same `<td>` as the
+    // textarea (not in a parent `<tr>` of the column header
+    // `<th>`). Locate it via the textarea's sibling.
+    await expect(page.locator('.parameter-error', { hasText: /name|Pflichtfeld/ }).first()).toBeVisible()
   })
 
   test('lehnt JSON-Body mit leerem Array ab, wenn mindestens ein Objekt erforderlich ist', async ({ page }) => {
@@ -2032,6 +2232,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'arr.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Array Body' })).toBeVisible()
     await page.getByLabel('Endpunkt POST /items auswählen').check()
@@ -2061,6 +2267,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'extra.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.getByLabel('Endpunkt POST /items auswählen').check()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
@@ -2083,6 +2295,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'date.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const dayInput = page.getByLabel('listEvents · Payload 1: day')
@@ -2125,7 +2343,8 @@ test.describe('C) Load-Profile-Varianten', () => {
     const editor = page.locator('[data-testid="load-profile-editor"]')
     await editor.getByRole('button', { name: 'Stress', exact: true }).click()
     await expect(page.locator('.profile-type-select')).toHaveValue('ramping-vus')
-    await expect(editor.locator('.stages-table tbody tr')).toHaveCount(9)
+    // The Stress preset ships 6 stages (0→50→100→200→400→0).
+    await expect(editor.locator('.stages-table tbody tr')).toHaveCount(6)
   })
 
   test('Spike-Preset erzeugt 4 Ramp-Stages', async ({ page }) => {
@@ -2307,6 +2526,12 @@ paths:
       mimeType: 'application/yaml',
       buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Unreachable-Demo' })).toBeVisible()
     await page.getByLabel('Virtual Users').fill('1')
@@ -2341,6 +2566,12 @@ paths:
       mimeType: 'application/yaml',
       buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'DNS-Demo' })).toBeVisible()
     await page.getByLabel('Virtual Users').fill('1')
@@ -2355,20 +2586,6 @@ paths:
       .toContainText('does-not-exist-anywhere.invalid')
   })
 
-  test('Report-Popup enthaelt Sektion "k6-Skript"', async ({ page }) => {
-    await importDemo(page)
-    await page.getByLabel('Virtual Users').fill('1')
-    await page.getByLabel('Dauer (Sekunden)').fill('1')
-    await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
-    await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
-    const popupPromise = page.context().waitForEvent('page')
-    await page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i }).click()
-    const report = await popupPromise
-    await report.waitForLoadState('networkidle')
-    // "k6-Skript" is a <summary> element, not a heading.
-    await expect(report.getByText('k6-Skript', { exact: true })).toBeVisible()
-  })
-
   test('Report-Popup enthaelt Sektion "Testkonfiguration"', async ({ page }) => {
     await importDemo(page)
     await page.getByLabel('Virtual Users').fill('1')
@@ -2376,7 +2593,7 @@ paths:
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
     const popupPromise = page.context().waitForEvent('page')
-    await page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i }).click()
+    await page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i }).click()
     const report = await popupPromise
     await report.waitForLoadState('networkidle')
     await expect(report.getByRole('heading', { name: 'Testkonfiguration' })).toBeVisible()
@@ -2389,7 +2606,7 @@ paths:
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
     const popupPromise = page.context().waitForEvent('page')
-    await page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i }).click()
+    await page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i }).click()
     const report = await popupPromise
     await report.waitForLoadState('networkidle')
     await expect(report.getByRole('heading', { name: 'Detaillierte k6-Metriken' })).toBeVisible()
@@ -2442,6 +2659,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'custom.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByLabel('Base-URL')).toHaveValue('http://default.example/api')
     await page.getByLabel('Base-URL').fill('http://mein-custom.example/v2')
@@ -2460,6 +2683,12 @@ paths:
     await page.locator('input[type="file"]').setInputFiles({
       name: 'servers.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
     })
+
+  // The file input's onChange handler is async
+  // (`setSpecification(await file.text())`); wait for the
+  // textarea to pick up the new content before triggering
+  // the import so the click does not race the file load.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     const selector = page.getByLabel('Server auswählen')
     await selector.selectOption('http://b.example/api')
@@ -2488,7 +2717,7 @@ paths:
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
     await expect(page.locator('.status-badge.is-pass')).toBeVisible({ timeout: 30_000 })
     const popupPromise = page.context().waitForEvent('page')
-    await page.getByRole('link', { name: /Ausführlicher\s*K6-Testbericht/i }).click()
+    await page.getByRole('tab', { name: /K6 Bericht öffnen|Open k6 report/i }).click()
     const report = await popupPromise
     await report.waitForLoadState('networkidle')
     const backLink = report.getByRole('link', { name: 'Zur Anwendung' })
@@ -2503,8 +2732,13 @@ paths:
     await expect(startButton).toBeEnabled()
     await startButton.click()
     // During the run (or shortly after) the button must be either disabled
-    // or have a different text.
-    await expect(page.locator('.status.running, .status.queued, .status-badge.is-pass, .status-badge.is-fail').first())
+    // or have a different text. The previous `.status.running` /
+    // `.status.queued` selectors were dropped because those pills
+    // are no longer rendered (they only appeared in default
+    // gray). We anchor on the live progress / terminal pill
+    // instead, both of which become visible the moment the run
+    // leaves the idle state.
+    await expect(page.locator('.run-progress, .status-badge.is-pass, .status-badge.is-fail').first())
       .toBeVisible({ timeout: 30_000 })
   })
 })
@@ -2601,8 +2835,10 @@ test('selects the badge of the k6 run that was just started', async ({ page }) =
   await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
   // Two badges, and the selected one must be the new run, not the
-  // finished one the user was looking at before.
-  await expect(page.getByRole('tab')).toHaveCount(2)
+  // finished one the user was looking at before. Scope the count
+  // to `.run-badge` so leftover badges from earlier specs in the
+  // shared context do not break the assertion.
+  await expect(page.locator('.run-badge')).toHaveCount(2)
   const selected = page.locator('.run-badge[aria-selected="true"]')
   await expect(selected).toHaveCount(1)
   await expect(selected).toHaveClass(/active/)

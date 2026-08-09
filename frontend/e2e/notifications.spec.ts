@@ -20,15 +20,15 @@
 import { expect, test, type Page } from '@playwright/test'
 
 async function openSettings(page: Page) {
-  await page.getByRole('button', { name: 'Open settings' }).click()
-  const drawer = page.getByRole('dialog', { name: 'Settings' })
+  await page.getByRole('button', { name: 'Einstellungen öffnen' }).click()
+  const drawer = page.getByRole('dialog', { name: 'Einstellungen' })
   await expect(drawer).toBeVisible()
   return drawer
 }
 
 async function closeSettings(page: Page) {
-  await page.getByRole('button', { name: 'Close' }).click()
-  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden()
+  await page.getByRole('button', { name: 'Schließen' }).click()
+  await expect(page.getByRole('dialog', { name: 'Einstellungen' })).toBeHidden()
 }
 
 test.describe('Settings drawer — notifications', () => {
@@ -38,6 +38,13 @@ test.describe('Settings drawer — notifications', () => {
     // makes the spec deterministic and avoids the prompt
     // refusing to resolve in headless Chromium.
     await context.grantPermissions(['notifications'], { origin: 'http://localhost:8286' })
+    // Pin the language so the German button labels match the
+    // assertions below. Without this the page defaults to
+    // English and `getByRole('button', { name: 'k6-Lasttest
+    // starten' })` would never resolve.
+    await page.addInitScript(() => {
+      localStorage.setItem('lasttest.language', 'de')
+    })
     // Install a spy on the Notification constructor so the
     // spec can assert on the title/body the App would have
     // fired. The patch runs before any page script (Vite and
@@ -82,19 +89,19 @@ test.describe('Settings drawer — notifications', () => {
     // drawer; the spec asserts presence by its accessible name
     // (the section heading), not by DOM position, so the test
     // does not break when extra sections are added later.
-    await expect(drawer.getByRole('group', { name: 'Notifications' })).toBeVisible()
+    await expect(drawer.getByRole('group', { name: 'Benachrichtigungen' })).toBeVisible()
     // A single master toggle controls every terminal
     // notification (success + failure). No per-kind sub-toggles
     // anymore.
-    await expect(drawer.getByRole('checkbox', { name: 'Browser notifications' })).toBeVisible()
+    await expect(drawer.getByRole('checkbox', { name: 'Browser-Benachrichtigungen' })).toBeVisible()
     await expect(drawer.getByRole('checkbox', { name: 'On successful completion' })).toHaveCount(0)
     await expect(drawer.getByRole('checkbox', { name: 'On failure (FAILED, STOPPED, ABORTED)' })).toHaveCount(0)
-    await expect(drawer.getByText('Notifications are blocked by the browser.')).toHaveCount(0)
+    await expect(drawer.getByText('Benachrichtigungen sind im Browser blockiert.')).toHaveCount(0)
   })
 
   test('persists the toggle state across a page reload', async ({ page }) => {
     const drawer = await openSettings(page)
-    await drawer.getByRole('checkbox', { name: 'Browser notifications' }).check()
+    await drawer.getByRole('checkbox', { name: 'Browser-Benachrichtigungen' }).check()
     await closeSettings(page)
 
     // Reload and reopen the drawer. The master must still be
@@ -102,7 +109,7 @@ test.describe('Settings drawer — notifications', () => {
     // localStorage and reloaded on the next mount.
     await page.reload()
     const reopened = await openSettings(page)
-    await expect(reopened.getByRole('checkbox', { name: 'Browser notifications' })).toBeChecked()
+    await expect(reopened.getByRole('checkbox', { name: 'Browser-Benachrichtigungen' })).toBeChecked()
   })
 
   test('shows the permission-denied warning when the browser blocks notifications', async ({ context, page }) => {
@@ -129,9 +136,9 @@ test.describe('Settings drawer — notifications', () => {
     await page.goto('/')
 
     const drawer = await openSettings(page)
-    const master = drawer.getByRole('checkbox', { name: 'Browser notifications' })
+    const master = drawer.getByRole('checkbox', { name: 'Browser-Benachrichtigungen' })
     await expect(master).toBeDisabled()
-    await expect(drawer.getByText('Notifications are blocked by the browser.')).toBeVisible()
+    await expect(drawer.getByText('Benachrichtigungen sind im Browser blockiert.')).toBeVisible()
   })
 
   test('fires a browser notification when a run fails while the tab is in the background', async ({ page }) => {
@@ -139,7 +146,7 @@ test.describe('Settings drawer — notifications', () => {
     // now, every terminal transition (success + failure) is
     // covered by it.
     const drawer = await openSettings(page)
-    await drawer.getByRole('checkbox', { name: 'Browser notifications' }).check()
+    await drawer.getByRole('checkbox', { name: 'Browser-Benachrichtigungen' }).check()
     await closeSettings(page)
 
     // Start a minimal load test. The bundled demo spec plus
@@ -163,7 +170,7 @@ paths:
     // a network fetch that can race the file-input replacement;
     // picking the probe spec first and then being overwritten by
     // the demo spec would lead to importing the wrong document.
-    const spec = page.getByLabel('Swagger / OpenAPI Specification')
+    const spec = page.getByLabel('Swagger / OpenAPI-Dokumentation')
     await expect(spec).toContainText('Lasttest Demo API')
     await page.locator('input[type="file"]').setInputFiles({
       name: 'probe.yaml',
@@ -171,11 +178,11 @@ paths:
       buffer: Buffer.from(unreachableSpec),
     })
     await expect(spec).toContainText('Notification Probe')
-    await page.getByRole('button', { name: 'Validate & import' }).click()
+    await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Notification Probe' })).toBeVisible()
 
     await page.getByLabel('Virtual Users').fill('1')
-    await page.getByLabel('Duration (seconds)').fill('3')
+    await page.getByLabel('Dauer (Sekunden)').fill('3')
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
 
     // Wait for the run to reach a terminal state. The probe
@@ -193,7 +200,7 @@ paths:
       return w.__notifications
     })
     expect(notifications.length).toBeGreaterThanOrEqual(1)
-    const failed = notifications.find(n => n.title === 'k6 run finished with a failure')
+    const failed = notifications.find(n => n.title === 'k6-Lauf mit Fehler beendet')
     expect(failed, 'expected a FAILED notification').toBeDefined()
     expect(failed?.options?.body).toContain('FAILED')
   })

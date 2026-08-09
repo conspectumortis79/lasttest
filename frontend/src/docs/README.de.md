@@ -23,13 +23,20 @@ Pro importierter Spec lässt lasttest dich:
    **Smoke, Load, Stress, Spike, Soak, Burst** und **Arrival-Rate**.
 3. **Den Test starten** und den Status `QUEUED → RUNNING → COMPLETED`
    (bzw. `FAILED`, `STOPPED`, `ABORTED`) verfolgen. Jeder Lauf
-   erscheint als **Badge** im Multi-Run-Dashboard. Ein **Rechtsklick
-   auf das Badge** öffnet ein Aktions-Menü — siehe
-   [§5](#5-aktions-menü-am-run-badge-rechtsklick).
-4. **Den Report** in einem neuen Tab öffnen. Er enthält eine
-   druckoptimierte Zusammenfassung, das generierte k6-Skript und — sofern
-   InfluxDB läuft — eine **Ramp-Grafik**, die die geplante Last (*Soll*)
-   mit der tatsächlich gemessenen Last (*Ist*) vergleicht.
+   erscheint als **Zeile** im Multi-Run-Dashboard (`Letzte Läufe`-
+   Panel) mit einem **× N**-Badge, das zusammenfasst, wie oft der
+   Endpunkt bereits getestet wurde. Ein **Rechtsklick auf die Zeile**
+   öffnet ein Aktions-Menü — siehe
+   [§5](#5-aktions-menü-am-run-row-rechtsklick).
+4. **Den Lauf prüfen** über den Run-Detail-Tab-Strip (Übersicht ·
+   Timeline · Aktionen · k6-Konsole · Schwellen · Konfiguration
+   · Fehler-Diagnose) und den druckoptimierten Report in einem
+   neuen Tab öffnen. Der Report enthält die Zusammenfassung, das
+   generierte k6-Skript und — sofern InfluxDB läuft — eine
+   **Ramp-Grafik**, die die geplante Last (*Soll*) mit der
+   tatsächlich gemessenen Last (*Ist*) vergleicht. Eine **Live-
+   Ramp-Grafik** liegt auch auf dem **Übersicht**-Tab des
+   Dashboards, sodass du *Soll vs Ist* in Echtzeit verfolgen kannst.
 
 ---
 
@@ -204,14 +211,17 @@ jederzeit umgestellt werden kann.
 
 ---
 
-## 5. Aktions-Menü am Run-Badge (Rechtsklick)
+## 5. Aktions-Menü am Run-Row (Rechtsklick)
 
-Jeder k6-Lauf erscheint als farbiges Badge im **Multi-Run-Dashboard**
-(Schritt 4). Das Badge zeigt HTTP-Methode, Status und Pfad. Ein
-Linksklick fokussiert den Lauf; ein **Rechtsklick öffnet das
-Aktions-Menü an der Cursor-Position**. Das Menü passt sich dem
-aktuellen Status des Laufs an und bietet nur Aktionen an, die Sinn
-ergeben:
+Jeder k6-Lauf erscheint als **Zeile** im **Multi-Run-Dashboard**
+(`Letzte Läufe`-Panel — Schritt 4). Die Zeile zeigt einen Status-
+Punkt, die HTTP-Methode, das Status-Badge, den Pfad, einen **× N**-
+Zähler, der zusammenfasst, wie oft der Endpunkt bereits getestet
+wurde, einen Meta-String (`VUs · Dauer`) und einen relativen
+`when`-Stempel. Ein Linksklick fokussiert den Lauf; ein
+**Rechtsklick öffnet das Aktions-Menü an der Cursor-Position**.
+Das Menü passt sich dem aktuellen Status des Laufs an und bietet
+nur Aktionen an, die Sinn ergeben:
 
 | Menüpunkt | Sichtbar bei | Wirkung |
 | --- | --- | --- |
@@ -223,20 +233,118 @@ ergeben:
 | **Stop (graceful)** | `QUEUED`, `RUNNING`, `STOPPING` | Sendet `SIGTERM`; k6 läuft sauber aus, der Lauf endet als `STOPPED` |
 | **Force abort** | `QUEUED`, `RUNNING`, `STOPPING` | Sendet `SIGKILL`; der Lauf endet sofort als `ABORTED` (Metriken können unvollständig sein) |
 | **Erneut ausführen** | Terminal-Läufe (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Führt dasselbe Szenario mit der ursprünglichen Base-URL und einer frischen Run-ID erneut aus |
-| **Aus Ansicht entfernen** | Terminal-Läufe (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Entfernt das Badge aus dem In-Memory-Dashboard. Das Backend hält den Lauf weiterhin, sodass ein Page-Refresh ihn aus `/api/test-runs` wieder einliest. Die übrigen Badges werden nach ihrem ursprünglichen `createdAt` neu sortiert, damit das Dashboard in der Reihenfolge „neueste zuerst" bleibt. |
-| **Alle anderen fehlgeschlagenen Läufe entfernen** | Terminal-Läufe, wenn mindestens ein anderes `FAILED`-Badge vorhanden ist | Entfernt alle anderen `FAILED`-Badges aus dem Dashboard in einem Schritt. Deaktiviert (mit Grund), wenn es nichts zu entfernen gibt. STOPPED- und ABORTED-Läufe werden bewusst erhalten |
+| **Aus Ansicht entfernen** | Terminal-Läufe (`COMPLETED` / `FAILED` / `STOPPED` / `ABORTED`) | Entfernt die Zeile aus dem In-Memory-Dashboard. Das Backend hält den Lauf weiterhin, sodass ein Page-Refresh ihn aus `/api/test-runs` wieder einliest. Die übrigen Zeilen werden nach ihrem ursprünglichen `createdAt` neu sortiert, damit das Dashboard in der Reihenfolge „neueste zuerst" bleibt. |
+| **Alle anderen fehlgeschlagenen Läufe entfernen** | Terminal-Läufe, wenn mindestens eine andere `FAILED`-Zeile vorhanden ist | Entfernt alle anderen `FAILED`-Zeilen aus dem Dashboard in einem Schritt. Deaktiviert (mit Grund), wenn es nichts zu entfernen gibt. STOPPED- und ABORTED-Läufe werden bewusst erhalten |
 
 > 💡 **Beispiel — Rerun per Rechtsklick:** Du hast ein 30 s
 > `Smoke`-Profil gegen die Demo gefahren und willst prüfen, ob das
-> Ergebnis reproduzierbar ist. Rechtsklicke das grüne
-> `COMPLETED`-Badge, wähle **Erneut ausführen**, und lasttest ruft
+> Ergebnis reproduzierbar ist. Rechtsklicke die grüne
+> `COMPLETED`-Zeile, wähle **Erneut ausführen**, und lasttest ruft
 > `/api/test-runs/{id}/rerun` auf. Das Backend reiht denselben
 > `CreateTestRunRequest`, der beim ursprünglichen Start gespeichert
-> wurde, erneut ein, k6 startet frisch, und das neue Badge erscheint
-> im Dashboard — der Fokus wechselt automatisch auf den neuen Lauf.
+> wurde, erneut ein, k6 startet frisch, und die neue Zeile
+> erscheint im Dashboard — der Fokus wechselt automatisch auf den
+> neuen Lauf.
 
 Ein Klick außerhalb des Menüs (oder `Esc`) schließt es. Linksklick
 bleibt reserviert für das Fokussieren des Laufs.
+
+### 5.1 Das `Letzte Läufe`-Panel und der `× N`-Zähler
+
+Das Multi-Run-Dashboard ist als Liste von Zeilen (eine pro Lauf)
+gerendert, nicht als Grid von Badges. Jede Zeile zeigt:
+
+- einen **Status-Punkt** (animiert, solange der Lauf in flight ist)
+  und das passende Status-Badge (`EINGEREIHT` / `LÄUFT` /
+  `GESTOPPT` / `BESTANDEN` / `FEHLGESCHLAGEN` / `ABGEBROCHEN`),
+- einen menschenlesbaren Identifikator (`METHOD /path`),
+- einen **× N**-Chip neben dem Operations-Namen, der anzeigt, wie
+  oft der Endpunkt bereits getestet wurde — die Daten stammen aus
+  `/api/operations/stats` und werden alle 5 s gepollt; bis zur
+  ersten Antwort zeigt der Chip `neu`,
+- einen einzeiligen Meta-String (`VUs · Dauer`),
+- die Spalte **Verstrichen / Geplant**,
+- einen **relativen `when`-Stempel** (`gerade eben` / `vor 5 min`
+  / `gestern` …).
+
+Ein neuer Lauf fokussiert die frisch hinzugefügte Zeile, sodass
+der Nutzer den Live-Status sofort sieht, ohne zu scrollen. Der
+Rechtsklick-Menü-Vertrag aus dem alten Badge-Grid bleibt 1:1
+erhalten (siehe oben), und die existierenden Tastatur-Shortcuts
+(`S` für Stop, `⇧S` für Force abort, …) gelten unverändert.
+
+## 5.2 Der Run-Detail-Tab-Strip
+
+Die Detail-Karte eines Laufs ist als horizontaler Tab-Strip
+organisiert:
+
+| Tab | Zweck |
+| --- | --- |
+| **Übersicht** | Live-Status, Metrik-Karten, Live-Ramp-Grafik (Auslastung — Soll vs Ist) |
+| **Timeline** | Pro-Endpunkt-Heatmap + Gantt (siehe [§5.3](#53-die-pro-endpunkt-timeline)) |
+| **Aktionen** | Statusabhängige Controls (Stop, Abort, Rerun, Copy, Open, Export, Remove) |
+| **k6-Konsole** | Vollständige k6-stdout/stderr des Laufs |
+| **Schwellen** | Jeder konfigurierte k6-Threshold mit gemessenem Wert |
+| **Konfiguration** | API, Lastprofil, Operationen, Lauf-Metadaten |
+| **Fehler-Diagnose** | Typisierte Fehler-Diagnose für `FAILED` / `ABORTED`-Läufe |
+| **↗ k6-Bericht öffnen** | Öffnet den druckoptimierten Report in einem neuen Tab |
+
+Das Wechseln der Tabs erhält die Lese-Position des Nutzers, sodass
+die Detail-Karte bei jedem Klick nicht zurück an den Seitenanfang
+springt.
+
+## 5.3 Die Pro-Endpunkt-Timeline
+
+Der **Timeline**-Tab verwandelt die Lauf-Historie eines konkreten
+`(method, path)`-Endpunkts in eine einzige visuelle Geschichte. Er
+enthält:
+
+- einen **24 h / 7 d / 30 d / 90 d**-Fenster-Selektor,
+- einen **Stat-Streifen** mit Lauf-Anzahl, Erfolgs- /
+  Fehler-Zählern und dem Zeitstempel des letzten fehlgeschlagenen
+  Laufs,
+- eine **Heatmap** mit einer Zelle pro Tag, farbcodiert nach dem
+  Tages-Outcome (grün = alle `COMPLETED`, gelb = mindestens ein
+  `STOPPED`, rot = mindestens ein `FAILED` / `ABORTED`),
+- ein **Gantt-artiges einzeiliges Timeline** mit einem Balken pro
+  Lauf, zentriert auf den fokussierten Lauf (bzw. „jetzt", wenn
+  keiner fokussiert ist); Klick auf einen Balken springt im
+  Diagramm zu dessen `createdAt`,
+- eine kompakte **Liste** der jüngsten Läufe im Fenster mit
+  Status-Badges, relativen `when`-Stempeln und einem
+  Rechtsklick-Menü, das die Aktionen der Übersicht spiegelt.
+
+Die Datenquelle ist `/api/operations/runs?method=…&path=…`,
+gepollt mit derselben Kadenz wie die Run-Liste. Ein Rechtsklick
+auf einen Gantt-Balken oder einen Listeneintrag öffnet dasselbe
+per-Run-Kontextmenü wie auf den Übersichts-Zeilen.
+
+## 5.4 Die Live-Ramp-Grafik (Auslastung — Soll vs Ist)
+
+Während ein Lauf in flight ist, zeigt der **Übersicht**-Tab eine
+Live-SVG-Grafik, die die **Soll**-Kurve (geplant, deterministisch
+aus dem konfigurierten Lastprofil abgeleitet) gegen die **Ist**-
+Kurve (tatsächlich, aus dem Time-Series-Container gestreamt)
+vergleicht. Die Grafik:
+
+- rendert die Soll-Linie je nach Exekutor als flache oder
+  getreppte Kurve (`constant-vus`, `ramping-vus`,
+  `constant-arrival-rate` …),
+- aktualisiert die Ist-Polyline alle paar Sekunden, solange der
+  Lauf in flight ist,
+- zeigt einen gelben Cursor am letzten Messpunkt,
+- friert die Ist-Kurve bei den zuletzt gemessenen Werten ein,
+  sobald der Lauf endet — damit dient dieselbe Grafik auch als
+  Post-Mortem-Ansicht,
+- beschriftet die Y-Achse als `VUs` für VU-basierte Exekutoren
+  und als `Anfragen/s` für Arrival-Rate-Exekutoren,
+- zeigt neben dem Titel die verstrichene Dauer (`läuft seit
+  HH:MM:SS`) und die Anzahl der empfangenen Messpunkte.
+
+Ohne InfluxDB rendert die Grafik weiterhin die Soll-Linie; die
+Ist-Kurve ist dann schlicht nicht verfügbar. Dieselbe Grafik
+erscheint auch im druckoptimierten Report (`/?report=<id>`) als
+Abschnitt **Ramp-Grafik**.
 
 ---
 
@@ -301,17 +409,16 @@ Nach einem Testlauf öffnet der Link "Ausführlichen k6-Testbericht in
 neuem Tab öffnen" eine druckoptimierte Ergebnis-Ansicht. Sie enthält
 Zusammenfassung, Thresholds, Lauf- und API-Konfiguration, die
 tatsächlich verwendeten Endpunkt-Parameter, die **Ramp-Grafik** mit
-Soll/Ist-Vergleich (wenn InfluxDB läuft), detaillierte k6-Metriken
-und Konsolen-/JSON-Rohdaten. Über "Drucken / als PDF speichern"
-kannst du diese Ansicht direkt als PDF archivieren.
+Soll/Ist-Vergleich (wenn InfluxDB läuft) und detaillierte
+k6-Metriken. Über "Drucken / als PDF speichern" kannst du diese
+Ansicht direkt als PDF archivieren.
 
 ### 6.5 k6-Skript-Download
 
-Unter dem k6-JSON-Export lässt sich "Generiertes k6-Testskript"
-ausklappen. Es zeigt das exakte Skript, das lasttest ausgeführt hat,
-und bietet einen Download als "k6-Testskript herunterladen (.js)" an.
-Der Report zeigt zusätzlich den passenden manuellen Startbefehl, zum
-Beispiel:
+Im Dashboard unter dem Run-Detail-Tab **k6-Skript** lässt sich das
+generierte Skript ansehen und als "k6-Testskript herunterladen (.js)"
+exportieren. Der Tab zeigt zusätzlich den passenden manuellen
+Startbefehl, zum Beispiel:
 
 ```bash
 k6 run -e BASE_URL="https://example.test" lasttest-<run-id>.js
@@ -404,10 +511,14 @@ müssen explizit aktiviert werden.
 
 - **[`USER_GUIDE.md`](./USER_GUIDE.md)** — umfassendes, durchgehendes
   englisches Benutzerhandbuch, das den Workflow, die Demo-API, die
-  Konfiguration jedes Endpunkts, das Ausführen von Lasttests, die
-  Report-Ansicht, das Rechtsklick-Menü am Run-Badge, die
-  Settings-Schublade zum Sprachwechsel und die Fehlerbehebung
-  abdeckt.
+  Konfiguration jedes Endpunkts, das Ausführen von Lasttests, das
+  `Letzte Läufe`-Panel und seinen `× N`-Zähler, den Run-Detail-
+  Tab-Strip (Übersicht · Timeline · Aktionen · k6-Konsole ·
+  Schwellen · Konfiguration · Fehler-Diagnose), die Pro-Endpunkt-
+  Timeline (Heatmap + Gantt), die Live-Ramp-Grafik (Auslastung —
+  Soll vs Ist), die druckoptimierte Report-Ansicht, das
+  Rechtsklick-Menü am Run-Row, die Settings-Schublade zum
+  Sprachwechsel und die Fehlerbehebung abdeckt.
 - Dieselben Anleitungen stehen **in der laufenden Anwendung** über
   die Toolbar-Links **User Guide** und **README** zur Verfügung. Sie
   öffnen sich als durchsuchbare Markdown-Popups
@@ -440,12 +551,15 @@ npm test
 ```
 
 Die Tests erzwingen 100 % Zeilen, Branches und Funktionen für die
-Frontend-Logik. Sie decken den Run-Badge-Kontextmenü-Klassifizierer
+Frontend-Logik. Sie decken den Run-Row-Kontextmenü-Klassifizierer
 (`in-flight` / `terminal` / `terminal-aborted`), die Payload-Pool-
 Helfer, die Multi-Run-Dashboard-Fokusauswahl, die
-Settings-Schublade / i18n-Dictionary-Parität (jeder Schlüssel
-existiert in Englisch und Deutsch) sowie Toolbar, Status-Pills und
-Report-Chrome ab.
+Pro-Endpunkt-Timeline-Helfer (`EndpointTimelineTab.tsx` —
+Fenster-Slice, Tages-Bucket-Färbung, Day-Label-Auflösung), das
+Layout der Live-Ramp-Grafik (`liveRampChartLayout.ts`), den
+Operations-Statistik-Helfer, die Settings-Schublade /
+i18n-Dictionary-Parität (jeder Schlüssel existiert in Englisch und
+Deutsch) sowie Toolbar, Status-Pills und Report-Chrome ab.
 
 ### 10.3 Frontend E2E-Tests mit Playwright
 
@@ -463,8 +577,13 @@ Chromium und prüft:
 - Payload-Strategie-Auswahl
 - Lastprofil-Limits
 - Erfolgreiche k6-Ausführung, Polling
-- Run-Badge-Rechtsklick-Menü (Rerun, Stop, Kopier-Aktionen)
+- Run-Row-Rechtsklick-Menü (Rerun, Stop, Kopier-Aktionen)
 - Fokusübergabe im Multi-Run-Dashboard
+- Letzte-Läufe-Row-Liste und `× N`-Zähler
+- Timeline-Tab (Heatmap, Gantt-Balken, Fenster-Wechsel)
+- Run-Detail-Tab-Wechsel (Übersicht · Timeline · Aktionen ·
+  k6-Konsole · Schwellen · Konfiguration · Fehler-Diagnose)
+- Live-Ramp-Grafik (Soll vs Ist)
 - Report in einem neuen Tab, Druck-/PDF-Trigger
 - Sprachwechsel in der Settings-Schublade
 - Unbekannte Report-IDs

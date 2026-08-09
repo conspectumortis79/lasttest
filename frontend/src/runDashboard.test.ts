@@ -6,11 +6,13 @@ import {
   isCancellable,
   isInFlight,
   isTerminalRun,
+  mergeTimelineMenuRuns,
   pickActiveRunId,
   pickActiveRunIdAfterStart,
   removeAllOtherFailed,
   removeRun,
   sortRunsByCreatedAt,
+  showsStatusPill,
 } from './runDashboard.ts'
 import type { TestRun } from './k6Report.ts'
 
@@ -106,6 +108,45 @@ test('dashboard row (status pill + compact metric box) hides for STOPPED and ABO
   equal(showsRow('FAILED'), false)
   equal(showsRow('STOPPED'), false)
   equal(showsRow('ABORTED'), false)
+})
+
+test('showsStatusPill hides the RUNNING/QUEUED pill (default gray) and keeps the STOPPING pill', () => {
+  // The pill at the top of `<TestRunSummary>` is rendered through
+  // `<div className="status {status.toLowerCase()}">`. Only
+  // `.status.completed` and `.status.failed` have specific
+  // background colours in `App.css`; everything else falls back
+  // to the default gray `.status { background: #344258 }`. We
+  // suppress the pill for the in-flight states whose CSS
+  // modifier would render in that gray (RUNNING, QUEUED) so the
+  // user does not see a colourless pill next to the colour-coded
+  // `RunStatusView` content below. STOPPING keeps the pill
+  // because the progress cells do not surface the "k6 is winding
+  // down" hint on their own.
+  equal(showsStatusPill('RUNNING'), false)
+  equal(showsStatusPill('QUEUED'), false)
+  equal(showsStatusPill('STOPPING'), true)
+  // Terminal states (including FAILED) are owned by
+  // `RunStatusView`; the local pill would only duplicate the
+  // colour-coded terminal pill, so it is hidden for every
+  // terminal status (including STOPPED / ABORTED, not just the
+  // natural end states). This matches the inline
+  // `!isTerminalRun(run.status) && …` predicate the JSX used
+  // before this helper was extracted.
+  equal(showsStatusPill('FAILED'), false)
+  equal(showsStatusPill('COMPLETED'), false)
+  equal(showsStatusPill('STOPPED'), false)
+  equal(showsStatusPill('ABORTED'), false)
+  // Forward-compat: an unknown status is treated as in-flight
+  // (matches `isTerminalRun`'s default) and therefore keeps the
+  // pill visible. This mirrors the previous inline
+  // `!isTerminalRun(run.status) && …` predicate: a future
+  // status that the backend introduces before the frontend
+  // catches up would have rendered the gray box before this
+  // change, and still does so now. Once the new status is
+  // mapped, the team can either extend the blacklist here or
+  // give it a dedicated `.status.<new>` colour modifier in
+  // `App.css`.
+  equal(showsStatusPill('NEW_STATE_FROM_FUTURE_BACKEND'), true)
 })
 
 test('pickActiveRunId keeps the current focus while it is still in the map', () => {
@@ -348,4 +389,58 @@ test('cancellableRunIds does not mutate the input map', () => {
   const before = JSON.stringify(runs)
   cancellableRunIds(runs)
   equal(JSON.stringify(runs), before)
+})
+
+// ---- mergeTimelineMenuRuns -----------------------------------------------
+//
+// Regression guard for the bug where right-clicking a historical
+// run in the per-endpoint Timeline tab never opened the context
+// menu. Root cause: the dashboard's in-session `runs` map is
+// never hydrated from the backend on app start, so historical
+// runs (only fetched by [EndpointTimelineTab]) were missing
+// from the lookup source. [RunContextMenu]'s defensive
+// `if (!run) { onClose(); return null }` then closed the menu
+// immediately, hiding every action (focus / rerun / share /
+// cleanup). The helper below merges the two sources so the
+// menu can resolve any visible run.
+
+test('mergeTimelineMenuRuns resolves a historical run that only lives in the timeline fetch', () => {
+  // The exact shape that the user reported: dashboard is
+  // empty (cold session, no run started yet), the right-clicked
+  // run only exists in the per-endpoint fetch. The menu must
+  // find it.
+  const historical = makeRun('historical-1', '2026-01-01T00:00:00Z', 'COMPLETED')
+  const merged = mergeTimelineMenuRuns({}, [historical])
+  equal(merged['historical-1']?.id, 'historical-1')
+  equal(merged['historical-1']?.status, 'COMPLETED')
+})
+
+test('mergeTimelineMenuRuns keeps a run that only lives in the dashboard map visible', () => {
+  // Positive companion: a run the user just started must
+  // still resolve through the merged map (no regression on
+  // the existing in-session behaviour).
+  const live = makeRun('live-1', '2026-01-01T00:00:00Z', 'RUNNING')
+  const merged = mergeTimelineMenuRuns({ 'live-1': live }, [])
+  equal(merged['live-1']?.status, 'RUNNING')
+})
+
+test('mergeTimelineMenuRuns returns no entry for an unknown run id', () => {
+  // Negative case: an id neither source knows about must
+  // surface as `undefined` so [RunContextMenu] can decide to
+  // close cleanly (its defensive null-run path) instead of
+  // throwing on a missing field.
+  const merged = mergeTimelineMenuRuns({}, [])
+  equal(merged['does-not-exist'], undefined)
+})
+
+test('mergeTimelineMenuRuns lets the timeline snapshot win on id collisions', () => {
+  // Edge case: the same run id appears on both sides (e.g.
+  // the user re-fetched the timeline while a run is still
+  // in-flight in the dashboard). The timeline snapshot is
+  // the one the user actually right-clicked on, so the menu
+  // must show its data, not the stale dashboard copy.
+  const stale = makeRun('shared', '2026-01-01T00:00:00Z', 'RUNNING')
+  const fresh = makeRun('shared', '2026-01-01T00:00:00Z', 'COMPLETED')
+  const merged = mergeTimelineMenuRuns({ 'shared': stale }, [fresh])
+  equal(merged['shared']?.status, 'COMPLETED')
 })
