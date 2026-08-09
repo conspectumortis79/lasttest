@@ -17,6 +17,56 @@ async function importDemo(page: Page) {
   await expect(page.getByRole('heading', { name: /Lasttest Demo API/ })).toBeVisible()
 }
 
+/**
+ * Race-free helper for importing a typed spec via the file-upload
+ * input. The previous version of these tests relied on
+ * `not.toHaveValue('')` to wait for the textarea to receive the
+ * uploaded content, but the assertion passes immediately while the
+ * demo-API toggle effect is still mid-flight loading the bundled
+ * demo spec into the textarea — the test then clicks
+ * "Validieren & importieren" before React's `setSpecification`
+ * actually runs with the uploaded file, and the import ends up
+ * using the demo spec (visible in the failing-trace screenshots
+ * as "Lasttest Demo API" instead of the typed title).
+ *
+ * The fix is two-pronged:
+ *   1. Reset the textarea to a known empty state with
+ *      [Locator.fill]. On a controlled React input this fires the
+ *      `onChange` and synchronously commits an empty string into
+ *      the component state, which gives the subsequent
+ *      `setInputFiles` + `await file.text()` a clean starting
+ *      point — no demo-spec content to "win" the race against.
+ *   2. Wait for the typed spec's distinguishing text to actually
+ *      appear in the textarea. The previous comment claimed this
+ *      was happening; the assertion just did not enforce it.
+ *      [Locator.toContainText] retries until the substring shows
+ *      up, so the test can no longer click import against stale
+ *      content.
+ *
+ * The `expectedTitle` argument is both the substring we look for
+ * in the textarea and the heading we expect once the import has
+ * committed. Passing a [RegExp] works for both: the regex
+ * matches a substring of the textarea content and Playwright
+ * also evaluates the regex against the heading text.
+ */
+async function importTypedSpec(
+  page: Page,
+  spec: string,
+  fileName: string,
+  expectedTitle: string | RegExp,
+): Promise<void> {
+  const textarea = page.getByLabel('Swagger / OpenAPI-Dokumentation')
+  await textarea.fill('')
+  await page.locator('input[type="file"]').setInputFiles({
+    name: fileName,
+    mimeType: 'application/yaml',
+    buffer: Buffer.from(spec),
+  })
+  await expect(textarea).toContainText(expectedTitle)
+  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+  await expect(page.getByRole('heading', { name: expectedTitle })).toBeVisible()
+}
+
 async function expandOperation(page: Page, opId: string) {
   const card = page.locator('.operation-card', { has: page.getByLabel(`Operation ${opId}`) })
   const toggle = card.locator('button.expand-toggle')
@@ -245,19 +295,7 @@ paths:
         '200': {description: OK}
 `
 
-  await page.locator('input[type="file"]').setInputFiles({
-    name: 'multi.yaml',
-    mimeType: 'application/yaml',
-    buffer: Buffer.from(multiServerSpec),
-  })
-
-  // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
-  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-  await expect(page.getByRole('heading', { name: 'Multi Server' })).toBeVisible()
+  await importTypedSpec(page, multiServerSpec, 'multi.yaml', 'Multi Server')
 
   const selector = page.getByLabel('Server auswählen')
   await expect(selector).toBeVisible()
@@ -287,19 +325,7 @@ paths:
         '200': {description: OK}
 `
 
-  await page.locator('input[type="file"]').setInputFiles({
-    name: 'single.yaml',
-    mimeType: 'application/yaml',
-    buffer: Buffer.from(singleServerSpec),
-  })
-
-  // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
-  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-  await expect(page.getByRole('heading', { name: 'Single Server' })).toBeVisible()
+  await importTypedSpec(page, singleServerSpec, 'single.yaml', 'Single Server')
 
   await expect(page.getByLabel('Server auswählen')).toHaveCount(0)
   await expect(page.getByLabel('Base-URL')).toHaveValue('http://localhost:8286/api')
@@ -863,19 +889,7 @@ paths:
         '200': {description: OK}
 `
 
-  await page.locator('input[type="file"]').setInputFiles({
-    name: 'typed.yaml',
-    mimeType: 'application/yaml',
-    buffer: Buffer.from(typedSpec),
-  })
-
-  // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
-  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-  await expect(page.getByRole('heading', { name: /Typed API/ })).toBeVisible()
+  await importTypedSpec(page, typedSpec, 'typed.yaml', /Typed API/)
   const card = page.locator('.operation-card').first()
   await expect(card).toBeVisible()
   const toggle = card.locator('button.expand-toggle')
@@ -986,20 +1000,7 @@ paths:
         '200': {description: OK}
 `
 
-  await page.locator('input[type="file"]').setInputFiles({
-    name: 'typed.yaml',
-    mimeType: 'application/yaml',
-    buffer: Buffer.from(typedSpec),
-  })
-
-  // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
-  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-  await expect(page.getByRole('heading', { name: /Typed API/ })).toBeVisible()
-  await expect(page.locator('.operation-card')).toHaveCount(1)
+  await importTypedSpec(page, typedSpec, 'typed.yaml', /Typed API/)
 
   // Expand the card so the id field becomes visible.
   const card = page.locator('.operation-card').first()
@@ -1062,20 +1063,7 @@ paths:
         '201': {description: Created}
 `
 
-  await page.locator('input[type="file"]').setInputFiles({
-    name: 'body.yaml',
-    mimeType: 'application/yaml',
-    buffer: Buffer.from(typedSpec),
-  })
-
-  // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
-  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-  await expect(page.getByRole('heading', { name: /Body API/ })).toBeVisible()
-  await expect(page.locator('.operation-card')).toHaveCount(1)
+  await importTypedSpec(page, typedSpec, 'body.yaml', /Body API/)
 
   // POST is destructive → is not auto-selected. Select it manually.
   await page.getByLabel('Endpunkt POST /items auswählen').check()
@@ -1806,17 +1794,7 @@ paths:
       responses:
         '200':
           description: OK`
-    await page.locator('input[type="file"]').setInputFiles({
-      name: 'cookie.yaml', mimeType: 'application/yaml', buffer: Buffer.from(cookieSpec),
-    })
-
-  // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
-    await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-    await expect(page.getByRole('heading', { name: 'Cookie-Param API' })).toBeVisible()
+    await importTypedSpec(page, cookieSpec, 'cookie.yaml', 'Cookie-Param API')
     await expandOperation(page, 'getSession')
     await expect(page.getByLabel('getSession · Payload 1: sessionId')).toBeVisible()
   })
@@ -1900,17 +1878,7 @@ paths:
     get: { operationId: dup, responses: { '200': { description: OK } } }
   /b:
     get: { operationId: dup, responses: { '200': { description: OK } } }`
-    await page.locator('input[type="file"]').setInputFiles({
-      name: 'dup.yaml', mimeType: 'application/yaml', buffer: Buffer.from(duplicateSpec),
-    })
-
-  // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
-    await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-    await expect(page.getByRole('heading', { name: 'Duplicate API' })).toBeVisible()
+    await importTypedSpec(page, duplicateSpec, 'dup.yaml', 'Duplicate API')
     await expect(page.locator('.operation-card')).toHaveCount(2)
   })
 
@@ -2183,17 +2151,7 @@ paths:
       responses:
         '201':
           description: Created`
-    await page.locator('input[type="file"]').setInputFiles({
-      name: 'reqf.yaml', mimeType: 'application/yaml', buffer: Buffer.from(spec),
-    })
-
-  // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
-    await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-    await expect(page.getByRole('heading', { name: 'Required Field' })).toBeVisible()
+    await importTypedSpec(page, spec, 'reqf.yaml', 'Required Field')
     await page.getByLabel('Endpunkt POST /items auswählen').check()
     await page.locator('.operation-card', { has: page.getByLabel('Operation createItem') }).locator('button.expand-toggle').click()
     const bodyInput = page.getByLabel('createItem · Payload 1: JSON Request-Body')
@@ -2567,13 +2525,7 @@ paths:
       buffer: Buffer.from(spec),
     })
 
-  // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
-    await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-    await expect(page.getByRole('heading', { name: 'DNS-Demo' })).toBeVisible()
+    await importTypedSpec(page, spec, 'dns-demo.yaml', 'DNS-Demo')
     await page.getByLabel('Virtual Users').fill('1')
     await page.getByLabel('Dauer (Sekunden)').fill('2')
     await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()

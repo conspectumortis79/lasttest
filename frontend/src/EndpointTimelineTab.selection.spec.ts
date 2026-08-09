@@ -496,3 +496,45 @@ test('clicking a past run badge in the timeline list does NOT call onFocusRun', 
     handle.unmount()
   }
 })
+
+test('every past run list item shows the endpoint method+path and the load-profile summary', async () => {
+  // Regression test for the "the timeline list shows almost
+  // nothing useful" complaint: each list item must carry
+  //   - the HTTP method pill (colour-coded, same family as
+  //     the run-grid badges so the two surfaces match),
+  //   - the path,
+  //   - the load-profile summary built by
+  //     `loadProfileSummaryFor` (with profile label, VUs and
+  //     duration, so the user can read off "which profile" at
+  //     a glance).
+  // The test fixtures in [makeRuns] use the timeline-level
+  // `method: 'GET'` / `path: '/things'` (no per-run
+  // operations), so we assert against those values plus the
+  // constant-vus summary string from `loadProfileSummaryFor`.
+  const handle = renderTimeline('run-A', '2026-01-01T10:00:00Z')
+  try {
+    await handle.waitForRuns()
+    const items = handle.queryListItems()
+    equal(items.length, 4)
+    for (const item of items) {
+      const methodEl = item.querySelector('.timeline-list-method')
+      const pathEl = item.querySelector('.timeline-list-path')
+      const profileEl = item.querySelector('.vulist')
+      ok(methodEl, 'expected every list item to render a method pill')
+      equal(methodEl!.textContent, 'GET')
+      ok(methodEl!.classList.contains('method-get'), 'method pill must carry the colour-coded method-get modifier')
+      ok(pathEl, 'expected every list item to render an endpoint path')
+      equal(pathEl!.textContent, '/things')
+      ok(profileEl, 'expected every list item to render the load-profile summary')
+      // The shared helper renders "Constant · 1 VUs · 1 s"
+      // for the fixtures in [makeRuns] (constant-vus, 1 VU,
+      // 1 s duration). We assert the prefix so a future
+      // tweak to the formatter cannot silently drop the
+      // "Constant" label and leave the user with a
+      // direction-less "1 VUs · 1 s".
+      ok(profileEl!.textContent?.startsWith('Constant'), `expected profile summary to start with "Constant", got "${profileEl!.textContent}"`)
+    }
+  } finally {
+    handle.unmount()
+  }
+})

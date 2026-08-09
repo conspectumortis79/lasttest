@@ -13,6 +13,12 @@ import { formatTimestamp } from './k6Report.ts'
 import { formatDayTick, formatHourTick } from './endpointTimelineTicks.ts'
 import { RunContextMenu } from './RunContextMenu.tsx'
 import type { MenuItem } from './runMenuItems.ts'
+// Pure helpers for the "endpoint + profile" line that the
+// timeline list now renders on every past run. Lives in
+// `lastRunsView.ts` so the same formatter drives the run-grid
+// badges above and the timeline list below — one source of
+// truth for "what does a load profile look like in this app".
+import { loadProfileSummaryFor, operationMethodAndPath } from './lastRunsView.ts'
 import { dispatchRunMenuAction, type RunActionHandlers } from './runActionHandlers.ts'
 import { mergeTimelineMenuRuns } from './runDashboard.ts'
 
@@ -500,8 +506,38 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
                 <span className="abs">{formatTimestamp(run.createdAt)} · {run.id.slice(0, 8)}</span>
               </span>
             </div>
+            {/* Endpoint row: method pill + path. Even though the
+                timeline is already filtered by endpoint (via the
+                parent-owned `method` / `path` props), the per-run
+                operation can differ for runs that exercised more
+                than one operation against the same path; we
+                surface the run's *own* operation so the user can
+                tell two near-identical runs apart without opening
+                the run detail. Falls back to the timeline-level
+                `method` / `path` when the run has no configuration
+                attached (legacy fixtures). */}
+            {(() => {
+              const { method: runMethod, path: runPath } = operationMethodAndPath(run)
+              const endpointMethod = runMethod || method
+              const endpointPath = runPath || path
+              return <div className="timeline-list-endpoint">
+                <span className={`timeline-list-method method-${endpointMethod.toLowerCase()}`}>{endpointMethod}</span>
+                <span className="timeline-list-path">{endpointPath}</span>
+              </div>
+            })()}
+            {/* Bottom row: load-profile summary on the left,
+                exit code / error marker on the right. The profile
+                summary uses the same formatter as the run-grid
+                badges above (and the report tab) so a 50-VUs/30-s
+                run reads identically everywhere — the user does
+                not have to learn a second format. The previous
+                `vulist` element (just "X VUs") was a subset of
+                this string, so swapping it out does not lose any
+                information. */}
             <div className="bot">
-              <span className="vulist">{vusLabel(run)}</span>
+              <span className="vulist" title={loadProfileSummaryFor(run.configuration?.loadProfile, language)}>
+                {loadProfileSummaryFor(run.configuration?.loadProfile, language)}
+              </span>
               <span className="rid">{exitOrError(run)}</span>
             </div>
           </div>
@@ -667,13 +703,6 @@ function relativeWhen(iso: string, now: number, language: SupportedLanguage): st
   const days = Math.round(hours / 24)
   if (days === 1) return translate(language, 'when.yesterday')
   return translate(language, 'when.days', { n: days })
-}
-
-function vusLabel(run: TestRun): string {
-  const profile = run.configuration?.loadProfile
-  if (!profile) return run.status === 'RUNNING' ? 'läuft …' : '–'
-  if (profile.virtualUsers != null) return `${profile.virtualUsers} VUs`
-  return '–'
 }
 
 function exitOrError(run: TestRun): string {
