@@ -17,6 +17,7 @@ import de.lasttest.api.TestRunOperationConfiguration
 import de.lasttest.api.TestRunStatus
 import de.lasttest.config.AsyncConfiguration
 import de.lasttest.config.InfluxDbProperties
+import jakarta.annotation.PreDestroy
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
@@ -25,6 +26,7 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
+import java.util.concurrent.ExecutorService
 
 interface TestRunService {
     fun create(request: CreateTestRunRequest): TestRun
@@ -79,8 +81,17 @@ interface TestRunService {
 class LocalK6TestRunService(
     private val importer: SpecificationImporter,
     private val generator: K6ScriptGenerator,
+    /**
+     * Main pool for `execute()` and the cancellation-escalation
+     * tasks. Typed as [ExecutorService] rather than [Executor] so
+     * the graceful-shutdown hook below can poll
+     * [ExecutorService.isTerminated] and wait for in-flight
+     * `execute()` tasks to finish their DB writes before Spring
+     * starts destroying the database connection. See
+     * [shutdownInFlightRuns] for the full lifecycle rationale.
+     */
     @Qualifier(AsyncConfiguration.TEST_RUN_EXECUTOR)
-    private val executor: Executor,
+    private val executor: ExecutorService,
     /**
      * Pool dedicated to the per-run stdout reader task. Kept
      * separate from [executor] so each k6 process only occupies
@@ -91,9 +102,11 @@ class LocalK6TestRunService(
      * k6 processes", not "up to N/2". The two executors are
      * wired by Spring; tests pass a noop (or a separate sync
      * executor) so they can drive the reader deterministically.
+     * Typed as [ExecutorService] so the graceful-shutdown hook
+     * can await the readers too.
      */
     @Qualifier(AsyncConfiguration.K6_READER_EXECUTOR)
-    private val readerExecutor: Executor,
+    private val readerExecutor: ExecutorService,
     @Value("\${lasttest.k6-command:k6}") private val k6Command: String,
     private val influxDbProperties: InfluxDbProperties,
     private val runRepository: TestRunRepository,
@@ -237,6 +250,94 @@ class LocalK6TestRunService(
      * and ABORTED.
      */
     private enum class CancellationMode { GRACEFUL, FORCE }
+
+    /**
+     * Graceful-shutdown hook. Spring runs `@PreDestroy` on this
+     * service before the executor beans themselves are torn down
+     * (the service depends on the executors, so it is destroyed
+     * first). That ordering is what makes the fix work: at the
+     * moment this method runs, the H2 database is still open, so
+     * the `execute()` tasks below can still flush their terminal
+     * state into the `test_run` row.
+     *
+     * Without this hook, Spring tears the executors down first —
+     * k6 is still running, the reader threads are still parsing
+     * its stdout, and `runRepository.save(...)` calls from the
+     * main `execute()` task race the database close. The visible
+     * symptoms in the container log are
+     *   • `Database is already closed` from Hibernate,
+     *   • `RejectedExecutionException` from
+     *     [ThreadPoolExecutor] when new tasks arrive on an
+     *     already-shutting-down pool.
+     * Both end up as ERROR/WARN lines that look scary and can
+     * hide a real terminal-state write from the user.
+     *
+     * The hook:
+     *   1. Walks every live k6 process and routes it through
+     *      [cancel] with `force = false`. `cancel()` sends SIGTERM
+     *      and schedules a SIGKILL escalation after
+     *      [GRACEFUL_STOP_GRACE_MS]; the main `execute()` task is
+     *      blocked in `process.waitFor()`, so destroying the
+     *      process unblocks it and lets the bookkeeping block
+     *      flush the terminal status into the DB.
+     *   2. Polls both executor pools for `isTerminated` with a
+     *      bounded timeout. The bound is generous — 2× the
+     *      graceful-stop grace period plus the reader drain
+     *      window — so a misbehaving k6 escalates to SIGKILL
+     *      long before we give up. If we time out anyway the JVM
+     *      still exits cleanly: Spring continues destroying beans,
+     *      the executor's own `destroyMethod` runs, and any
+     *      leftover tasks see the closed database. We would
+     *      rather lose a terminal-state write than block the
+     *      container from stopping.
+     *
+     * Idempotent — calling it twice is a no-op. The
+     * `processes` map shrinks as `execute()` removes its own
+     * entry in the `finally` block, so the snapshot taken at the
+     * top of the loop may already exclude runs that finished
+     * between cancellation and the wait.
+     */
+    @PreDestroy
+    fun shutdownInFlightRuns() {
+        if (processes.isEmpty()) return
+        // Snapshot before cancelling — cancel() mutates the run
+        // map but leaves the process registry alone until
+        // execute()'s finally block runs. Iterating over a copy
+        // avoids a ConcurrentModificationException if a reader
+        // task ends between snapshot and signal.
+        val liveProcessIds = processes.keys.toList()
+        for (id in liveProcessIds) {
+            try {
+                cancel(id, force = false)
+            } catch (exception: Exception) {
+                // Never let one bad run's shutdown prevent the
+                // others from being cancelled. The shutdown log
+                // is noisy enough already.
+            }
+        }
+        // Tell the executors to stop accepting new tasks (which
+        // is what [cancel] scheduled for the SIGKILL
+        // escalation) and then wait for the in-flight tasks to
+        // drain. Without the `shutdown()` call, `isTerminated`
+        // would never flip to true on a real [ThreadPoolExecutor]
+        // — the drain loop would block until the timeout cap
+        // instead of returning as soon as the bookkeeping is
+        // done.
+        executor.shutdown()
+        readerExecutor.shutdown()
+        val deadline = System.currentTimeMillis() + SHUTDOWN_DRAIN_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            val mainDone = executor.isTerminated
+            val readerDone = readerExecutor.isTerminated
+            if (mainDone && readerDone) return
+            try {
+                Thread.sleep(50)
+            } catch (exception: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
+            }
+        }
+    }
 
     override fun cancel(
         id: String,
@@ -823,5 +924,16 @@ class LocalK6TestRunService(
          * in STOPPING for long.
          */
         const val GRACEFUL_STOP_GRACE_MS: Long = 3_000
+
+        /**
+         * Upper bound for the [shutdownInFlightRuns] drain loop.
+         * Sized as 2× the graceful-stop grace window plus a
+         * reader-drain buffer so the SIGKILL escalation in
+         * [cancel] has fired and the `execute()` bookkeeping has
+         * had time to commit before we time out. If we ever hit
+         * the cap the JVM still exits — we would rather lose a
+         * terminal-state write than block the container stop.
+         */
+        const val SHUTDOWN_DRAIN_TIMEOUT_MS: Long = 2 * GRACEFUL_STOP_GRACE_MS + 1_000
     }
 }

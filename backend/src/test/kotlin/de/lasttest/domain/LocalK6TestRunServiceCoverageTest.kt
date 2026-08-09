@@ -13,7 +13,7 @@ import de.lasttest.api.TestRun
 import de.lasttest.api.TestRunStatus
 import de.lasttest.config.InfluxDbProperties
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executor
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -89,8 +89,8 @@ class LocalK6TestRunServiceCoverageTest {
         )
 
     private fun service(
-        executor: Executor = Executor { },
-        readerExecutor: Executor = executor,
+        executor: ExecutorService = NoopExecutorService(),
+        readerExecutor: ExecutorService = executor,
     ): LocalK6TestRunService =
         LocalK6TestRunService(
             importer =
@@ -576,7 +576,7 @@ class LocalK6TestRunServiceCoverageTest {
             java.util.concurrent.atomic
                 .AtomicReference<String?>(null)
         val capturingExecutor =
-            Executor { task ->
+            CapturingExecutorService { task ->
                 val t =
                     Thread({
                         try {
@@ -742,7 +742,7 @@ class LocalK6TestRunServiceCoverageTest {
                     time.sleep(0.1)
                 """.trimIndent(),
             )
-            val syncExecutor = Executor { it.run() }
+            val syncExecutor = SynchronousExecutorService()
             val svc =
                 LocalK6TestRunService(
                     importer =
@@ -826,7 +826,7 @@ class LocalK6TestRunServiceCoverageTest {
         // We use a process that lives just long enough for the
         // lambda to enter the loop and poll, but not so long
         // that it forces the deadline path.
-        val syncExecutor = Executor { it.run() }
+        val syncExecutor = SynchronousExecutorService()
         val svc = service(executor = syncExecutor)
         val run =
             svc.create(
@@ -885,7 +885,7 @@ class LocalK6TestRunServiceCoverageTest {
         // blocked in waitFor(), then waiting for the main
         // lambda to complete.
         val asyncExecutor =
-            Executor { task ->
+            CapturingExecutorService { task ->
                 val t = Thread(task, "force-cancel-main")
                 t.isDaemon = true
                 t.start()
@@ -976,10 +976,10 @@ class LocalK6TestRunServiceCoverageTest {
     // between FORCE / GRACEFUL / null. We cover all three branches.
     // ------------------------------------------------------------------
 
-    private fun syncExecutor(): Executor = Executor { it.run() }
+    private fun syncExecutor(): ExecutorService = SynchronousExecutorService()
 
     private fun serviceWithFakeK6(
-        executor: Executor = syncExecutor(),
+        executor: ExecutorService = syncExecutor(),
         command: String = "this-command-does-not-exist-${System.nanoTime()}",
     ): LocalK6TestRunService =
         LocalK6TestRunService(
@@ -1257,7 +1257,7 @@ class LocalK6TestRunServiceCoverageTest {
             }
             val captureThread = arrayOf<Thread?>(null)
             val capturingExecutor =
-                Executor { task ->
+                CapturingExecutorService { task ->
                     val t = Thread(task, "execute-capture")
                     captureThread[0] = t
                     t.start()
@@ -1865,7 +1865,7 @@ class LocalK6TestRunServiceCoverageTest {
             require(scriptFile.canExecute()) { "script at $scriptFile is not executable" }
             val threads = java.util.Collections.synchronizedList(mutableListOf<Thread>())
             val asyncExecutor =
-                Executor { task ->
+                CapturingExecutorService { task ->
                     val t = Thread(task, "k6-reader")
                     threads.add(t)
                     t.start()

@@ -924,7 +924,18 @@ function LoadTestApp() {
     onDownloadScript: (runId) => downloadScriptById(runId),
     onExportMetrics: (runId) => downloadSummaryById(runId),
     onRemove: (runId) => handleRemoveRun(runId),
+    // Mirror the early-return guard from [handleRemoveRun]: when
+    // the clicked run is NOT in the dashboard map (typical for the
+    // per-endpoint timeline tab, which renders historical runs that
+    // were persisted to H2 by previous sessions), there is nothing
+    // the parent should drop from its in-memory map. The timeline
+    // tab already hides the other FAILED runs from its own view via
+    // [setHiddenRunIds]; removing dashboard runs we should not touch
+    // would silently wipe the user's current session — see the
+    // regression test in `e2e/context-menu.spec.ts` ("right-click on
+    // a failed run in the timeline list offers …").
     onRemoveAllOtherFailed: (runId) => setRuns(current => {
+      if (current[runId] === undefined) return current
       const next = removeAllOtherFailed(current, runId)
       setActiveRunId(pickActiveRunId(next, activeRunId))
       return next

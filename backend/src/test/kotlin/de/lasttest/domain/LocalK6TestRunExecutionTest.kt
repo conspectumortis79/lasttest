@@ -9,7 +9,6 @@ import de.lasttest.api.TestRunStatus
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
@@ -561,8 +560,8 @@ class LocalK6TestRunExecutionTest {
                         loadProfile: de.lasttest.api.LoadProfile,
                     ): String = "export default function () {}"
                 },
-            executor = Executor(Runnable::run),
-            readerExecutor = Executor(Runnable::run),
+            executor = SynchronousExecutorService(),
+            readerExecutor = SynchronousExecutorService(),
             k6Command = command,
             influxDbProperties = de.lasttest.config.InfluxDbProperties(enabled = false),
             runRepository = repository,

@@ -2,7 +2,7 @@ package de.lasttest.config
 
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import java.util.concurrent.Executor
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 @Configuration
@@ -19,7 +19,7 @@ class AsyncConfiguration {
      * `MAX_PARALLEL_RUNS = 2` parallel runs.
      */
     @Bean(name = [TEST_RUN_EXECUTOR], destroyMethod = "close")
-    fun testRunExecutor(): Executor = Executors.newFixedThreadPool(MAX_PARALLEL_RUNS)
+    fun testRunExecutor(): ExecutorService = Executors.newFixedThreadPool(MAX_PARALLEL_RUNS)
 
     /**
      * Pool for the per-run stdout reader task. A cached pool
@@ -33,7 +33,7 @@ class AsyncConfiguration {
      * limit again.
      */
     @Bean(name = [K6_READER_EXECUTOR], destroyMethod = "shutdown")
-    fun k6ReaderExecutor(): Executor = Executors.newCachedThreadPool()
+    fun k6ReaderExecutor(): ExecutorService = Executors.newCachedThreadPool()
 
     companion object {
         const val MAX_PARALLEL_RUNS = 2

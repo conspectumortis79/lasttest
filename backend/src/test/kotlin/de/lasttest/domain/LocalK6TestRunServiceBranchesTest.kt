@@ -9,7 +9,6 @@ import de.lasttest.api.LoadProfileType
 import de.lasttest.api.OperationConfiguration
 import de.lasttest.api.TestRunStatus
 import de.lasttest.config.InfluxDbProperties
-import java.util.concurrent.Executor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -61,8 +60,8 @@ class LocalK6TestRunServiceBranchesTest {
                         loadProfile: LoadProfile,
                     ): String = "export default function () {}"
                 },
-            executor = Executor { /* noop — wir testen hier nicht execute() */ },
-            readerExecutor = Executor { /* noop — wir testen hier nicht execute() */ },
+            executor = NoopExecutorService(),
+            readerExecutor = NoopExecutorService(),
             k6Command = "k6",
             influxDbProperties = InfluxDbProperties(enabled = influxDbEnabled),
             runRepository = InMemoryTestRunRepository(),

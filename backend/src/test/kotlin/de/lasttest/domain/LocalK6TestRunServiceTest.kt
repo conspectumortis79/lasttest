@@ -14,7 +14,6 @@ import de.lasttest.api.PayloadStrategy
 import de.lasttest.api.TestRun
 import de.lasttest.api.TestRunStatus
 import de.lasttest.config.InfluxDbProperties
-import java.util.concurrent.Executor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -80,8 +79,8 @@ class LocalK6TestRunServiceTest {
         LocalK6TestRunService(
             importer = noopImporter,
             generator = successfulGenerator,
-            executor = Executor { },
-            readerExecutor = Executor { },
+            executor = NoopExecutorService(),
+            readerExecutor = NoopExecutorService(),
             k6Command = "k6",
             influxDbProperties = influxDb,
             runRepository = InMemoryTestRunRepository(),
@@ -355,8 +354,8 @@ class LocalK6TestRunServiceTest {
                         override fun import(content: String): ImportedSpecification = specification
                     },
                 generator = recordingGenerator,
-                executor = Executor { },
-                readerExecutor = Executor { },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
                 k6Command = "k6",
                 influxDbProperties = InfluxDbProperties(enabled = true),
                 runRepository = InMemoryTestRunRepository(),
@@ -393,8 +392,8 @@ class LocalK6TestRunServiceTest {
                         override fun import(content: String): ImportedSpecification = specification
                     },
                 generator = SuccessfulGenerator(),
-                executor = Executor { },
-                readerExecutor = Executor { },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
                 k6Command = "k6",
                 influxDbProperties = InfluxDbProperties(enabled = true),
                 runRepository = InMemoryTestRunRepository(),
@@ -408,8 +407,8 @@ class LocalK6TestRunServiceTest {
                         override fun import(content: String): ImportedSpecification = specification
                     },
                 generator = SuccessfulGenerator(),
-                executor = Executor { },
-                readerExecutor = Executor { },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
                 k6Command = "k6",
                 influxDbProperties = InfluxDbProperties(enabled = false),
                 runRepository = InMemoryTestRunRepository(),
@@ -796,7 +795,7 @@ class LocalK6TestRunServiceTest {
         // `process.isAlive` becomes false. A stub that exits
         // quickly exercises the early-exit branch without waiting
         // the full GRACEFUL_STOP_GRACE_MS.
-        val syncExecutor = Executor { it.run() }
+        val syncExecutor = SynchronousExecutorService()
         val runService =
             LocalK6TestRunService(
                 importer = noopImporter,
@@ -847,7 +846,7 @@ class LocalK6TestRunServiceTest {
         // that path with a stub that traps SIGTERM and ignores it
         // (a real k6 would do the same when the target server hangs
         // up the socket and k6 is stuck mid-iteration).
-        val syncExecutor = Executor { it.run() }
+        val syncExecutor = SynchronousExecutorService()
         val runService =
             LocalK6TestRunService(
                 importer = noopImporter,
@@ -966,8 +965,8 @@ class LocalK6TestRunServiceTest {
             LocalK6TestRunService(
                 importer = noopImporter,
                 generator = successfulGenerator,
-                executor = Executor { },
-                readerExecutor = Executor { },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
                 k6Command = "k6",
                 influxDbProperties = influxDb,
                 runRepository = repository,
@@ -1010,8 +1009,8 @@ class LocalK6TestRunServiceTest {
             LocalK6TestRunService(
                 importer = noopImporter,
                 generator = successfulGenerator,
-                executor = Executor { },
-                readerExecutor = Executor { },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
                 k6Command = "k6",
                 influxDbProperties = influxDb,
                 runRepository = repository,
@@ -1052,8 +1051,8 @@ class LocalK6TestRunServiceTest {
             LocalK6TestRunService(
                 importer = noopImporter,
                 generator = successfulGenerator,
-                executor = Executor { },
-                readerExecutor = Executor { },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
                 k6Command = "k6",
                 influxDbProperties = influxDb,
                 runRepository = repository,
@@ -1077,8 +1076,8 @@ class LocalK6TestRunServiceTest {
             LocalK6TestRunService(
                 importer = noopImporter,
                 generator = successfulGenerator,
-                executor = Executor { },
-                readerExecutor = Executor { },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
                 k6Command = "k6",
                 influxDbProperties = influxDb,
                 runRepository = repository,
@@ -1109,8 +1108,8 @@ class LocalK6TestRunServiceTest {
             LocalK6TestRunService(
                 importer = noopImporter,
                 generator = successfulGenerator,
-                executor = Executor { },
-                readerExecutor = Executor { },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
                 k6Command = "k6",
                 influxDbProperties = influxDb,
                 runRepository = repository,
@@ -1131,8 +1130,8 @@ class LocalK6TestRunServiceTest {
             LocalK6TestRunService(
                 importer = noopImporter,
                 generator = successfulGenerator,
-                executor = Executor { },
-                readerExecutor = Executor { },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
                 k6Command = "k6",
                 influxDbProperties = influxDb,
                 runRepository = repository,
@@ -1169,8 +1168,8 @@ class LocalK6TestRunServiceTest {
             LocalK6TestRunService(
                 importer = noopImporter,
                 generator = successfulGenerator,
-                executor = Executor { },
-                readerExecutor = Executor { },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
                 k6Command = "k6",
                 influxDbProperties = influxDb,
                 runRepository = repository,
@@ -1184,5 +1183,230 @@ class LocalK6TestRunServiceTest {
         // is missing. Only the script regeneration path needs
         // the preserved request.
         assertNotNull(serviceAfterRestart.find("synthetic"))
+    }
+
+    // ---- shutdownInFlightRuns() --------------------------------------
+    //
+    // The @PreDestroy hook exists to close the shutdown race the
+    // user hit when the container received SIGTERM while k6 runs
+    // were still in flight. Spring tears bean dependencies down
+    // in reverse order; without the hook, the executor beans
+    // closed first and the still-running reader / execute()
+    // tasks raced the H2 connection close, producing
+    // "Database is already closed" and "RejectedExecutionException"
+    // noise in the container log.
+    //
+    // The hook must:
+    //   • send SIGTERM to every live k6 process (and let the
+    //     existing cancel() escalation handle the SIGKILL after
+    //     [GRACEFUL_STOP_GRACE_MS]),
+    //   • drain the executor pools within the bounded window,
+    //   • be a no-op when there are no live processes — a fresh
+    //     JVM with nothing to do must not block on shutdown.
+
+    @Test
+    fun `shutdownInFlightRuns is a no-op when no k6 processes are registered`() {
+        // A fresh service has an empty `processes` map — the hook
+        // should return promptly without scheduling any
+        // cancellation tasks on the executors.
+        val executor = SynchronousExecutorService()
+        val readerExecutor = SynchronousExecutorService()
+        val runService =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = executor,
+                readerExecutor = readerExecutor,
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = InMemoryTestRunRepository(),
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        val deadline = System.currentTimeMillis() + 1_000
+        runService.shutdownInFlightRuns()
+        assertTrue(System.currentTimeMillis() < deadline, "shutdownInFlightRuns must return immediately when there are no live processes")
+        // No task should have been submitted to the escalation
+        // pool — the synchronous executor would have run any
+        // submitted task before returning.
+        assertFalse(executor.isShutdown, "noop shutdown must not touch the executors")
+    }
+
+    @Test
+    fun `shutdownInFlightRuns cancels every live k6 process and waits for the executor to drain`() {
+        // Register two live k6 process stubs. The hook must
+        // route each through cancel(), which sends SIGTERM (the
+        // SIGKILL escalation runs on the testRunExecutor and is
+        // what gives the main execute() task a chance to flush
+        // its terminal status to the DB).
+        //
+        // We use a *real* async pool for the testRunExecutor —
+        // cancel() schedules its SIGKILL escalation on the pool,
+        // and a synchronous executor would force cancel() to
+        // block for [GRACEFUL_STOP_GRACE_MS] waiting for the
+        // escalation. Production wiring uses
+        // [Executors.newFixedThreadPool] which behaves the same
+        // way as the cached pool here.
+        val executor =
+            java.util.concurrent.Executors
+                .newCachedThreadPool()
+        val readerExecutor =
+            java.util.concurrent.Executors
+                .newCachedThreadPool()
+        val runService =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = executor,
+                readerExecutor = readerExecutor,
+                k6Command = "k6",
+                influxDbProperties = influxDb,
+                runRepository = InMemoryTestRunRepository(),
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        val runA =
+            runService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        val runB =
+            runService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("createPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        // Move the runs to RUNNING so cancel() can mark them
+        // STOPPING without an early-out. Register real OS
+        // processes (sleep 10s) so destroy() actually has work
+        // to do and we can verify they get killed.
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(runService) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+        runsMap[runA.id] = runService.find(runA.id)!!.copy(status = TestRunStatus.RUNNING)
+        runsMap[runB.id] = runService.find(runB.id)!!.copy(status = TestRunStatus.RUNNING)
+        val stubA = ProcessBuilder("sleep", "10").start()
+        val stubB = ProcessBuilder("sleep", "10").start()
+        runService.processes[runA.id] = stubA
+        runService.processes[runB.id] = stubB
+        try {
+            runService.shutdownInFlightRuns()
+            // Both runs must no longer be RUNNING. cancel() sets
+            // the status to STOPPING; the execute() task — which
+            // create() scheduled on our cached pool — may then
+            // observe the cancellation and flip the status to
+            // STOPPED. Either is acceptable: what matters is
+            // that the hook actually drove the run to a
+            // cancellation terminal state.
+            val statusA = runService.find(runA.id)?.status
+            val statusB = runService.find(runB.id)?.status
+            assertTrue(
+                statusA == TestRunStatus.STOPPING || statusA == TestRunStatus.STOPPED,
+                "runA must be STOPPING or STOPPED after shutdownInFlightRuns(), was $statusA",
+            )
+            assertTrue(
+                statusB == TestRunStatus.STOPPING || statusB == TestRunStatus.STOPPED,
+                "runB must be STOPPING or STOPPED after shutdownInFlightRuns(), was $statusB",
+            )
+            // Both stub processes must be dead — cancel() sent
+            // SIGTERM via destroy() and the escalation sent
+            // SIGKILL after the grace period. The poll loop
+            // below absorbs the OS reaping latency.
+            val reapDeadline = System.currentTimeMillis() + 5_000
+            while ((stubA.isAlive || stubB.isAlive) && System.currentTimeMillis() < reapDeadline) {
+                Thread.sleep(20)
+            }
+            assertFalse(stubA.isAlive, "stub A should be killed by shutdownInFlightRuns()")
+            assertFalse(stubB.isAlive, "stub B should be killed by shutdownInFlightRuns()")
+        } finally {
+            // Defensive cleanup — the test must not leave a
+            // sleeping process behind on the dev box.
+            if (stubA.isAlive) stubA.destroyForcibly()
+            if (stubB.isAlive) stubB.destroyForcibly()
+            runService.processes.remove(runA.id)
+            runService.processes.remove(runB.id)
+            executor.shutdown()
+            executor.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS)
+            readerExecutor.shutdown()
+            readerExecutor.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS)
+        }
+    }
+
+    @Test
+    fun `shutdownInFlightRuns gives up after the drain timeout without hanging the JVM`() {
+        // A real pool whose worker is blocked (e.g. on a stuck
+        // waitFor()) must not stop the JVM. The hook must
+        // observe the timeout and return — Spring then proceeds
+        // with bean destruction, the executor's own
+        // destroyMethod fires, and any remaining task fails its
+        // DB write. The point of the hook is to *flush the
+        // common case*, not to make every pathological case
+        // recoverable.
+        val realPool =
+            java.util.concurrent.Executors
+                .newSingleThreadExecutor()
+        // Submit a blocking task that we never let complete.
+        val blocker = java.util.concurrent.CountDownLatch(1)
+        realPool.execute { blocker.await() }
+        try {
+            val runService =
+                LocalK6TestRunService(
+                    importer = noopImporter,
+                    generator = successfulGenerator,
+                    executor = realPool,
+                    readerExecutor = NoopExecutorService(),
+                    k6Command = "k6",
+                    influxDbProperties = influxDb,
+                    runRepository = InMemoryTestRunRepository(),
+                    statisticsRepository = InMemoryOperationStatisticsRepository(),
+                    timeSeriesWriter = InMemoryTimeSeriesWriter(),
+                )
+            val stub = ProcessBuilder("sleep", "10").start()
+            val run =
+                runService.create(
+                    CreateTestRunRequest(
+                        specification = "openapi document",
+                        baseUrl = "https://target.test",
+                        operationIds = setOf("getPet"),
+                        loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                    ),
+                )
+            val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+            runsField.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val runsMap = runsField.get(runService) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+            runsMap[run.id] = runService.find(run.id)!!.copy(status = TestRunStatus.RUNNING)
+            runService.processes[run.id] = stub
+            try {
+                val start = System.currentTimeMillis()
+                runService.shutdownInFlightRuns()
+                val elapsed = System.currentTimeMillis() - start
+                // The drain cap is
+                // 2 × GRACEFUL_STOP_GRACE_MS + 1_000 = 7 s. Allow
+                // some slack for thread scheduling; we just want
+                // to see that we did NOT block forever.
+                assertTrue(elapsed < 10_000, "shutdownInFlightRuns must honour the drain timeout (took $elapsed ms)")
+                assertEquals(TestRunStatus.STOPPING, runService.find(run.id)?.status)
+            } finally {
+                if (stub.isAlive) stub.destroyForcibly()
+                runService.processes.remove(run.id)
+                // Let the blocker through so the pool can drain
+                // when the test tears down.
+                blocker.countDown()
+                realPool.shutdown()
+                realPool.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS)
+            }
+        } finally {
+            blocker.countDown()
+            realPool.shutdownNow()
+        }
     }
 }

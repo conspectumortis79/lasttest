@@ -368,3 +368,177 @@ test('right-click on a completed badge offers "k6-Skript herunterladen" which do
     if (runId) await forceAbortRun(runId)
   }
 })
+
+test('right-click on a run in the timeline list offers "Aus Ansicht entfernen" and it removes the run from the timeline view', async ({ page }) => {
+  // Regression test for the user-reported bug: the right-click
+  // menu on a timeline list item must hide the run from the
+  // timeline when the user picks "Aus Ansicht entfernen". The
+  // dashboard map may or may not contain the run depending on
+  // whether it was started in the current session — the local
+  // timeline view must react regardless. We drive a run to
+  // COMPLETED so it lands both in the in-memory dashboard map
+  // AND in the persisted /api/operations/runs timeline, then
+  // open the Timeline tab and right-click the run inside the
+  // timeline list.
+  await importDemo(page)
+  await page.getByLabel('Virtual Users').fill('1')
+  await page.getByLabel('Dauer (Sekunden)').fill('3')
+  await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+
+  let runId = ''
+  try {
+    const badge = page.locator('.run-badge').first()
+    await expect(badge).toBeVisible({ timeout: 10_000 })
+    await expect(badge).toContainText('COMPLETED', { timeout: 30_000 })
+    runId = await runIdFromBadge(page)
+
+    // Switch to the Timeline tab. The run must appear in the
+    // timeline list — it's persisted to H2 by create() so it is
+    // visible in /api/operations/runs.
+    await page.getByRole('tab', { name: /Timeline/ }).click()
+    await expect(page.locator('.timeline-tab')).toBeVisible()
+
+    const timelineListItem = page.locator(`.timeline-tab-list-item[data-run-id="${runId}"]`)
+    await expect(timelineListItem).toBeVisible({ timeout: 5_000 })
+
+    // Right-click and pick the cleanup entry. The menu must
+    // open and the entry must be enabled (the run is COMPLETED
+    // and not in-flight).
+    await timelineListItem.click({ button: 'right' })
+    const menu = page.locator('.run-context-menu')
+    await expect(menu).toBeVisible()
+    const removeItem = menu.getByRole('menuitem', { name: 'Aus Ansicht entfernen' })
+    await expect(removeItem).toBeVisible()
+    await expect(removeItem).toBeEnabled()
+    await removeItem.click()
+
+    // The run must disappear from the timeline list. We match
+    // on data-run-id so we don't accidentally match the Gantt
+    // bar or any sibling surface that may still be present.
+    await expect(timelineListItem).toHaveCount(0, { timeout: 5_000 })
+  } finally {
+    if (runId) await forceAbortRun(runId)
+  }
+})
+
+test('right-click on a failed run in the timeline list offers "Alle anderen fehlgeschlagenen Läufe entfernen" and it hides the other FAILED runs', async ({ page }) => {
+  // Companion to the previous test: the bulk-remove entry on a
+  // FAILED timeline list item must drop every other FAILED run
+  // from the timeline. The pre-toggle test seeded FAILED runs
+  // via an unreachable base URL — same trick here.
+  //
+  // Regression for the user-reported bug: a historical FAILED
+  // run (persisted to H2 by a previous session, NOT in the
+  // dashboard map of the current browser session) sits in the
+  // timeline list alongside session-started runs. Right-clicking
+  // it and picking "Alle anderen fehlgeschlagenen Läufe entfernen"
+  // must hide the other FAILED runs from the timeline view AND
+  // leave the dashboard map intact. The pre-fix code called
+  // [removeAllOtherFailed] against the dashboard map with a
+  // keepRunId that was not in the map; the predicate
+  // `status === 'FAILED' && id !== keepRunId` matched every
+  // session run, so the user's dashboard was wiped on every
+  // historical-bulk-remove click.
+  const unreachableSpec = `openapi: 3.0.3
+info:
+  title: Timeline Bulk Probe
+  version: "1"
+servers:
+  - url: http://127.0.0.1:1
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '200': {description: OK}
+`
+  const api = await playwrightRequest.newContext({ baseURL: 'http://localhost:8286' })
+  const historicalRunIds: string[] = []
+  const sessionRunIds: string[] = []
+  try {
+    // 1) Start the historical FAILED run. It lives only in H2
+    //    after the page reload below.
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'probe-timeline-bulk-1.yaml',
+      mimeType: 'application/yaml',
+      buffer: Buffer.from(unreachableSpec),
+    })
+    await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+    await expect(page.getByRole('heading', { name: 'Timeline Bulk Probe' })).toBeVisible()
+    await page.getByLabel('Virtual Users').fill('1')
+    await page.getByLabel('Dauer (Sekunden)').fill('3')
+    await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+    const historicalBadge = page.locator('.run-badge').first()
+    await expect(historicalBadge).toBeVisible({ timeout: 10_000 })
+    await expect(historicalBadge).toContainText('FAILED', { timeout: 30_000 })
+    historicalRunIds.push(await runIdFromBadge(page))
+
+    // 2) Hard reload so the historical run is loaded ONLY from
+    //    H2 (via /api/operations/runs into the timeline tab),
+    //    not from the in-memory dashboard map. This is the
+    //    exact state the user sees when they open the timeline
+    //    after a fresh browser session.
+    await page.reload()
+
+    // 3) Re-import the spec so the dashboard is fresh, then
+    //    start a session FAILED run. This is the only run the
+    //    dashboard map knows about for the rest of the test.
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'probe-timeline-bulk-2.yaml',
+      mimeType: 'application/yaml',
+      buffer: Buffer.from(unreachableSpec),
+    })
+    await page.getByRole('button', { name: 'Validieren & importieren' }).click()
+    await expect(page.getByRole('heading', { name: 'Timeline Bulk Probe' })).toBeVisible()
+    await page.getByLabel('Virtual Users').fill('1')
+    await page.getByLabel('Dauer (Sekunden)').fill('3')
+    await page.getByRole('button', { name: 'k6-Lasttest starten' }).click()
+    const sessionBadge = page.locator('.run-badge').first()
+    await expect(sessionBadge).toBeVisible({ timeout: 10_000 })
+    await expect(sessionBadge).toContainText('FAILED', { timeout: 30_000 })
+    sessionRunIds.push(await runIdFromBadge(page))
+
+    // 4) Switch to the Timeline tab. Both runs must appear
+    //    (historical from H2, session from H2 + dashboard).
+    await page.getByRole('tab', { name: /Timeline/ }).click()
+    await expect(page.locator('.timeline-tab')).toBeVisible()
+    const historicalTimelineItem = page.locator(`.timeline-tab-list-item[data-run-id="${historicalRunIds[0]}"]`)
+    await expect(historicalTimelineItem).toBeVisible({ timeout: 5_000 })
+    const sessionTimelineItem = page.locator(`.timeline-tab-list-item[data-run-id="${sessionRunIds[0]}"]`)
+    await expect(sessionTimelineItem).toBeVisible({ timeout: 5_000 })
+
+    // 5) Right-click the HISTORICAL run (the one not in the
+    //    dashboard map) and pick the bulk entry. The entry
+    //    must be enabled because the session run is also
+    //    FAILED and visible in the same timeline.
+    await historicalTimelineItem.click({ button: 'right' })
+    const menu = page.locator('.run-context-menu')
+    await expect(menu).toBeVisible()
+    const bulkItem = menu.getByRole('menuitem', { name: 'Alle anderen fehlgeschlagenen Läufe entfernen' })
+    await expect(bulkItem).toBeVisible()
+    await expect(bulkItem).toBeEnabled()
+    await bulkItem.click()
+
+    // 6) The session FAILED run must disappear from the
+    //    timeline view (the timeline's local hiddenRunIds
+    //    mechanism handles historical + session alike).
+    await expect(sessionTimelineItem).toHaveCount(0, { timeout: 5_000 })
+    // The historical run (clicked) must STAY in the timeline.
+    await expect(historicalTimelineItem).toHaveCount(1, { timeout: 5_000 })
+
+    // 7) The dashboard map must NOT have been wiped. The
+    //    session run is still owned by the in-memory map (the
+    //    timeline view hid it, the parent did NOT remove it).
+    //    The user must still see the run-grid with the
+    //    session badge, and the right panel must still
+    //    render the session run. This is the regression
+    //    assertion that pinned the bug.
+    await page.getByRole('tab', { name: /Übersicht|Overview/ }).click()
+    const sessionBadgeAfter = page.locator(`.run-badge[title^="${sessionRunIds[0]}"]`)
+    await expect(sessionBadgeAfter).toBeVisible({ timeout: 5_000 })
+  } finally {
+    await api.dispose()
+    for (const id of historicalRunIds) await forceAbortRun(id)
+    for (const id of sessionRunIds) await forceAbortRun(id)
+  }
+})
