@@ -1400,13 +1400,13 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   border-color: #7d63ff;
   box-shadow: 0 0 0 1px #7d63ff, 0 6px 18px -6px #7d63ff66;
 }
-.run-badge.running,
-.run-badge.queued    { border-left-color: #d4a72c; }
-.run-badge.stopping  { border-left-color: #d4a72c; }
-.run-badge.completed { border-left-color: #2d6a4f; }
-.run-badge.stopped   { border-left-color: #5a4293; }
-.run-badge.failed    { border-left-color: #793b4b; }
-.run-badge.aborted   { border-left-color: #793b4b; }
+.run-badge-running,
+.run-badge-queued,
+.run-badge-stopping  { border-left-color: #d4a72c; }
+.run-badge-completed { border-left-color: #2d6a4f; }
+.run-badge-stopped   { border-left-color: #5a4293; }
+.run-badge-failed,
+.run-badge-aborted   { border-left-color: #793b4b; }
 
 .run-badge-method {
   flex-shrink: 0;

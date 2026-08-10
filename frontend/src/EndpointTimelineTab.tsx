@@ -582,20 +582,49 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
       </div>
     ) : null}
     <div className="timeline-tab-list">
-      {windowedRuns
-        .slice()
-        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-        .slice(0, MAX_TIMELINE_BADGES)
-        .map(run => {
+      {(() => {
+        // Pre-compute the id of the run whose `createdAt` is
+        // closest to `centerTs` so the list below can mark
+        // exactly one row, no matter how many runs the user
+        // started in the same second. The pre-fix code used
+        // `Math.abs(listTs - centerTs) < 1000` per item, which
+        // lit up every run inside the focus window at once —
+        // visibly wrong in `dd.png`, where four quick back-to-
+        // back starts all shared the highlight. The
+        // "closest" reduction here matches the Gantt-bar logic
+        // above and keeps the contract that exactly one
+        // timeline row (and one Gantt bar) is highlighted at a
+        // time.
+        const sortedWindowedRuns = windowedRuns
+          .slice()
+          .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        const sortedForFocus = sortedWindowedRuns.slice(0, MAX_TIMELINE_BADGES)
+        let focusedListId: string | null = null
+        if (isFocused) {
+          let bestDelta = Number.POSITIVE_INFINITY
+          for (const run of sortedForFocus) {
+            const ts = Date.parse(run.createdAt)
+            if (!Number.isFinite(ts)) continue
+            const delta = Math.abs(ts - centerTs)
+            if (delta < bestDelta) {
+              bestDelta = delta
+              focusedListId = run.id
+            }
+          }
+        }
+        return sortedForFocus.map(run => {
           // Ein Listeneintrag gilt als „fokussiert", wenn sein
-          // `createdAt` mit dem aktuellen `centerTs` überein­
-          // stimmt. Das matcht das Verhalten des Gantt-Balkens
-          // (siehe `isFocusedRun` weiter oben), damit der
-          // visuell hervorgehobene Eintrag in der Liste immer
-          // derselbe ist, dessen Zeitpunkt im Diagramm zentriert
-          // ist.
+          // `createdAt` dem `centerTs` am nächsten liegt. Das
+          // matcht das Verhalten des Gantt-Balkens (siehe
+          // `isFocusedRun` weiter oben), damit der visuell
+          // hervorgehobene Eintrag in der Liste immer
+          // derselbe ist, dessen Zeitpunkt im Diagramm
+          // zentriert ist. Wir wählen den **engsten** Run statt
+          // alle innerhalb von ± 1000 ms, weil der User mehrere
+          // Lasttests in derselben Sekunde starten kann und
+          // dann alle innerhalb der ± 1000-ms-Toleranz liegen.
           const listTs = Date.parse(run.createdAt)
-          const isListFocused = isFocused && Math.abs(listTs - centerTs) < 1000
+          const isListFocused = isFocused && run.id === focusedListId
           return <div
             key={run.id}
             data-run-id={run.id}
@@ -681,7 +710,8 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
               <span className="rid">{exitOrError(run, language)}</span>
             </div>
           </div>
-        })}
+        })
+      })()}
       {windowedRuns.length === 0 && !loading && (
         <div className="run-tab-empty" style={{ gridColumn: '1 / -1' }}>
           <div className="run-tab-empty-title">{translate(language, 'detail.timeline.empty.title')}</div>

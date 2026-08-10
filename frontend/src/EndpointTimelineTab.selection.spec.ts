@@ -839,3 +839,49 @@ test('timeline list renders all runs when the count is at or below the cap', asy
     }
   }
 })
+
+test('rapidly-started runs in the same millisecond bucket do not all share the highlight', async () => {
+  // Regression for the user-reported bug visible in `dd.png`:
+  // when the user starts several load tests back-to-back in
+  // quick succession, the dashboard forwards a `createdAt`
+  // for each new active run, and the timeline ends up with
+  // every run inside the ± 1000 ms "focused run" window at
+  // once. The ± 1000 ms tolerance was a deliberate choice
+  // so the Gantt bar and the list stay in lockstep across
+  // small float drift, but it was never meant to cover
+  // multiple distinct runs that happen to land in the same
+  // second.
+  //
+  // The test runs four `createTestRun` calls in the same
+  // tick. Their `createdAt` values differ by sub-millisecond
+  // jitter (1.000 s apart) so the timestamps are still
+  // distinguishable to `Date.parse`, but every one of them
+  // is inside the focus window of any of the others. With
+  // the buggy code, all four list items would render the
+  // `is-selected` class at once; the fix narrows the focus
+  // match to the run whose `id` matches the parent-owned
+  // `selectedRunId` so the highlight always points at exactly
+  // one run.
+  const runs: TestRun[] = [
+    { id: 'run-A', status: 'COMPLETED', createdAt: '2026-01-01T20:00:00.000Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+    { id: 'run-B', status: 'COMPLETED', createdAt: '2026-01-01T20:00:00.250Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+    { id: 'run-C', status: 'COMPLETED', createdAt: '2026-01-01T20:00:00.500Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+    { id: 'run-D', status: 'COMPLETED', createdAt: '2026-01-01T20:00:00.750Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+  ]
+  // The parent pushes the most recent run's `createdAt` as
+  // `focusRunCreatedAt` and marks the same run as the
+  // active one in the run-grid.
+  const active = runs[runs.length - 1]!
+  const handle = renderTimeline(active.id, active.createdAt, HANDLERS, runs)
+  try {
+    await handle.waitForRuns()
+    const selected = handle.selectedIds()
+    deepEqual(
+      selected,
+      [active.id],
+      `only the active run must be highlighted, got ${JSON.stringify(selected)}`,
+    )
+  } finally {
+    handle.unmount()
+  }
+})

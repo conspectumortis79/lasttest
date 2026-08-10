@@ -9,7 +9,7 @@ export default defineConfig({
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:8286',
+    baseURL: 'http://localhost:5173',
     storageState: storageStatePath,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
@@ -26,7 +26,7 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://localhost:8286',
+        baseURL: 'http://localhost:5173',
         storageState: storageStatePath,
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
@@ -36,7 +36,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'docker compose -f ../docker-compose.yml up --build',
-    url: 'http://localhost:8286',
+    url: 'http://localhost:5173',
     reuseExistingServer: true,
     timeout: 180_000,
   },
