@@ -48,6 +48,17 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'drawer.section.demo': 'Demo API',
     'drawer.demo.enabled': 'Enable the bundled demo API',
     'drawer.demo.enabled.hint': 'Spins up the in-process /demo-api/* endpoints so you can drive load against a real, full-fidelity REST API without a separate backend. No auto-detection: the demo stays off until you flip this switch. Your choice is remembered across restarts.',
+    // Persistence toggle for the timeline. When OFF, the run
+    // is still executed and the live view keeps working, but
+    // the row never lands in the per-endpoint timeline and
+    // is dropped on the next container restart. When ON,
+    // runs are persisted, the per-endpoint timeline shows
+    // them, and the 40-row retention cap is enforced. The
+    // default is OFF so a fresh install does not silently
+    // grow the timeline just because the user clicked the
+    // "Start test" button.
+    'drawer.persistence.saveExecutions': 'Save executed test configurations',
+    'drawer.persistence.saveExecutions.hint': 'When enabled, every executed load test is stored with its configuration and shown in the timeline. The timeline keeps at most 40 runs per endpoint; older runs are dropped automatically. When disabled, the run is still executed and the live view works, but it is not saved and disappears when the container restarts.',
     'notification.completed.title': 'k6 run completed',
     'notification.completed.body': 'Run {id} finished successfully.',
     'notification.failed.title': 'k6 run finished with a failure',
@@ -963,6 +974,18 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'drawer.notifications.permission.denied': 'Benachrichtigungen sind im Browser blockiert. Aktiviere sie in den Website-Einstellungen, um diese Funktion zu nutzen.',
     'drawer.section.demo': 'Demo-API',
     'drawer.demo.enabled': 'Mitgelieferte Demo-API aktivieren',
+    // Speicher-Schalter für die Timeline. Bei AUS wird der
+    // Run weiterhin ausgeführt und die Live-Ansicht
+    // funktioniert, aber er landet nicht in der
+    // Endpunkt-Timeline und ist nach dem nächsten
+    // Container-Neustart weg. Bei AN werden Runs
+    // persistiert, in der Timeline angezeigt und das
+    // 40-Zeilen-Limit pro Endpunkt greift. Standard
+    // ist AUS, damit eine frische Installation nicht
+    // still die Timeline füllt, nur weil der Nutzer
+    // "Test starten" geklickt hat.
+    'drawer.persistence.saveExecutions': 'Ausgeführte Lasttestkonfigurationen speichern',
+    'drawer.persistence.saveExecutions.hint': 'Wenn aktiv, wird jeder ausgeführte Lasttest samt Konfiguration gespeichert und in der Timeline angezeigt. Die Timeline behält maximal 40 Läufe pro Endpunkt — ältere werden automatisch entfernt. Wenn deaktiviert, wird der Run trotzdem ausgeführt und die Live-Ansicht funktioniert, aber er wird nicht gespeichert und verschwindet beim Container-Neustart.',
     'drawer.demo.enabled.hint': 'Startet die im Prozess laufenden /demo-api/*-Endpunkte, damit du eine echte, vollständige REST-API mit Last treiben kannst — ohne separates Backend. Keine Auto-Erkennung: die Demo bleibt aus, bis du diesen Schalter umlegst. Deine Auswahl wird über Neustarts hinweg gemerkt.',
     'notification.completed.title': 'k6-Lauf abgeschlossen',
     'notification.completed.body': 'Lauf {id} wurde erfolgreich beendet.',

@@ -42,6 +42,8 @@ import { SettingsDrawer } from './SettingsDrawer.tsx'
 import { DocPopup } from './DocPopup.tsx'
 import { WikiPopup } from './WikiPopup.tsx'
 import { LanguageProvider } from './useLanguage.tsx'
+import { usePersistence } from './persistenceStorage.ts'
+import { PersistenceProvider } from './usePersistence.tsx'
 import { useLanguage } from './languageStorage.ts'
 import { translate, formatters, type SupportedLanguage } from './i18n.ts'
 import { RunStatusView, LiveBanner, AktionenTab, LiveRampChart } from './runStatusView.tsx'
@@ -196,13 +198,15 @@ function App() {
   const demoTrafficParam = params.has('demo-traffic') ? params.get('demo-traffic') ?? undefined : undefined
   return (
     <LanguageProvider>
-      <DemoStatusProvider>
-        {reportRunId
-          ? <TestRunReportPage runId={reportRunId} />
-          : demoTrafficParam !== undefined
-            ? <DemoTrafficPage runId={demoTrafficParam} />
-            : <LoadTestApp />}
-      </DemoStatusProvider>
+      <PersistenceProvider>
+        <DemoStatusProvider>
+          {reportRunId
+            ? <TestRunReportPage runId={reportRunId} />
+            : demoTrafficParam !== undefined
+              ? <DemoTrafficPage runId={demoTrafficParam} />
+              : <LoadTestApp />}
+        </DemoStatusProvider>
+      </PersistenceProvider>
     </LanguageProvider>
   )
 }
@@ -216,6 +220,53 @@ function LoadTestApp() {
   // — not in a deeper component — so the toolbar and drawer share
   // the same language state and stay in sync.
   const { language, setLanguage } = useLanguage()
+  // Timeline-persistence toggle. Forwarded as the `persist`
+  // body field on every `POST /api/test-runs` call so the
+  // backend skips the timeline write when the user has
+  // disabled the setting. The hook lives at the App root so
+  // the Settings drawer (a sibling) and the test-runner
+  // button see the same value without prop-drilling.
+  const { persistRuns } = usePersistence()
+  // One-shot cleanup: when the user has the persistence
+  // toggle OFF at the time the App mounts, wipe the
+  // persisted timeline so a fresh start lands on an empty
+  // dashboard. The intuitive contract is "I disabled
+  // saving — there should be no history"; without this
+  // effect the dashboard would still show the runs that
+  // were saved when the toggle was previously on (or under
+  // the default-true build that shipped before this
+  // feature). The [useRef] guard makes the cleanup run
+  // exactly once per App lifetime so toggling the switch
+  // back on and off does not silently re-trigger the wipe.
+  const cleanupRef = useRef(false)
+  useEffect(() => {
+    if (cleanupRef.current) return
+    if (persistRuns) return
+    cleanupRef.current = true
+    void (async () => {
+      try {
+        const response = await fetch('/api/test-runs', { method: 'DELETE' })
+        if (!response.ok) return
+        // Match the backend's wipe: drop the in-memory
+        // map and clear the active run selection. The
+        // dashboard's first poll re-fetches from an empty
+        // table and renders accordingly.
+        setRuns(clearAllRuns())
+        setActiveRunId(undefined)
+      } catch {
+        // Best-effort: when the backend is unreachable
+        // the polling loop will surface the same
+        // connectivity error on the next tick; no need
+        // to spam the user with a separate toast here.
+      }
+    })()
+    // The effect intentionally fires only on the first
+    // mount with `persistRuns === false`; subsequent
+    // renders must not re-run the cleanup. We depend on
+    // [persistRuns] only so the lint check is happy, the
+    // [cleanupRef] guard short-circuits the body on every
+    // subsequent call.
+  }, [persistRuns])
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Browser-Notification settings. The settings live next to the
   // drawer in App.tsx so the polling effect below can react to
@@ -576,6 +627,14 @@ function LoadTestApp() {
           operationIds: [...selected],
           operationConfigurations,
           loadProfile: serialiseLoadProfile(loadProfile),
+          // The Settings-drawer toggle. When the user has
+          // disabled "Ausgeführte Lasttestkonfigurationen
+          // speichern", the backend skips the timeline
+          // write and the 40-row retention cap, so this
+          // run is dropped on the next container restart.
+          // The live view (polling, single-run endpoints)
+          // keeps working for the duration of the session.
+          persist: persistRuns,
         }),
       })
       const data = await response.json()

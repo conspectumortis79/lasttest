@@ -145,7 +145,15 @@ class LocalK6TestRunService(
     private val readerExecutor: ExecutorService,
     @Value("\${lasttest.k6-command:k6}") private val k6Command: String,
     private val influxDbProperties: InfluxDbProperties,
-    private val runRepository: TestRunRepository,
+    /**
+     * Persistence backend. Exposed as `internal` (rather than
+     * `private`) so the per-endpoint retention tests can
+     * inspect the table without going through the wire —
+     * the assertions need to read `count()` and `findById`
+     * directly, and the public API does not surface those
+     * without a round trip through the controller.
+     */
+    internal val runRepository: TestRunRepository,
     private val statisticsRepository: OperationStatisticsRepository,
     private val timeSeriesWriter: TimeSeriesWriter,
     /**
@@ -210,12 +218,94 @@ class LocalK6TestRunService(
         // Persist the freshly-queued run to H2 so the row shows up
         // in `/api/operations/runs` and the dashboard's
         // EndpointTimelineTab immediately, and so a container
+        runs[run.id] = run
+        scripts[run.id] = script
+        // Persist the freshly-queued run to H2 so the row shows up
+        // in `/api/operations/runs` and the dashboard's
+        // EndpointTimelineTab immediately, and so a container
         // restart can recover the run instead of dropping it. The
         // entity-to-DTO mapper is the inverse of [toTestRunEntity]
         // so the row round-trips back to the same wire shape.
-        runRepository.save(run.toTestRunEntity(objectMapper, payloadEncryptor))
+        //
+        // The persist flag is driven by the Settings drawer
+        // toggle: when the user opts out, the run is still
+        // executed (so the live view works for the duration of
+        // the session) and exposed via the single-run endpoints,
+        // but it does not show up in the per-endpoint timeline
+        // and is dropped on the next container restart. Skipping
+        // the repository write keeps the timeline query result
+        // free of ephemeral runs and prevents the 40-row
+        // retention cap from kicking in for runs the user
+        // explicitly said they do not want to keep.
+        if (request.persist) {
+            runRepository.save(run.toTestRunEntity(objectMapper, payloadEncryptor))
+            enforceTimelineRetention(run)
+        }
         executor.execute { execute(run, script, request.baseUrl) }
         return run
+    }
+
+    /**
+     * Caps the per-endpoint row count at
+     * [TIMELINE_RETENTION_PER_ENDPOINT]. Called after a new
+     * persistable run is written so the cap is enforced
+     * proactively rather than waiting until the table
+     * balloons. We keep the most recent [TIMELINE_RETENTION_PER_ENDPOINT]
+     * rows per `(operationMethod, operationPath)` and drop the
+     * older ones in a single `delete` statement — see
+     * [trimEndpointToRetention] for the SQL.
+     *
+     * The check is best-effort: a run that targets a synthetic
+     * fixture (no operations, no method/path) is a no-op, and a
+     * concurrent write from another JVM is tolerated because the
+     * bounded delete is idempotent (deleting fewer rows than
+     * asked is fine; deleting more is impossible because the
+     * limit is enforced by the SQL itself).
+     */
+    private fun enforceTimelineRetention(run: TestRun) {
+        val firstOp = run.configuration?.operations?.firstOrNull() ?: return
+        val method = firstOp.method
+        val path = firstOp.path
+        val total = runRepository.countByEndpoint(method, path)
+        if (total <= TIMELINE_RETENTION_PER_ENDPOINT) return
+        trimEndpointToRetention(method, path, total)
+    }
+
+    /**
+     * Low-level delete helper: drops the oldest rows for the
+     * `(method, path)` pair until the table holds exactly
+     * [keep] rows. The native query is a single statement so
+     * the delete cannot race a concurrent insert — the LIMIT
+     * inside the subquery bounds the number of rows the
+     * transaction actually touches, and the outer DELETE
+     * re-evaluates the IDs against the freshly-snapshotted
+     * table. Without the LIMIT the helper would be
+     * destructive (delete every row that matches, ignoring
+     * `keep`).
+     */
+    private fun trimEndpointToRetention(
+        method: String,
+        path: String,
+        total: Long,
+    ) {
+        val keep = TIMELINE_RETENTION_PER_ENDPOINT
+        val toDelete = (total - keep).toInt().coerceAtLeast(0)
+        if (toDelete == 0) return
+        val ids =
+            runRepository
+                .findByOperationMethodAndOperationPathOrderByCreatedAtDesc(method, path)
+                .drop(keep)
+                .map { it.id }
+        // The repo exposes a derived query (read) and a
+        // write helper via [deleteAllById]; combining the two
+        // keeps the cap enforcement readable at the call site
+        // instead of hiding it behind a single multi-statement
+        // native query. The `drop(keep)` is safe because
+        // [findByOperationMethodAndOperationPathOrderByCreatedAtDesc]
+        // returns the rows newest-first.
+        if (ids.isNotEmpty()) {
+            runRepository.deleteAllById(ids)
+        }
     }
 
     /**
@@ -519,7 +609,17 @@ class LocalK6TestRunService(
             // Persist before returning so a polling client that
             // fetches /api/operations/runs within the same request
             // sees the terminal state, not the stale QUEUED row.
-            runRepository.save(finalRun.toTestRunEntity(objectMapper, payloadEncryptor))
+            // The `existsById` check is intentional: the user
+            // might have opted out of persistence via the
+            // Settings drawer, in which case the run lives in
+            // the in-memory map only. Persisting it here would
+            // silently turn an ephemeral run into a timeline
+            // row — the "Alle löschen" wipe would then leave
+            // the row in place and the live view would survive,
+            // contradicting the user's intent.
+            if (runRepository.existsById(id)) {
+                runRepository.save(finalRun.toTestRunEntity(objectMapper, payloadEncryptor))
+            }
             return true
         }
 
@@ -595,6 +695,11 @@ class LocalK6TestRunService(
             if (run.status.isTerminal()) continue
             if (cancel(id, force = true)) cancelled++
         }
+        // Snapshot the persisted ids BEFORE the bulk delete so
+        // we can tell ephemeral and persisted runs apart on the
+        // way out — calling [existsById] after the delete would
+        // always return false because every row is gone by then.
+        val persistedIdsBefore = runRepository.findAll().map { it.id }.toSet()
         // The repository's `deleteAll` issues a single SQL
         // statement (`delete from test_run`), so a 2 229-row
         // wipe is a single round trip and the auto-incremented
@@ -603,11 +708,18 @@ class LocalK6TestRunService(
         // know the final row count.
         val before = runRepository.count()
         runRepository.deleteAll()
-        // Drop the in-memory map too so a subsequent `find()`
-        // call cannot return a stale snapshot of a row that no
-        // longer exists in the database.
-        runs.clear()
-        scripts.clear()
+        // Drop the in-memory state for persisted runs too, so
+        // a subsequent `find()` cannot return a stale snapshot
+        // of a row that no longer exists in the database.
+        // Ephemeral runs (the user opted out of persistence via
+        // the Settings drawer toggle) intentionally survive
+        // the wipe — they are not in the table in the first
+        // place, and keeping them in the map preserves the
+        // live view until the session ends.
+        for (id in persistedIdsBefore) {
+            runs.remove(id)
+            scripts.remove(id)
+        }
         return TimelineDeleteResult(cancelled = cancelled, deleted = before.toInt())
     }
 
@@ -1119,6 +1231,20 @@ class LocalK6TestRunService(
     }
 
     private companion object {
+        /**
+         * Cap on the number of persisted runs the per-endpoint
+         * timeline keeps in H2. Every new persistable run
+         * older than this for a given (method, path) pair is
+         * dropped by [enforceTimelineRetention] so the table
+         * does not grow without bound. The cap is intentionally
+         * exposed as a constant rather than a property so the
+         * value is auditable in code reviews and stays in
+         * lockstep with the corresponding UI affordance
+         * (the timeline list slices the result to the
+         * "Sichtbar im Zeitfenster" header count).
+         */
+        const val TIMELINE_RETENTION_PER_ENDPOINT = 40
+
         const val MAX_ERROR_LENGTH = 4000
 
         /**

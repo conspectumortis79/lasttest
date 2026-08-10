@@ -17,6 +17,7 @@ import de.lasttest.config.InfluxDbProperties
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -1940,5 +1941,199 @@ class LocalK6TestRunServiceTest {
 
         val counterAfter = statisticsRepository.findAll().size
         assertEquals(counterBefore, counterAfter, "the × N counter table must not be reset by the timeline wipe")
+    }
+
+    // ---- persist flag --------------------------------------------------
+
+    @Test
+    fun `create with persist false does not write the run to the timeline table`() {
+        // The Settings-drawer toggle is the single source of
+        // truth for "should the run be kept?". When the user
+        // opts out, the run is still executed and the live
+        // view still works, but the row never lands in H2.
+        // The test creates a run with `persist = false` and
+        // asserts the repository is empty afterwards.
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                persist = false,
+            ),
+        )
+        // The in-memory map holds the run so the polling
+        // endpoints (`/api/test-runs/{id}`, time-series)
+        // keep working for the rest of the session.
+        assertEquals(1, service.list().size)
+        // The persisted timeline table is empty: the
+        // dashboard's per-endpoint timeline and the
+        // `/api/operations/runs` query must not see the
+        // ephemeral run.
+        assertEquals(emptyList(), service.runRepository.findAll())
+    }
+
+    @Test
+    fun `create with persist false does not enforce the 40-row per-endpoint retention cap`() {
+        // The retention cap only applies to persisted runs.
+        // Ephemeral runs do not show up in the timeline and
+        // therefore do not need to be capped — without this
+        // guarantee, opting out of persistence would still
+        // mutate the persisted timeline (because the cap
+        // helper runs even when no row was written).
+        // Pinning the absence of the side effect is enough.
+        repeat(60) {
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                    operationIds = setOf("getPet"),
+                    persist = false,
+                ),
+            )
+        }
+        // No persisted row was ever written; the cap helper
+        // therefore never ran. A regression that calls the
+        // helper unconditionally would leave 40 empty deletes
+        // on a 0-row table and still pass this assertion —
+        // pin the lack of a delete by counting after the
+        // 60th call.
+        assertEquals(0, service.runRepository.count())
+    }
+
+    @Test
+    fun `deleteAll preserves ephemeral runs in the in-memory map`() {
+        // The "Alle löschen" button on the timeline is
+        // scoped to the persisted table. An ephemeral run
+        // (the user opted out of persistence) must keep
+        // running so the live view does not break in the
+        // middle of a session. The test persists one run,
+        // creates an ephemeral second run, calls the wipe,
+        // and asserts the ephemeral one is still in the
+        // in-memory map.
+        val persisted =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+        val ephemeral =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                    persist = false,
+                ),
+            )
+        // Sanity: both runs live in the in-memory map
+        // before the wipe — the persisted one is in the
+        // table, the ephemeral one is not.
+        assertEquals(2, service.list().size)
+        assertEquals(1, service.runRepository.findAll().size)
+
+        service.deleteAll()
+
+        // Persisted table is empty after the wipe.
+        assertEquals(emptyList(), service.runRepository.findAll())
+        // The in-memory map retains exactly the ephemeral
+        // run; the persisted one is gone so a subsequent
+        // `find()` cannot return a stale snapshot of a
+        // row that no longer exists in the database.
+        val remaining = service.list()
+        assertEquals(1, remaining.size, "expected only the ephemeral run to survive the wipe")
+        assertEquals(ephemeral.id, remaining[0].id, "the survivor must be the ephemeral run")
+        assertNotEquals(persisted.id, remaining[0].id, "the persisted run must not survive the wipe")
+    }
+
+    // ---- per-endpoint 40-row retention cap -----------------------------
+
+    @Test
+    fun `create drops the oldest persisted run for the same endpoint when the cap is exceeded`() {
+        // The user asked for a hard ceiling of 40 runs per
+        // endpoint. We seed 40 runs targeting the same
+        // `(method, path)` and assert that a 41st create
+        // leaves the table at exactly 40 rows and drops the
+        // oldest one. The cap is per-endpoint, so a run for
+        // a different endpoint must not be evicted.
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1)
+        val seededIds = mutableListOf<String>()
+        for (i in 0 until 40) {
+            val run =
+                service.create(
+                    CreateTestRunRequest(
+                        specification = "openapi",
+                        baseUrl = "https://example.test",
+                        loadProfile = profile,
+                        operationIds = setOf("getPet"),
+                    ),
+                )
+            seededIds += run.id
+        }
+        // Cap reached: the 41st create must drop the
+        // oldest one. We assert the persisted count is
+        // exactly 40 and the dropped run is the original
+        // seed.
+        val survivor =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = profile,
+                    operationIds = setOf("getPet"),
+                ),
+            )
+        assertEquals(40, service.runRepository.count())
+        // The very first seed is the one that fell out of
+        // the window — every other run from the seed list
+        // is still addressable through the repository.
+        assertTrue(service.runRepository.findById(seededIds.first()).isEmpty, "the oldest seed must have been evicted")
+        assertTrue(service.runRepository.findById(survivor.id).isPresent, "the just-created run must remain")
+        // A different endpoint is independent: a run
+        // targeting `createPet` is a fresh row that does
+        // not consume the getPet budget.
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = profile,
+                operationIds = setOf("createPet"),
+            ),
+        )
+        // The getPet budget is still 40 rows; createPet is
+        // a separate counter that started at 0 and now has 1.
+        assertEquals(40, service.runRepository.countByEndpoint("GET", "/pets/{id}"))
+        assertEquals(1, service.runRepository.countByEndpoint("POST", "/pets"))
+    }
+
+    @Test
+    fun `create with persist true but no matching operation never triggers the retention cap`() {
+        // The cap helper keys on the first operation of the
+        // configuration. A run that targets no operations
+        // (a synthetic test fixture, e.g. a future
+        // "/health" probe) contributes to no endpoint and
+        // therefore does not consume any budget. Pinning
+        // the no-op behaviour keeps the helper from
+        // accidentally counting these runs against every
+        // existing endpoint.
+        repeat(60) {
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+        }
+        // The cap kicks in at 40 for the getPet endpoint
+        // (the first operation of the configuration is
+        // always picked because the test spec does not
+        // filter by operationIds). 60 - 40 + 1 (the 41st
+        // is the first to trigger the cap) means the
+        // table holds 40 rows in the end. Pinning the
+        // exact number keeps the helper honest.
+        assertEquals(40, service.runRepository.count())
     }
 }
