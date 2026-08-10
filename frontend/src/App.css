@@ -686,6 +686,25 @@ button:disabled { opacity: .5; cursor: wait; }
   min-height: calc(14px * 1.55 * 3);
 }
 
+/* "Important additional information" callout that the
+   walkthrough renders right under the intro for steps that
+   set `securityNoteKey` (currently only step 4 — the
+   timeline encryption-at-rest note). The block stands out
+   from the plain intro via a left accent border and a warm
+   background tint so the user reads it as a warning rather
+   than as part of the regular copy. */
+.walkthrough-security-note {
+  margin: 0 0 22px;
+  padding: 10px 14px;
+  border-left: 3px solid #fb923c;
+  background: rgba(251, 146, 60, 0.08);
+  border-radius: 4px;
+  color: #f3d6c1;
+  font-size: 13.5px;
+  line-height: 1.55;
+  max-width: 78ch;
+}
+
 .walkthrough-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
@@ -2786,10 +2805,113 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .timeline-tab-list-head {
   color: #fff; font-weight: 700; font-size: 14px;
   margin: 8px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.timeline-tab-list-head-text {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .timeline-tab-list-head .sub {
   color: #93a2b8; font-size: 12.5px; font-weight: 400;
   margin-left: 4px;
+}
+.timeline-tab-list-clear {
+  flex: 0 0 auto;
+  background: transparent;
+  color: #ff8a8a;
+  border: 1px solid #5a2a2a;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .02rem;
+  cursor: pointer;
+  transition: background-color .12s ease, color .12s ease, border-color .12s ease;
+}
+.timeline-tab-list-clear:hover:not(:disabled) {
+  background: #2a1212;
+  color: #ffb5c3;
+  border-color: #7a3535;
+}
+.timeline-tab-list-clear:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* Inline confirm dialog for the "Alle löschen" button.
+   Lives in the same dark-theme surface as the rest of the
+   timeline (no modal overlay, no window.confirm) so the
+   styling matches the existing app palette and the user
+   does not have to context-switch to the browser's native
+   chrome. */
+.timeline-tab-list-clear-confirm {
+  margin: 8px 0 12px;
+  padding: 14px 16px;
+  background: #2a1212;
+  border: 1px solid #7a3535;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.timeline-tab-list-clear-confirm-title {
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+}
+.timeline-tab-list-clear-confirm-hint {
+  color: #f0c5c5;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.timeline-tab-list-clear-confirm-error {
+  color: #ffb5c3;
+  font-size: 12.5px;
+}
+.timeline-tab-list-clear-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.timeline-tab-list-clear-confirm-cancel {
+  background: transparent;
+  color: #dbe5f3;
+  border: 1px solid #3a4d6b;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.timeline-tab-list-clear-confirm-cancel:hover:not(:disabled) {
+  background: #1a2638;
+  border-color: #4d5f7a;
+}
+.timeline-tab-list-clear-confirm-delete {
+  background: #b42318;
+  color: #fff;
+  border: 1px solid #b42318;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.timeline-tab-list-clear-confirm-delete:hover:not(:disabled) {
+  background: #c8332a;
+  border-color: #c8332a;
+}
+.timeline-tab-list-clear-confirm-cancel:disabled,
+.timeline-tab-list-clear-confirm-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .timeline-tab-list {
   display: grid;

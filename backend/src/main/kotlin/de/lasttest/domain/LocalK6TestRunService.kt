@@ -77,7 +77,41 @@ interface TestRunService {
      *   request.
      */
     fun rerun(id: String): TestRun?
+
+    /**
+     * Wipes the entire timeline. Every non-terminal run is
+     * force-cancelled first so an in-flight k6 binary does not
+     * keep writing rows into a database the user just emptied.
+     * Then every [TestRunEntity] row is removed from the
+     * repository so the next poll of the timeline endpoint
+     * returns an empty list.
+     *
+     * Per-endpoint statistics (the × N counter) are deliberately
+     * left untouched: the badge is a separate view over the
+     * historical run count and resetting it would silently
+     * invalidate other surfaces (e.g. the day-bucket heatmap
+     * that depends on a stable per-day test count).
+     *
+     * @return how many runs were cancelled and how many rows
+     *   were removed, so the frontend can surface a confirmation
+     *   like "2229 runs cleared" without having to poll the
+     *   list again.
+     */
+    fun deleteAll(): TimelineDeleteResult
 }
+
+/**
+ * Result of [TestRunService.deleteAll]. The two counts are
+ * reported separately so the frontend can tell the user
+ * whether any in-flight runs were force-cancelled as part
+ * of the wipe — a useful piece of information when the
+ * user has not noticed the dashboard's `RUNNING` badges
+ * yet and clicks the "Alle löschen" button on autopilot.
+ */
+data class TimelineDeleteResult(
+    val cancelled: Int,
+    val deleted: Int,
+)
 
 @Service
 class LocalK6TestRunService(
@@ -539,6 +573,42 @@ class LocalK6TestRunService(
         val existing = runs[id] ?: return null
         val preserved = existing.originalRequest ?: return null
         return create(preserved)
+    }
+
+    override fun deleteAll(): TimelineDeleteResult {
+        // Two-phase wipe: force-cancel every in-flight run first
+        // (so a k6 process does not race the bulk delete below
+        // and write a fresh row into a table we just emptied),
+        // then drop every persisted row.
+        //
+        // We snapshot the in-memory run ids first because
+        // [cancel] mutates the same map (it stamps the run to
+        // ABORTED and removes the process entry). Iterating over
+        // a copy avoids a ConcurrentModificationException if a
+        // run transitions to a terminal state on its own between
+        // snapshot and signal — the entry would just be skipped
+        // by `cancel` because the run is already terminal.
+        val liveIds = runs.keys.toList()
+        var cancelled = 0
+        for (id in liveIds) {
+            val run = runs[id] ?: continue
+            if (run.status.isTerminal()) continue
+            if (cancel(id, force = true)) cancelled++
+        }
+        // The repository's `deleteAll` issues a single SQL
+        // statement (`delete from test_run`), so a 2 229-row
+        // wipe is a single round trip and the auto-incremented
+        // primary key is reset for the next inserted run. A
+        // fresh `findAll()` afterwards is the cheapest way to
+        // know the final row count.
+        val before = runRepository.count()
+        runRepository.deleteAll()
+        // Drop the in-memory map too so a subsequent `find()`
+        // call cannot return a stale snapshot of a row that no
+        // longer exists in the database.
+        runs.clear()
+        scripts.clear()
+        return TimelineDeleteResult(cancelled = cancelled, deleted = before.toInt())
     }
 
     /**

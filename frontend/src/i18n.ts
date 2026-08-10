@@ -90,6 +90,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
 
     'walk.step4.title': 'Test runs',
     'walk.step4.intro': 'Step 4 is the dashboard of every test run you started in the current session. The Letzte Läufe row list at the top shows the run state; the run-detail card below the list opens a tab strip with Overview, Timeline, Actions, k6 console, Thresholds, Configuration, Failure diagnosis, k6 script and an external link to the printable k6 report.',
+    'walk.step4.securityNote': '⚠ Important: every row in the timeline stores its full load-test configuration (endpoints, payloads, auth, load profile, base URL) encrypted at rest on the H2 volume (AES-GCM, per-installation key). The plaintext is only reconstructed in memory at the moment you right-click a terminal row and pick Rerun — every other read of the row (dashboard polling, k6 report, /api/test-runs, /api/operations/runs) goes straight through the encrypted blob. See annotation 9 below.',
     // Annotations 1–4 belong to the primary SVG (the Letzte Läufe row list).
     'walk.step4.ann.1.title': 'Run row',
     'walk.step4.ann.1.body': 'One row per run, sorted newest first. The colour of the left stripe encodes the status: orange = RUNNING/QUEUED/STOPPING, green = COMPLETED, red = FAILED, dark red = ABORTED, purple = STOPPED. The status badge mirrors the same colour. Left-click = focus this run, right-click = open the action menu.',
@@ -108,6 +109,13 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step4.ann.7.body': 'Actions bundles every right-click action (Stop, Rerun, Copy report link, Export → k6 JSON, Remove from view, etc.) plus the deep link to the printable k6 report. k6 console shows the full k6 stdout/stderr. Thresholds lists every threshold with the measured value and a pass/fail pill.',
     'walk.step4.ann.8.title': 'Configuration / failure diagnosis / k6 script',
     'walk.step4.ann.8.body': 'Configuration echoes the full run configuration (API, base URL, profile, every operation with auth flags and payload count). Failure diagnosis only renders for FAILED/ABORTED runs and gives a typed diagnosis. k6 script shows the exact k6 script that was executed, with a download button, a copyable manual run command, and a link to the k6 docs.',
+    // Annotation 9 is a free-floating callout attached to the
+    // secondary SVG; it documents the timeline encryption-at-rest
+    // policy (see [walk.step4.securityNote]) which is the
+    // important additional information that prompted the
+    // annotation.
+    'walk.step4.ann.9.title': 'Encrypted timeline — Rerun is the only decrypt path',
+    'walk.step4.ann.9.body': 'Every row you see here is persisted in encrypted form on the H2 volume: the configuration JSON and the original create request are AES-GCM encrypted with a per-installation 256-bit key (auto-generated on first start, persisted next to the H2 file, or supplied via LASTTEST_ENCRYPTION_KEY / lasttest.encryption.key). The plaintext is materialised in memory only when you right-click a terminal row and pick Rerun — that is the single path that decrypts and replays the CreateTestRunRequest. Polling /api/test-runs, the dashboard re-render, the printable k6 report, and the per-endpoint /api/operations/runs endpoint all read the encrypted blob straight from disk and never touch the plaintext. Setting lasttest.encryption.enabled=false switches to a no-op encryptor for forensics or for environments that already provide volume-level encryption.',
 
     'walk.step5.title': 'Detailed k6 report',
     'walk.step5.intro': 'The detailed k6 report opens in a new tab and contains every metric k6 collected, broken down by endpoint and status code. Use it to investigate failures, compare runs, or archive results as PDF.',
@@ -744,6 +752,19 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'detail.timeline.dayLabel.past': '{n}d ago',
     'detail.timeline.list.head': 'Visible in window',
     'detail.timeline.list.sub': '· {count} runs · newest first',
+    // Wipe the entire timeline. Triggered by the "Clear all"
+    // button next to the "Visible in window · N runs" header
+    // on the per-endpoint timeline tab. Two-step UX: a
+    // confirm dialog must be accepted before the DELETE
+    // request goes out, because the wipe force-cancels
+    // every in-flight run as part of the operation.
+    'detail.timeline.list.clearAll': 'Clear all',
+    'detail.timeline.list.clearAll.confirm': 'Permanently delete all test runs?',
+    'detail.timeline.list.clearAll.confirmHint': 'In-flight tests will be force-cancelled. This action cannot be undone.',
+    'detail.timeline.list.clearAll.confirmButton': 'Delete everything',
+    'detail.timeline.list.clearAll.cancelButton': 'Cancel',
+    'detail.timeline.list.clearAll.error': 'Could not clear the timeline: {message}',
+    'detail.timeline.list.clearAll.success': 'Cleared {deleted} runs ({cancelled} in-flight cancelled).',
     'detail.timeline.list.item': 'Klick springt im Zeitstrahl zu dieser Zeit',
     'detail.timeline.legend.passed': 'Passed',
     'detail.timeline.legend.failed': 'Failed',
@@ -872,6 +893,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
 
     'walk.step4.title': 'Testläufe',
     'walk.step4.intro': 'Schritt 4 ist das Dashboard für jeden Testlauf, den du in dieser Session gestartet hast. Oben siehst du die Letzte-Läufe-Zeile mit dem Status jedes Laufs; darunter öffnet die Run-Detail-Karte einen Tab-Streifen mit Übersicht, Timeline, Aktionen, k6-Konsole, Schwellen, Konfiguration, Fehler-Diagnose, k6-Skript und einem externen Link auf den druckbaren k6-Bericht.',
+    'walk.step4.securityNote': '⚠ Wichtig: jede Zeile in der Timeline speichert ihre komplette Lasttest-Konfiguration (Endpunkte, Payloads, Auth, Lastprofil, Base-URL) verschlüsselt auf dem H2-Volume ab (AES-GCM, Schlüssel pro Installation). Der Klartext wird nur in dem Moment im Speicher materialisiert, in dem du per Rechtsklick auf einer Terminal-Zeile Erneut ausführen wählst — alle anderen Lese-Zugriffe (Dashboard-Polling, k6-Bericht, /api/test-runs, /api/operations/runs) lesen den verschlüsselten Blob direkt von der Platte. Siehe Annotation 9 weiter unten.',
     // Annotations 1–4 gehören zur primären Grafik (Letzte Läufe Zeilenliste).
     'walk.step4.ann.1.title': 'Lauf-Zeile',
     'walk.step4.ann.1.body': 'Eine Zeile pro Lauf, sortiert nach Neueste zuerst. Die Farbe des linken Streifens kodiert den Status: orange = RUNNING/QUEUED/STOPPING, grün = COMPLETED, rot = FAILED, dunkelrot = ABORTED, lila = STOPPED. Das Status-Badge spiegelt die gleiche Farbe. Linksklick = diesen Lauf fokussieren, Rechtsklick = Aktions-Menü öffnen.',
@@ -890,6 +912,13 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step4.ann.7.body': 'Aktionen bündelt jede Rechtsklick-Aktion (Stop, Erneut ausführen, Report-Link kopieren, Export → k6-JSON, Aus Ansicht entfernen …) plus den Deep-Link auf den druckbaren k6-Bericht. k6-Konsole zeigt die volle k6-stdout/stderr. Schwellen listet jeden Threshold mit Messwert und bestanden/fehlgeschlagen-Pille.',
     'walk.step4.ann.8.title': 'Konfiguration / Fehler-Diagnose / k6-Skript',
     'walk.step4.ann.8.body': 'Konfiguration gibt die gesamte Lauf-Konfiguration wieder (API, Base-URL, Profil, jeder Endpunkt mit Auth-Flags und Payload-Anzahl). Fehler-Diagnose rendert nur für FAILED/ABORTED und liefert eine typisierte Diagnose. k6-Skript zeigt das exakte k6-Skript, das ausgeführt wurde, mit Download-Button, kopierbarem manuellem Start-Befehl und Link auf die k6-Doku.',
+    // Annotation 9 is a free-floating callout attached to the
+    // secondary SVG; it documents the timeline encryption-at-rest
+    // policy (see [walk.step4.securityNote]) which is the
+    // important additional information that prompted the
+    // annotation.
+    'walk.step4.ann.9.title': 'Verschlüsselte Timeline — Erneut ausführen ist der einzige Entschlüsselungs-Pfad',
+    'walk.step4.ann.9.body': 'Jede Zeile, die du hier siehst, liegt verschlüsselt auf dem H2-Volume: die Konfigurations-JSON und der ursprüngliche Create-Request sind mit AES-GCM und einem 256-Bit-Schlüssel pro Installation verschlüsselt (beim ersten Start automatisch erzeugt und neben der H2-Datei abgelegt, alternativ via LASTTEST_ENCRYPTION_KEY bzw. lasttest.encryption.key gesetzt). Der Klartext wird ausschließlich dann im Speicher rekonstruiert, wenn du per Rechtsklick auf einer Terminal-Zeile Erneut ausführen wählst — das ist der einzige Pfad, der den CreateTestRunRequest entschlüsselt und erneut einspeist. Das Polling von /api/test-runs, das Re-Render des Dashboards, der druckbare k6-Bericht und der Pro-Endpunkt-Endpoint /api/operations/runs lesen den verschlüsselten Blob direkt von der Platte und kommen nie mit dem Klartext in Berührung. Über lasttest.encryption.enabled=false schaltest du für Forensik oder für Umgebungen mit Volume-Level-Verschlüsselung auf einen No-Op-Encryptor um.',
 
     'walk.step5.title': 'Ausführlicher k6-Testbericht',
     'walk.step5.intro': 'Der ausführliche k6-Testbericht öffnet sich in einem neuen Tab und enthält jede Metrik, die k6 erfasst hat, aufgeschlüsselt nach Endpunkt und Status-Code. Nutze ihn, um Fehler zu untersuchen, Läufe zu vergleichen oder Ergebnisse als PDF zu archivieren.',
@@ -1561,6 +1590,19 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'detail.timeline.dayLabel.past': 'vor {n} T',
     'detail.timeline.list.head': 'Sichtbar im Zeitfenster',
     'detail.timeline.list.sub': '· {count} Läufe · neueste zuerst',
+    // Gesamte Timeline leeren. Wird durch den "Alle
+    // löschen"-Button neben der Überschrift "Sichtbar
+    // im Zeitfenster · N Läufe" auf der
+    // Endpoint-Timeline-Tab ausgelöst. Zwei-Schritt-UX:
+    // ein Bestätigungsdialog muss bestätigt werden, weil
+    // der Wipe alle laufenden Tests hart abbricht.
+    'detail.timeline.list.clearAll': 'Alle löschen',
+    'detail.timeline.list.clearAll.confirm': 'Sollen wirklich alle Testläufe gelöscht werden?',
+    'detail.timeline.list.clearAll.confirmHint': 'Laufende Tests werden hart abgebrochen. Diese Aktion kann nicht rückgängig gemacht werden.',
+    'detail.timeline.list.clearAll.confirmButton': 'Alle löschen',
+    'detail.timeline.list.clearAll.cancelButton': 'Abbrechen',
+    'detail.timeline.list.clearAll.error': 'Timeline konnte nicht geleert werden: {message}',
+    'detail.timeline.list.clearAll.success': '{deleted} Läufe gelöscht ({cancelled} laufende abgebrochen).',
     'detail.timeline.list.item': 'Klick springt im Zeitstrahl zu dieser Zeit',
     'detail.timeline.legend.passed': 'Bestanden',
     'detail.timeline.legend.failed': 'Fehlgeschlagen',

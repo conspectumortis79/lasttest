@@ -351,6 +351,15 @@ function Step4DetailSvg() {
     <AnnotationBadge n={7} x={300} y={265} color={ZONE_COLOR.action} />
     <CalloutLine x1={442} y1={72} x2={140} y2={265} color={ZONE_COLOR.status} />
     <AnnotationBadge n={8} x={140} y={265} color={ZONE_COLOR.status} />
+    {/* Annotation 9 — free-floating callout that documents the
+        timeline encryption-at-rest policy. Lands in the only
+        empty corner of the secondary SVG (the gap between
+        badges 6 and 7 on the right side); the callout line
+        points at the bottom-right of the run-detail tab strip
+        body so the user reads it as "everything below this line
+        is encrypted on disk". */}
+    <CalloutLine x1={470} y1={220} x2={510} y2={248} color={ZONE_COLOR.status} />
+    <AnnotationBadge n={9} x={510} y={248} color={ZONE_COLOR.status} />
   </svg>
 }
 
@@ -498,6 +507,13 @@ export function UserGuideWalkthrough({ language, strings, focusStepId, onActiveS
       aspect-ratio / max-height rules in
       `.walkthrough-illustration` so the visual cap stays
       consistent across the five steps.
+
+      A step that sets `securityNoteKey` gets a second
+      paragraph rendered right under the intro — the
+      "important additional information" callout. The note is
+      opt-in per step so the other steps keep their current
+      shape and the security callout does not leak into UI
+      surfaces that do not need it.
     */}
     {STEPS.map(step => {
       const Renderer = SVG_RENDERERS[step.id]
@@ -513,6 +529,16 @@ export function UserGuideWalkthrough({ language, strings, focusStepId, onActiveS
       >
         <h3 className="walkthrough-title">{translate(language, step.titleKey)}</h3>
         <p className="walkthrough-intro">{translate(language, step.introKey)}</p>
+        {/* The security callout carries a dedicated CSS class
+            so it can be styled as a prominent, attention-grabbing
+            block (border, background tint) without affecting the
+            plain `.walkthrough-intro` paragraph that every step
+            uses for its primary copy. */}
+        {step.securityNoteKey && (
+          <p className="walkthrough-security-note">
+            {translate(language, step.securityNoteKey)}
+          </p>
+        )}
         <div className="walkthrough-grid">
           <div className="walkthrough-illustration">
             <div className="walkthrough-illustration-stack">

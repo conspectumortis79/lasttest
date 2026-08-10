@@ -75,6 +75,13 @@ class LocalK6TestRunServiceTest {
             override fun import(content: String): ImportedSpecification = specification
         }
     private val successfulGenerator = SuccessfulGenerator()
+
+    // Shared per-endpoint statistics repository. Tests that
+    // want to inspect the × N counter snapshot the table via
+    // this instance, the service writes through the same one
+    // so the assertions reflect what the production code path
+    // would see.
+    private val statisticsRepository: InMemoryOperationStatisticsRepository = InMemoryOperationStatisticsRepository()
     private val service =
         LocalK6TestRunService(
             importer = noopImporter,
@@ -84,7 +91,7 @@ class LocalK6TestRunServiceTest {
             k6Command = "k6",
             influxDbProperties = influxDb,
             runRepository = InMemoryTestRunRepository(),
-            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            statisticsRepository = statisticsRepository,
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
         )
 
@@ -1791,5 +1798,147 @@ class LocalK6TestRunServiceTest {
             blocker.countDown()
             realPool.shutdownNow()
         }
+    }
+
+    // ---- deleteAll ----------------------------------------------------
+
+    @Test
+    fun `deleteAll removes every persisted run and reports the row count`() {
+        // Persist three rows through the service so the
+        // repository is the source of truth (the in-memory
+        // map is only kept in sync, the database is what the
+        // timeline endpoint actually reads from). After the
+        // wipe both stores must be empty and the result must
+        // surface the row count so the frontend can confirm
+        // the operation without a follow-up round trip.
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1)
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = profile,
+            ),
+        )
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = profile,
+            ),
+        )
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = profile,
+            ),
+        )
+
+        val result = service.deleteAll()
+
+        // The three inserted runs are all QUEUED. The wipe
+        // force-cancels them via the no-process branch in
+        // [cancel] (each QUEUED run lands in STOPPED with a
+        // `cancelledAt` timestamp). That counts as
+        // "cancelled" from the wipe's perspective because
+        // the user explicitly asked for the rows to be
+        // removed and the cancel path had to run.
+        assertEquals(3, result.cancelled)
+        assertEquals(3, result.deleted)
+        // The in-memory map is cleared so a subsequent find()
+        // cannot return a stale snapshot of a row that no
+        // longer exists in the database.
+        assertEquals(emptyList(), service.list())
+    }
+
+    @Test
+    fun `deleteAll force-cancels every in-flight run before wiping the table`() {
+        // The wipe is two-phase: cancel first, then delete.
+        // Without the cancel-first step a still-running k6
+        // would race the bulk delete and write a fresh row
+        // into a table we just emptied, leaving the timeline
+        // with a single phantom run after the wipe.
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1)
+        val first =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = profile,
+                ),
+            )
+        val second =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = profile,
+                ),
+            )
+        // Cancel the first one gracefully so it lands in
+        // STOPPED before the wipe. The second is still
+        // QUEUED. After the wipe both rows are gone, and
+        // the second row's cancel path (the no-process
+        // branch in [cancel]) flipped it to STOPPED with a
+        // `cancelledAt` timestamp — the second one counts
+        // as "cancelled" because the wipe forced it out of
+        // its cancellable state.
+        service.cancel(first.id, force = false)
+
+        val result = service.deleteAll()
+
+        // First run was already terminal (STOPPED), second
+        // was QUEUED with no live process so the cancel
+        // path still ran and reported success. The
+        // cancelled count is 1 (the QUEUED one).
+        assertEquals(1, result.cancelled)
+        assertEquals(2, result.deleted)
+        // Both runs are wiped from the in-memory map too,
+        // so the dashboard re-render that follows the wipe
+        // shows an empty list (no zombies on the UI).
+        assertEquals(emptyList(), service.list())
+        // The repository agrees — a second call returns zero
+        // deleted because the table is already empty.
+        val followUp = service.deleteAll()
+        assertEquals(0, followUp.deleted)
+    }
+
+    @Test
+    fun `deleteAll on an empty database returns zero counts and does not throw`() {
+        // Regression: an empty wipe must NOT crash on the
+        // repository's `count()` call. A user who clicks the
+        // button before any run was ever started is the
+        // common case for that path.
+        val result = service.deleteAll()
+
+        assertEquals(0, result.cancelled)
+        assertEquals(0, result.deleted)
+    }
+
+    @Test
+    fun `deleteAll leaves the per-endpoint statistics counter untouched`() {
+        // The × N badge in the operation list is a separate
+        // view over the run history. Resetting it as part of
+        // the timeline wipe would silently invalidate the
+        // day-bucket heatmap and any other surface that
+        // depends on a stable per-endpoint counter. The
+        // service must leave the statistics table alone.
+        // We verify the contract by snapshotting the
+        // statistics table before and after the wipe and
+        // asserting the row count is identical.
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                operationIds = setOf(specification.operations[0].operationId),
+            ),
+        )
+        val counterBefore = statisticsRepository.findAll().size
+
+        service.deleteAll()
+
+        val counterAfter = statisticsRepository.findAll().size
+        assertEquals(counterBefore, counterAfter, "the × N counter table must not be reset by the timeline wipe")
     }
 }

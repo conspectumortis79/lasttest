@@ -1529,6 +1529,25 @@ You have two ways to re-run the same scenario:
   genealogical link to the old one; the old row stays in the
   dashboard unchanged.
 
+> ⚠ **Important — timeline rows are stored encrypted.** Every
+> row you see in the `Letzte Läufe` panel is persisted encrypted
+> on the H2 volume: the `CreateTestRunRequest` and the run's
+> configuration JSON are AES-GCM encrypted with a 256-bit key
+> that is auto-generated on first start and persisted next to the
+> H2 file (or supplied explicitly via the `LASTTEST_ENCRYPTION_KEY`
+> environment variable or the `lasttest.encryption.key` property).
+> The plaintext is materialised in memory **only** when you
+> right-click a terminal row and pick **Rerun** — that is the
+> single path through which the backend decrypts the original
+> request and re-queues a new run. Polling `/api/test-runs`, the
+> dashboard re-render, the printable k6 report, and the
+> per-endpoint `/api/operations/runs` endpoint all read the
+> encrypted blob straight from disk and never touch the plaintext.
+> Set `lasttest.encryption.enabled=false` to switch to a no-op
+> encryptor (useful for forensics or for environments that
+> already provide volume-level encryption). See the **Walkthrough**
+> step 4 (annotation 9) for the same note in popup form.
+
 ---
 
 ### 10.6 Run-detail tab strip

@@ -97,6 +97,7 @@ const HANDLERS: RunActionHandlers = {
   onExportMetrics: () => {},
   onRemove: () => {},
   onRemoveAllOtherFailed: () => {},
+  onClearAll: async () => ({ cancelled: 0, deleted: 0 }),
 }
 
 // Four historical runs at well-separated timestamps so the

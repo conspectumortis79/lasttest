@@ -16,6 +16,16 @@ export type WalkthroughStep = {
   id: WalkthroughStepId
   titleKey: `walk.${WalkthroughStepId}.title`
   introKey: `walk.${WalkthroughStepId}.intro`
+  /**
+   * Optional "important additional information" callout that
+   * the [UserGuideWalkthrough] renders as a separate paragraph
+   * right under the intro. Used by step 4 ("Test Runs") to
+   * flag the timeline encryption-at-rest policy without
+   * inflating the SVG annotation count: the same policy is
+   * then spelled out in detail by the free-floating
+   * annotation 9.
+   */
+  securityNoteKey?: `walk.${WalkthroughStepId}.securityNote`
   annotations: WalkthroughAnnotation[]
   /**
    * Optional secondary SVG illustration shown below the primary
@@ -69,11 +79,25 @@ export const STEPS: WalkthroughStep[] = [
     id: 'step4',
     titleKey: 'walk.step4.title',
     introKey: 'walk.step4.intro',
+    // The [walk.step4.securityNote] key carries an extra
+    // paragraph that is rendered into the step body below the
+    // intro. It surfaces the timeline encryption-at-rest policy
+    // — i.e. that the timeline stores every run configuration
+    // encrypted and only decrypts it when the user triggers a
+    // rerun — as the "important additional information" the
+    // walkthrough is meant to flag. The UI layer joins it onto
+    // the intro so it stays discoverable without inflating the
+    // SVG annotation count.
+    securityNoteKey: 'walk.step4.securityNote',
     secondarySvg: 'step4-detail',
     // Annotations 1–4 belong to the primary SVG (the Letzte
     // Läufe row list). Annotations 5–8 belong to the secondary
     // SVG (the run detail tab strip plus the overview tab).
-    // The numbers are contiguous [1..8] per the walkthrough
+    // Annotation 9 is a free-floating callout attached to the
+    // secondary SVG; it documents the timeline encryption-at-rest
+    // policy (the same policy that the [securityNoteKey]
+    // surfaces at the top of the step).
+    // The numbers are contiguous [1..9] per the walkthrough
     // test in [walkthrough.test.ts].
     annotations: [
       { n: 1, titleKey: 'walk.step4.ann.1.title', bodyKey: 'walk.step4.ann.1.body' },
@@ -84,6 +108,7 @@ export const STEPS: WalkthroughStep[] = [
       { n: 6, titleKey: 'walk.step4.ann.6.title', bodyKey: 'walk.step4.ann.6.body' },
       { n: 7, titleKey: 'walk.step4.ann.7.title', bodyKey: 'walk.step4.ann.7.body' },
       { n: 8, titleKey: 'walk.step4.ann.8.title', bodyKey: 'walk.step4.ann.8.body' },
+      { n: 9, titleKey: 'walk.step4.ann.9.title', bodyKey: 'walk.step4.ann.9.body' },
     ],
   },
   {

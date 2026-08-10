@@ -1645,6 +1645,28 @@ Du hast zwei Wege, dasselbe Szenario erneut auszuführen:
   Lauf hat keine genealogische Verbindung zum alten; die alte Zeile
   bleibt unverändert im Dashboard.
 
+> ⚠ **Wichtig — Timeline-Zeilen sind verschlüsselt gespeichert.**
+> Jede Zeile, die du im `Letzte Läufe`-Panel siehst, liegt
+> verschlüsselt auf dem H2-Volume: der `CreateTestRunRequest` und
+> die Konfigurations-JSON des Laufs sind mit AES-GCM und einem
+> 256-Bit-Schlüssel verschlüsselt, der beim ersten Start
+> automatisch erzeugt und neben der H2-Datei abgelegt wird
+> (alternativ über die Umgebungsvariable `LASTTEST_ENCRYPTION_KEY`
+> bzw. die Property `lasttest.encryption.key` gesetzt). Der
+> Klartext wird **ausschließlich** dann im Speicher
+> rekonstruiert, wenn du per Rechtsklick auf einer Terminal-Zeile
+> **Erneut ausführen** wählst — das ist der einzige Pfad, über
+> den das Backend den ursprünglichen Request entschlüsselt und
+> einen neuen Lauf einreiht. Das Polling von `/api/test-runs`, das
+> Re-Render des Dashboards, der druckbare k6-Bericht und der
+> Pro-Endpunkt-Endpoint `/api/operations/runs` lesen den
+> verschlüsselten Blob direkt von der Platte und kommen nie mit
+> dem Klartext in Berührung. Über `lasttest.encryption.enabled=false`
+> schaltest du auf einen No-Op-Encryptor um (nützlich für Forensik
+> oder für Umgebungen, die bereits Volume-Level-Verschlüsselung
+> mitbringen). Die gleiche Info findest du im **Walkthrough** in
+> Schritt 4 (Annotation 9) als Popup.
+
 ---
 
 ### 10.6 Run-Detail-Tab-Strip

@@ -116,6 +116,16 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
    * screen). `null` when no menu is open.
    */
   const [runMenu, setRunMenu] = useState<{ runId: string, x: number, y: number } | null>(null)
+  // "Alle löschen" button: a two-step UX (button → confirm
+  // dialog → DELETE request) so a stray click cannot wipe
+  // the entire timeline. The dialog is rendered inline in
+  // the tab body so it lives in the same dark-theme surface
+  // as the rest of the timeline; the alternative (window.confirm)
+  // would have rendered in the browser's default chrome and
+  // looked out of place next to the styled buttons.
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false)
+  const [clearAllInFlight, setClearAllInFlight] = useState(false)
+  const [clearAllError, setClearAllError] = useState<string | null>(null)
   const runMenuRef = useRef<HTMLDivElement | null>(null)
 
   /**
@@ -495,8 +505,69 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
 
     {/* Compact list of the most-recent runs in the window */}
     <div className="timeline-tab-list-head">
-      {translate(language, 'detail.timeline.list.head')} <span className="sub">{translate(language, 'detail.timeline.list.sub', { count: windowedRuns.length })}</span>
+      <div className="timeline-tab-list-head-text">
+        {translate(language, 'detail.timeline.list.head')} <span className="sub">{translate(language, 'detail.timeline.list.sub', { count: windowedRuns.length })}</span>
+      </div>
+      <button
+        type="button"
+        className="timeline-tab-list-clear"
+        onClick={() => setShowClearAllConfirm(true)}
+        disabled={!handlers.onClearAll || timelineRuns.length === 0}
+        title={translate(language, 'detail.timeline.list.clearAll')}
+        aria-label={translate(language, 'detail.timeline.list.clearAll')}
+      >
+        {translate(language, 'detail.timeline.list.clearAll')}
+      </button>
     </div>
+    {showClearAllConfirm ? (
+      <div className="timeline-tab-list-clear-confirm" role="alertdialog" aria-modal="true">
+        <div className="timeline-tab-list-clear-confirm-title">
+          {translate(language, 'detail.timeline.list.clearAll.confirm')}
+        </div>
+        <div className="timeline-tab-list-clear-confirm-hint">
+          {translate(language, 'detail.timeline.list.clearAll.confirmHint')}
+        </div>
+        {clearAllError ? (
+          <div className="timeline-tab-list-clear-confirm-error">
+            {translate(language, 'detail.timeline.list.clearAll.error', { message: clearAllError })}
+          </div>
+        ) : null}
+        <div className="timeline-tab-list-clear-confirm-actions">
+          <button
+            type="button"
+            className="timeline-tab-list-clear-confirm-cancel"
+            disabled={clearAllInFlight}
+            onClick={() => {
+              setShowClearAllConfirm(false)
+              setClearAllError(null)
+            }}
+          >
+            {translate(language, 'detail.timeline.list.clearAll.cancelButton')}
+          </button>
+          <button
+            type="button"
+            className="timeline-tab-list-clear-confirm-delete"
+            disabled={clearAllInFlight}
+            onClick={async () => {
+              if (!handlers.onClearAll) return
+              setClearAllInFlight(true)
+              setClearAllError(null)
+              const result = await handlers.onClearAll()
+              setClearAllInFlight(false)
+              if (result === null) {
+                setClearAllError(translate(language, 'detail.timeline.list.clearAll.error', { message: '–' }))
+                return
+              }
+              setShowClearAllConfirm(false)
+            }}
+          >
+            {clearAllInFlight
+              ? '…'
+              : translate(language, 'detail.timeline.list.clearAll.confirmButton')}
+          </button>
+        </div>
+      </div>
+    ) : null}
     <div className="timeline-tab-list">
       {windowedRuns
         .slice()

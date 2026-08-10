@@ -19,6 +19,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.CrossOrigin
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -78,6 +79,23 @@ class LastTestController(
     fun create(
         @Valid @RequestBody request: CreateTestRunRequest,
     ): ResponseEntity<TestRun> = ResponseEntity.status(HttpStatus.ACCEPTED).body(testRuns.create(request))
+
+    /**
+     * Wipes the entire timeline: force-cancels every in-flight
+     * run and then deletes every [TestRunEntity] row from H2.
+     * Returns the two counts so the frontend can confirm the
+     * operation without a follow-up round trip.
+     *
+     * The endpoint is `DELETE /api/test-runs` rather than
+     * `DELETE /api/test-runs/all` because the entire timeline
+     * IS the resource at that path — there is no per-id
+     * counterpart to keep. A 405 on `DELETE /api/test-runs/{id}`
+     * (the more REST-y shape) would be misleading: a single
+     * run cannot be deleted today, only the full timeline can
+     * be cleared.
+     */
+    @DeleteMapping("/test-runs")
+    fun deleteAll(): ResponseEntity<de.lasttest.domain.TimelineDeleteResult> = ResponseEntity.ok(testRuns.deleteAll())
 
     @GetMapping("/test-runs")
     fun list(): ResponseEntity<List<TestRun>> = ResponseEntity.ok(testRuns.list())

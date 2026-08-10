@@ -8,6 +8,7 @@ import {
   pickActiveRunId,
   pickActiveRunIdAfterStart,
   removeAllOtherFailed,
+  clearAllRuns,
   removeRun,
   showsStatusPill,
 } from './runDashboard.ts'
@@ -962,6 +963,28 @@ function LoadTestApp() {
       setActiveRunId(pickActiveRunId(next, activeRunId))
       return next
     }),
+    // Wipe the timeline. The backend handles the
+    // in-flight cancellation + bulk delete via
+    // `DELETE /api/test-runs` (see
+    // [LocalK6TestRunService.deleteAll]); the client just
+    // empties its in-memory map and clears the active run
+    // selection. We swallow fetch errors and return null
+    // so the caller can surface a toast without the
+    // promise itself rejecting.
+    onClearAll: async () => {
+      try {
+        const response = await fetch('/api/test-runs', { method: 'DELETE' })
+        if (!response.ok) {
+          return null
+        }
+        const body = (await response.json()) as { cancelled: number, deleted: number }
+        setRuns(() => clearAllRuns())
+        setActiveRunId(undefined)
+        return body
+      } catch {
+        return null
+      }
+    },
   }), [cancelRun, rerunRun, safeClipboard, downloadScriptById, downloadSummaryById, handleRemoveRun, activeRunId])
 
   /**

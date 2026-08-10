@@ -34,6 +34,20 @@ export function removeRun(
 }
 
 /**
+ * Returns a new empty runs map. Pure — the input map is
+ * never mutated. Powers the "Alle löschen" timeline action:
+ * the user clicks the button, the backend wipes the
+ * `test_run` table, and the client drops every run from its
+ * in-memory state so the dashboard re-renders as an empty
+ * grid. Returning `{}` rather than `null` keeps the
+ * downstream `Record<string, TestRun>` typing intact and
+ * saves every consumer from a null-check.
+ */
+export function clearAllRuns(): Record<string, TestRun> {
+  return {}
+}
+
+/**
  * Returns a new runs map with every FAILED run removed except
  * the keepRunId one. Pure — the input map is never mutated.
  * Powers the right-click "remove all other failed" menu action:

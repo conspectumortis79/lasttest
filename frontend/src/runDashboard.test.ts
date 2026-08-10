@@ -11,6 +11,7 @@ import {
   pickActiveRunIdAfterStart,
   removeAllOtherFailed,
   removeRun,
+  clearAllRuns,
   sortRunsByCreatedAt,
   showsStatusPill,
 } from './runDashboard.ts'
@@ -262,6 +263,29 @@ test('removeRun drops the targeted id and keeps every other entry', () => {
 test('removeRun on an unknown id is a no-op and returns the same reference', () => {
   const runs = { a: makeRun('a', '2026-01-01T00:00:00Z') }
   equal(removeRun(runs, 'unknown'), runs)
+})
+
+test('clearAllRuns returns an empty map and does not mutate the input', () => {
+  // Powers the "Alle löschen" timeline action: after the
+  // backend confirms the wipe, the client drops every run
+  // from its in-memory state so the dashboard re-renders
+  // as an empty grid. The helper must return a fresh
+  // `{}` rather than `null` so the downstream
+  // `Record<string, TestRun>` typing stays intact and the
+  // consumers do not need a null-check.
+  const runs = {
+    a: makeRun('a', '2026-01-01T00:00:00Z', 'FAILED'),
+    b: makeRun('b', '2026-01-02T00:00:00Z', 'COMPLETED'),
+  }
+  const cleared = clearAllRuns()
+  deepEqual(cleared, {})
+  // The input map is never mutated; the consumer does not
+  // need to clone before calling.
+  deepEqual(Object.keys(runs).sort(), ['a', 'b'])
+  // Each call returns a fresh object so React's state
+  // setter sees a new reference and re-renders even if the
+  // user clicks the button twice in a row.
+  ok(clearAllRuns() !== clearAllRuns())
 })
 
 test('removeAllOtherFailed keeps the focused run and drops every other FAILED run', () => {
