@@ -308,6 +308,18 @@ test('the toolbar reset button drops every captured request after a confirm prom
   await page.goto('/?demo-traffic')
   await expect(page.locator('.demo-traffic-live-badge.is-live')).toBeVisible({ timeout: 5_000 })
 
+  // Clear the demo-traffic log first so the assertion below
+  // (`count === 0` after reset) is meaningful. Without this
+  // the test depends on the log being empty from previous
+  // runs, which is fragile once a few test runs have driven
+  // k6 traffic against the demo API.
+  await page.evaluate(async () => {
+    await fetch('/api/demo-traffic/requests', { method: 'DELETE' })
+  })
+  // Wait for the dashboard to pick up the empty envelope so the
+  // baseline is safe before we drive the test request.
+  await expect(page.locator('.demo-traffic-row')).toHaveCount(0, { timeout: 5_000 })
+
   // Drive a request so the table has at least one row.
   await page.evaluate(async () => {
     await fetch('/demo-api/products?reset-fixture=true')
@@ -359,6 +371,15 @@ test('the toolbar reset button does nothing when the user cancels the confirm pr
   // test.
   await page.goto('/?demo-traffic')
   await expect(page.locator('.demo-traffic-live-badge.is-live')).toBeVisible({ timeout: 5_000 })
+
+  // Clear the demo-traffic log so the row count snapshot is
+  // deterministic. Without this the baseline picks up whatever
+  // was captured by previous test runs and the cancel test
+  // would fail because the polling loop keeps adding entries.
+  await page.evaluate(async () => {
+    await fetch('/api/demo-traffic/requests', { method: 'DELETE' })
+  })
+  await expect(page.locator('.demo-traffic-row')).toHaveCount(0, { timeout: 5_000 })
 
   // Drive a request so the table has at least one row.
   await page.evaluate(async () => {
