@@ -1209,8 +1209,14 @@ export function summarizeFailure(run: TestRun): FailureSummary {
         ],
       }
     }
-    case 'unknown':
     default:
+      // The [failureCategory] helper only ever returns one of the
+      // explicit categories above. The `unknown` bucket is the
+      // catch-all fall-through — we do not split it into a separate
+      // `case 'unknown':` because that would create a second,
+      // unreachable branch (TypeScript also flags this as
+      // dead code) and inflate the branch-coverage denominator
+      // for no behavioural gain.
       return {
         category: 'unknown',
         diagnosis: excerpt ? 'k6-Lauf fehlgeschlagen' : 'Unbekannter Fehler',

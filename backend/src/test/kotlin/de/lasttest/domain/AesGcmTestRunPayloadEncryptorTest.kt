@@ -149,22 +149,30 @@ class AesGcmTestRunPayloadEncryptorTest {
 
     @Test
     fun `decrypt returns null when the GCM tag is tampered with`() {
-        // Flip a single bit in the ciphertext: GCM's
-        // authentication tag must catch the tamper and the
-        // decryptor must surface `null` rather than return a
-        // corrupted string. The exact behaviour is
-        // implementation-defined (the JCE may throw
-        // AEADBadTagException or return a different exception
-        // class), so the test only pins the contract: the
-        // result is `null`, never garbage.
+        // Flip a character in the MIDDLE of the ciphertext:
+        // GCM's authentication tag must catch the tamper and
+        // the decryptor must surface `null` rather than return
+        // a corrupted string.
+        //
+        // The previous implementation flipped the LAST base64
+        // character of the blob, which is flaky because the
+        // last character carries unused padding bits. The
+        // decoded bytes can be identical after the flip, GCM
+        // decodes successfully, and the test fails
+        // intermittently in the full Gradle run (passes in
+        // isolation, fails under parallel scheduling). A flip
+        // inside the ciphertext always lands inside a byte the
+        // JCE actually consumes, so the auth tag mismatches
+        // deterministically.
         val sut = encryptor()
         val encrypted = assertNotNull(sut.encrypt("payload"))
-        // Flip the last base64 character of the blob so the
-        // trailing tag byte changes.
-        val tamperedIndex = encrypted.length - 1
+        assertTrue(encrypted.length > 8, "blob must be long enough for a mid-string flip")
+        // Pick an index well past the magic prefix so the
+        // tamper lands inside the ciphertext, not the IV.
+        val tamperedIndex = encrypted.length / 2
         val tamperedChar = encrypted[tamperedIndex]
         val replacement = if (tamperedChar == 'A') 'B' else 'A'
-        val tampered = encrypted.substring(0, tamperedIndex) + replacement
+        val tampered = encrypted.substring(0, tamperedIndex) + replacement + encrypted.substring(tamperedIndex + 1)
 
         assertNotEquals(encrypted, tampered)
         assertNull(sut.decrypt(tampered))

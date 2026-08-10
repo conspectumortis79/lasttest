@@ -2136,4 +2136,139 @@ class LocalK6TestRunServiceTest {
         // exact number keeps the helper honest.
         assertEquals(40, service.runRepository.count())
     }
+
+    // ---- reproduce the user-reported "newly-started run inherits the
+    // ---- previous run's SIGKILL" race ---------------------------------
+    //
+    // The bug surfaces when the user starts run A, then cancels run A
+    // (graceful or force), then immediately starts run B. The dashboard
+    // then renders run B as ABORTED + cancelledByForce=true even though
+    // the user only ever asked to stop run A.
+    //
+    // The root cause is a window inside `execute()` between
+    //   (1) `runs[run.id] = current.copy(status = RUNNING, startedAt = started)`
+    // and
+    //   (2) `processes[run.id] = process`
+    // During that window the in-memory status is RUNNING but
+    // `processes[run.id]` is still `null`. A concurrent `cancel(id)`
+    // therefore takes the "no-process branch", which sets the
+    // terminal state (ABORTED or STOPPED) and `cancelledByForce` on
+    // `runs[id]` — but does NOT touch `cancellationRequested[id]`.
+    // The graceful-cancel escalation in the with-process branch
+    // never gets scheduled, so when the k6 process the executor just
+    // spawned eventually exits, `execute()` reads
+    //   `cancellationRequested.remove(run.id) == null`
+    // and falls through to the `exitCode`-based branch, picking
+    // COMPLETED/FAILED as the new status. `latest.copy(status = ...)`
+    // keeps the `cancelledByForce = true` that the no-process
+    // branch wrote, so the row is left in the contradictory shape
+    //   status = COMPLETED, cancelledByForce = true, cancelledAt = <stop A timestamp>
+    // which the frontend renders as "vom Benutzer per SIGKILL
+    // abgebrochen" because that branch only checks the
+    // `cancelledByForce` flag.
+    //
+    // The test below reproduces that exact sequence by hand: a
+    // CapturingExecutorService parks the `execute()` task, we then
+    // flip the run to RUNNING and call force-cancel on it (so the
+    // executor-side window is bypassed but the no-process branch is
+    // still taken), then we run the parked task and assert that the
+    // final state is consistent.
+
+    @Test
+    fun `execute preserves the user-initiated ABORTED state when cancel ran inside the race window`() {
+        // The user-reported race: cancel() takes the
+        // no-process branch (ABORTED + cancelledByForce=true)
+        // during the window between
+        //   `runs[run.id] = current.copy(status = RUNNING, ...)`
+        // and
+        //   `processes[run.id] = process`
+        // The post-`waitFor` bookkeeping must NOT overwrite
+        // that user-initiated ABORTED with the
+        // exit-code-derived COMPLETED/FAILED, or the row is
+        // left in a contradictory state (status = COMPLETED,
+        // cancelledByForce = true) that the dashboard renders
+        // as "vom Benutzer per SIGKILL abgebrochen".
+        //
+        // We drive the race deterministically by hand:
+        //   1. Stamp the in-memory snapshot to RUNNING, the
+        //      state execute() would have written just
+        //      before the window opened.
+        //   2. Call cancel() — it takes the no-process
+        //      branch because `processes[run.id]` is still
+        //      null, and stamps ABORTED +
+        //      cancelledByForce=true.
+        //   3. Inject a short-lived stub k6 process so the
+        //      parked executor task's `process.waitFor()`
+        //      returns quickly.
+        //   4. Run the parked task and assert the final
+        //      state honours the user-initiated ABORTED.
+        //
+        // The early `if (current.status.isTerminal()) return`
+        // guard in execute() already covers most of the
+        // race (it bails out before `processes[run.id] =
+        // process` is ever written). The fix we are
+        // asserting here is the *post-`waitFor`* guard
+        // that protects against a future refactor that
+        // removes the early bail-out — it ensures the
+        // post-`waitFor` bookkeeping itself never
+        // overwrites a user-initiated terminal status.
+        val pendingTask =
+            java.util.concurrent.atomic
+                .AtomicReference<Runnable?>(null)
+        val capturingExecutor =
+            CapturingExecutorService { task ->
+                pendingTask.set(task)
+            }
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val raceService =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = capturingExecutor,
+                readerExecutor = SynchronousExecutorService(),
+                k6Command = "/bin/sh",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = statistics,
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        val run =
+            raceService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(raceService) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+        val processesField = LocalK6TestRunService::class.java.getDeclaredField("processes")
+        processesField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val processesMap =
+            processesField.get(raceService) as java.util.concurrent.ConcurrentHashMap<String, Process>
+        runsMap[run.id] = run.copy(status = TestRunStatus.RUNNING, startedAt = "2026-01-01T00:00:01Z")
+        assertTrue(raceService.cancel(run.id, force = true))
+        assertEquals(TestRunStatus.ABORTED, runsMap[run.id]?.status)
+        val stub = ProcessBuilder("/bin/sh", "-c", "exit 0").start()
+        processesMap[run.id] = stub
+        try {
+            val task = pendingTask.get()
+            assertNotNull(task)
+            task.run()
+            val finalRun = assertNotNull(raceService.find(run.id))
+            assertEquals(
+                TestRunStatus.ABORTED,
+                finalRun.status,
+                "user-initiated ABORTED must survive the post-`waitFor` bookkeeping when cancel ran inside the race window",
+            )
+            assertEquals(true, finalRun.cancelledByForce, "cancelledByForce must remain true")
+        } finally {
+            if (stub.isAlive) stub.destroyForcibly()
+        }
+    }
 }

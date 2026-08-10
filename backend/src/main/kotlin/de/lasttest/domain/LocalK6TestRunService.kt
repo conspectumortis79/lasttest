@@ -1033,24 +1033,47 @@ class LocalK6TestRunService(
 
             val cancellation = cancellationRequested.remove(run.id)
             val summary = if (Files.exists(summaryFile)) mapOf("raw" to Files.readString(summaryFile)) else null
+            // Read the latest snapshot so we preserve any
+            // cancellation metadata cancel() wrote (cancelledAt /
+            // cancelledByForce / status=STOPPING). Otherwise our
+            // final copy() would silently revert cancel()'s state.
+            val latest = runs[run.id] ?: run
             // Decide the terminal status. A forced escalation
             // (CancellationMode.FORCE) reaches us even when the user
             // requested graceful stop but the grace window expired
             // while the run was still STOPPING; in that case the
             // process was already destroyed by the escalation job
             // and the run must end up as ABORTED, not STOPPED.
+            //
+            // The [latest.status.isTerminal()] branch is the
+            // fix for the user-reported race: `cancel()` can
+            // settle the row to a terminal state (ABORTED /
+            // STOPPED) via the "no-process" branch — which
+            // does NOT populate [cancellationRequested] —
+            // during the small window between
+            // `runs[run.id] = current.copy(status = RUNNING, ...)`
+            // and `processes[run.id] = process`. When
+            // [execute] reaches the bookkeeping block the row
+            // is already terminal, but [cancellation] is
+            // `null` and the post-`waitFor` code would
+            // otherwise stamp the run as COMPLETED/FAILED
+            // based on the k6 exit code. That overwrites the
+            // user-initiated ABORTED with COMPLETED, but the
+            // `cancelledByForce = true` flag survives on the
+            // `latest` snapshot — leaving a contradictory row
+            // the dashboard renders as "vom Benutzer per
+            // SIGKILL abgebrochen" (status = COMPLETED,
+            // cancelledByForce = true). Honouring
+            // [latest.status] when it is already terminal
+            // keeps the user-visible state consistent.
             val status =
-                when (cancellation) {
-                    CancellationMode.FORCE -> TestRunStatus.ABORTED
-                    CancellationMode.GRACEFUL -> TestRunStatus.STOPPED
-                    null -> if (exitCode == 0) TestRunStatus.COMPLETED else TestRunStatus.FAILED
+                when {
+                    latest.status.isTerminal() -> latest.status
+                    cancellation == CancellationMode.FORCE -> TestRunStatus.ABORTED
+                    cancellation == CancellationMode.GRACEFUL -> TestRunStatus.STOPPED
+                    else -> if (exitCode == 0) TestRunStatus.COMPLETED else TestRunStatus.FAILED
                 }
             val consoleOutput = truncateForError(synchronized(output) { output.toString(Charsets.UTF_8) })
-            // Read the latest snapshot so we preserve any
-            // cancellation metadata cancel() wrote (cancelledAt /
-            // cancelledByForce / status=STOPPING). Otherwise our
-            // final copy() would silently revert cancel()'s state.
-            val latest = runs[run.id] ?: run
             val finalRun =
                 latest.copy(
                     status = status,
@@ -1088,13 +1111,19 @@ class LocalK6TestRunService(
             // FAILED. exitCode is left as whatever cancel() set —
             // typically null because the process never ran.
             val cancellation = cancellationRequested.remove(run.id)
-            val status =
-                when (cancellation) {
-                    CancellationMode.FORCE -> TestRunStatus.ABORTED
-                    CancellationMode.GRACEFUL -> TestRunStatus.STOPPED
-                    null -> TestRunStatus.FAILED
-                }
             val latest = runs[run.id] ?: run
+            // Same terminal-state guard as the happy path: a
+            // cancel() that took the no-process branch during
+            // the register-process race window already settled
+            // the row, and the IOException bookkeeping must
+            // honour that instead of stamping FAILED on top.
+            val status =
+                when {
+                    latest.status.isTerminal() -> latest.status
+                    cancellation == CancellationMode.FORCE -> TestRunStatus.ABORTED
+                    cancellation == CancellationMode.GRACEFUL -> TestRunStatus.STOPPED
+                    else -> TestRunStatus.FAILED
+                }
             val finalRun =
                 latest.copy(
                     status = status,

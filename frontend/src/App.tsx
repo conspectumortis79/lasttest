@@ -544,9 +544,26 @@ function LoadTestApp() {
         // (STOPPED → ABORTED) so the user gets exactly one
         // notification per run.
         const next = { ...current }
-        for (const run of updated) {
-          if (run !== null) next[run.id] = run
-        }
+        pendingIds.forEach((id, index) => {
+          const run = updated[index]
+          if (run !== null) {
+            next[run.id] = run
+            return
+          }
+          // The backend no longer knows about this run id
+          // (404 from GET /api/test-runs/{id}). Without this
+          // branch the run would stay in the dashboard map
+          // forever, because the !isTerminalRun() filter on
+          // the next tick would still classify it as
+          // non-terminal and re-issue the same 404-bound
+          // request. The user then sees a permanent
+          // "XHR 404" for /rerun and /time-series on the
+          // stale badge. The fix mirrors the contract of
+          // [handleClearAll]: a row the backend does not
+          // know about is no longer part of the user's
+          // timeline and must drop out of the map.
+          delete next[id]
+        })
         const transitions = detectTerminalTransitions(current, next, notificationSettings)
         fireTerminalNotifications(transitions, language)
         return next
