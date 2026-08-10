@@ -3,6 +3,7 @@ package de.lasttest.api
 import de.lasttest.demo.DemoSpecificationProvider
 import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
+import de.lasttest.domain.TestRunPayloadEncryptor
 import de.lasttest.domain.TestRunService
 import de.lasttest.domain.TimeSeriesPoint
 import de.lasttest.domain.TimeSeriesReader
@@ -11,6 +12,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class LastTestControllerTest {
     private companion object {
@@ -548,6 +550,236 @@ class LastTestControllerTest {
         val body = assertNotNull(response.body)
         assertEquals(2, body.cancelled)
         assertEquals(2229, body.deleted)
+    }
+
+    // ---- GET /api/operations/stats ------------------------------------
+    // The dashboard's left list polls this endpoint on the
+    // same cadence as `/api/test-runs` so the "× N" badge
+    // next to each operation card stays fresh. The endpoint
+    // is a thin pass-through over the
+    // [OperationStatisticsRepository] but a regression that
+    // renames a field, drops a column or forgets the
+    // `testCount`-descending ordering would silently break
+    // the badge.
+
+    @Test
+    fun `operationStats returns the rows from the statistics repository in testCount desc order`() {
+        // Seed two rows with different test counts. The
+        // repository is shared with the production code path,
+        // so what we save here is exactly what the controller
+        // would see in production.
+        val hotRow =
+            de.lasttest.domain.OperationStatisticsEntity().apply {
+                method = "GET"
+                path = "/api/products"
+                testCount = 42L
+                lastTestAt = java.time.Instant.parse("2026-08-08T20:00:00Z")
+                lastStatus = TestRunStatus.COMPLETED
+                lastRunId = "run-hot"
+            }
+        val coldRow =
+            de.lasttest.domain.OperationStatisticsEntity().apply {
+                method = "POST"
+                path = "/api/orders"
+                testCount = 3L
+                lastTestAt = java.time.Instant.parse("2026-08-08T19:00:00Z")
+                lastStatus = TestRunStatus.FAILED
+                lastRunId = "run-cold"
+            }
+        statisticsRepository.save(hotRow)
+        statisticsRepository.save(coldRow)
+
+        val response = controller.operationStats()
+
+        assertEquals(200, response.statusCode.value())
+        val body = assertNotNull(response.body)
+        // The repository returns rows sorted by testCount
+        // descending, so the hot row must come first.
+        assertEquals(2, body.size)
+        assertEquals("GET", body[0].method)
+        assertEquals("/api/products", body[0].path)
+        assertEquals(42L, body[0].testCount)
+        assertEquals(TestRunStatus.COMPLETED, body[0].lastStatus)
+        assertEquals("run-hot", body[0].lastRunId)
+        assertEquals("2026-08-08T20:00:00Z", body[0].lastTestAt)
+        assertEquals("POST", body[1].method)
+        assertEquals("/api/orders", body[1].path)
+        assertEquals(3L, body[1].testCount)
+    }
+
+    @Test
+    fun `operationStats returns an empty list when the statistics repository is empty`() {
+        // A fresh server with no runs yet must NOT 500; the
+        // dashboard renders an empty list directly.
+        val response = controller.operationStats()
+
+        assertEquals(200, response.statusCode.value())
+        assertEquals(emptyList(), response.body)
+    }
+
+    // ---- GET /api/operations/runs -------------------------------------
+    // The per-endpoint timeline tab calls this endpoint when
+    // the user clicks a different operation so the right
+    // panel can re-render its Gantt chart against the
+    // freshest data. The controller delegates to the
+    // [TestRunRepository] and the [toTestRun] mapper, so a
+    // regression that forgets the query parameters or skips
+    // the mapper would surface here.
+
+    @Test
+    fun `runsForOperation returns the persisted runs for the requested method and path`() {
+        // Seed two rows that match the query and one row
+        // that targets a different endpoint. Only the
+        // matching rows must appear in the response.
+        val matchingA = de.lasttest.domain.TestRunEntity()
+        matchingA.id = "run-match-a"
+        matchingA.status = TestRunStatus.COMPLETED
+        matchingA.createdAt = java.time.Instant.parse("2026-08-08T20:00:00Z")
+        matchingA.operationMethod = "GET"
+        matchingA.operationPath = "/api/products"
+        val matchingB = de.lasttest.domain.TestRunEntity()
+        matchingB.id = "run-match-b"
+        matchingB.status = TestRunStatus.FAILED
+        matchingB.createdAt = java.time.Instant.parse("2026-08-08T20:30:00Z")
+        matchingB.operationMethod = "GET"
+        matchingB.operationPath = "/api/products"
+        val unrelated = de.lasttest.domain.TestRunEntity()
+        unrelated.id = "run-unrelated"
+        unrelated.status = TestRunStatus.COMPLETED
+        unrelated.createdAt = java.time.Instant.parse("2026-08-08T20:15:00Z")
+        unrelated.operationMethod = "POST"
+        unrelated.operationPath = "/api/orders"
+        runRepository.save(matchingA)
+        runRepository.save(matchingB)
+        runRepository.save(unrelated)
+
+        val response = controller.runsForOperation("GET", "/api/products")
+
+        assertEquals(200, response.statusCode.value())
+        val body = assertNotNull(response.body)
+        assertEquals(2, body.size)
+        assertEquals("run-match-b", body[0].id)
+        assertEquals("run-match-a", body[1].id)
+        // The mapper ran — the wire format must be the API
+        // [TestRun] data class, not the JPA entity.
+        assertEquals(TestRunStatus.COMPLETED, body[1].status)
+    }
+
+    @Test
+    fun `runsForOperation returns an empty list when no runs target the requested endpoint`() {
+        // The dashboard must not 500 on an unknown
+        // (method, path) — the timeline tab simply renders
+        // an empty list and asks the user to pick another
+        // endpoint.
+        val response = controller.runsForOperation("DELETE", "/api/never-tested")
+
+        assertEquals(200, response.statusCode.value())
+        assertEquals(emptyList(), response.body)
+    }
+
+    // ---- GET /api/test-runs/{id}/report-link --------------------------
+    // The "Im neuen Tab öffnen" button on the multi-run list
+    // view points at this endpoint; the dashboard renders a
+    // permalink that the user can share with a teammate.
+    // A regression that 200s on an unknown id, encodes the
+    // id wrong or flips the `isComplete` flag would all
+    // surface here.
+
+    @Test
+    fun `reportLink returns 200 with the deep-link and isComplete true for a completed run`() {
+        val response = controller.reportLink(completedRun.id)
+
+        assertEquals(200, response.statusCode.value())
+        val body = assertNotNull(response.body)
+        assertEquals(completedRun.id, body.runId)
+        // The URL is the dashboard's `/` route with the run
+        // id as a query parameter, URL-encoded so an id
+        // containing `/` would not break the routing.
+        assertEquals("/?report=${java.net.URLEncoder.encode(completedRun.id, Charsets.UTF_8)}", body.url)
+        assertTrue(body.isComplete, "a COMPLETED run must report isComplete=true")
+    }
+
+    @Test
+    fun `reportLink returns 200 with isComplete false for a non-completed run`() {
+        // The button is shown next to every row in the
+        // multi-run list, including runs that are still in
+        // flight. The `isComplete` flag tells the dashboard
+        // whether the report has content yet so it can
+        // disable the click and show a "noch nicht
+        // verfügbar" tooltip.
+        val response = controller.reportLink(runningRun.id)
+
+        assertEquals(200, response.statusCode.value())
+        val body = assertNotNull(response.body)
+        assertEquals(runningRun.id, body.runId)
+        assertEquals(false, body.isComplete)
+    }
+
+    @Test
+    fun `reportLink returns 404 when the id is unknown`() {
+        // An unknown id must surface a clean 404 so the
+        // dashboard's deep-link button can hide itself
+        // instead of rendering a broken permalink.
+        val response = controller.reportLink("never-created")
+
+        assertEquals(404, response.statusCode.value())
+        assertNull(response.body)
+    }
+
+    // ---- rerun() with payloadEncryptor returning null ----------------
+    // The DB-backed fallback in [lookupRerunRequest] calls
+    // [TestRunPayloadEncryptor.decrypt] on the persisted
+    // JSON column. The encryptor can return `null` when
+    // the blob cannot be decrypted (wrong key, tampered
+    // ciphertext, …). The lookup must treat that the same
+    // way as a missing JSON column and return 409 instead
+    // of a 500 — without that contract, an encryption key
+    // rotation would brick the rerun button for every
+    // historical run.
+
+    @Test
+    fun `rerun returns 409 when the payloadEncryptor cannot decrypt the persisted originalRequestJson`() {
+        // The controller's default encryptor is a no-op that
+        // returns the input unchanged, so we cannot exercise
+        // the `decrypt == null` branch through it. We
+        // therefore build a dedicated controller with a
+        // stub encryptor that simulates a decryption failure
+        // (e.g. a rotated key) on the persisted column.
+        val nullingEncryptor =
+            object : TestRunPayloadEncryptor {
+                override fun encrypt(plain: String?): String? = plain
+
+                override fun decrypt(blob: String?): String? = null
+            }
+        val encryptedController =
+            LastTestController(
+                importer =
+                    object : SpecificationImporter {
+                        override fun import(content: String): ImportedSpecification = imported
+                    },
+                testRuns = service,
+                demoSpecificationProvider = demoSpecificationProvider,
+                remoteFetcher = remoteFetcher,
+                timeSeriesReader = timeSeriesReader,
+                statisticsRepository = statisticsRepository,
+                runRepository = runRepository,
+                payloadEncryptor = nullingEncryptor,
+            )
+        val historicalId = "historical-encrypted-but-unreadable"
+        val persistedEntity = de.lasttest.domain.TestRunEntity()
+        persistedEntity.id = historicalId
+        persistedEntity.status = de.lasttest.api.TestRunStatus.COMPLETED
+        persistedEntity.createdAt = java.time.Instant.parse("2026-08-08T20:00:00Z")
+        persistedEntity.originalRequestJson = "{\"specification\":\"openapi document\"}"
+        runRepository.save(persistedEntity)
+
+        val response = encryptedController.rerun(historicalId)
+
+        assertEquals(409, response.statusCode.value())
+        // The controller must not even attempt to start a
+        // new run when the encrypted blob cannot be
+        // decrypted.
+        assertNull(service.lastCreatedRequest)
     }
 
     private class RecordingTestRunService(
