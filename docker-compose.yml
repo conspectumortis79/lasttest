@@ -16,7 +16,6 @@ services:
       # Override LASTTEST_DATA_DIR if you want to relocate it.
       - h2-data:/data
     environment:
-      LASTTEST_PUBLIC_URL: http://localhost:8286/
       # TrustStore for the target API's TLS certificate. Leave PASSWORD
       # empty for PEM files; set it for PKCS12 / JKS.
       LASTTEST_TRUSTSTORE_PATH: /etc/lasttest/custom-ca.pem

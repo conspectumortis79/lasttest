@@ -65,18 +65,9 @@ This starts three containers: `lasttest` (the application), `lasttest-influxdb`
 If you only need lasttest without the time-series parts, start it alone
 with `docker run` and the ramp-grafik will then show only the Soll line.
 
-Once Spring Boot has finished starting, a clearly visible success message with
-a link to the web UI is written to the container log:
-
-```text
-============================================================
-lasttest wurde erfolgreich gestartet.
-Jetzt im Browser öffnen: http://localhost:8286/
-============================================================
-```
-
-If a different public host or port is used, the displayed link can be
-overridden via the `LASTTEST_PUBLIC_URL` environment variable.
+Once Spring Boot has finished starting, the web UI is reachable on the
+configured port (default `8286`). The startup log only contains the
+standard Spring Boot output — no extra banner is emitted by lasttest.
 
 Open the application in your browser:
 
