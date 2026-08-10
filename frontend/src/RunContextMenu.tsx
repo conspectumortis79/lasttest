@@ -28,6 +28,32 @@ export type RunContextMenuProps = {
    *  to remove (see `buildRunMenuItems`). */
   runs: Record<string, TestRun>
   language: SupportedLanguage
+  /**
+   * Whether the `rerun` action should be offered.
+   *
+   * Defaults to `true` so the overview dashboard — which
+   * uses this component for its badge right-click — keeps
+   * the historical `Erneut starten` entry point. The
+   * per-endpoint timeline tab passes `false`: timeline rows
+   * are a passive history view, the payload data the rerun
+   * would replay was intentionally stripped from the
+   * timeline persist path, so offering a rerun from a
+   * timeline row would only produce a half-replayed run
+   * with no previewable preview.
+   */
+  showRerun?: boolean
+  /**
+   * Whether the `export-metrics` action should be offered.
+   *
+   * Defaults to `true` so the overview dashboard keeps the
+   * `k6-JSON exportieren` entry point. The per-endpoint
+   * timeline tab passes `false` because exporting from a
+   * timeline row would either trigger an extra round trip
+   * per click or silently hand the user a stale blob — see
+   * the KDoc on `buildRunMenuItems.showExportMetrics` for
+   * the full rationale.
+   */
+  showExportMetrics?: boolean
   /** Fired with the picked `MenuItem`. The parent decides what the
    *  action does — typically by switching on `item.action` and
    *  routing to the matching backend call or local state update. */
@@ -46,6 +72,8 @@ export function RunContextMenu({
   run,
   runs,
   language,
+  showRerun,
+  showExportMetrics,
   onAction,
   onClose,
   menuRef,
@@ -59,7 +87,11 @@ export function RunContextMenu({
   // is in the dashboard. Without it the user could click the
   // action with no visible effect. The active language comes
   // from the toolbar so the labels match the rest of the UI.
-  const groups = buildRunMenuItems(run, language, runs)
+  // `showRerun` and `showExportMetrics` default to `true` so
+  // the overview dashboard — which does not pass them — keeps
+  // the historical entry points; the timeline tab opts out
+  // explicitly.
+  const groups = buildRunMenuItems(run, language, runs, showRerun ?? true, showExportMetrics ?? true)
   // Clamp the position so the menu stays inside the viewport.
   // We use 8px padding from the viewport edge so the rounded
   // corners and the focus ring do not get clipped.

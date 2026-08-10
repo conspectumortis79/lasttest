@@ -30,6 +30,49 @@ test('profileTotalSeconds returns undefined for shared-iterations', () => {
   equal(profileTotalSeconds({ type: 'shared-iterations', virtualUsers: 10, iterations: 100 }), undefined)
 })
 
+test('profileTotalSeconds returns the explicit duration for constant-arrival-rate', () => {
+  // The constant-arrival-rate executor does not iterate VUs,
+  // it requests a fixed requests/second rate for the given
+  // duration. The total run length is the duration itself, so
+  // the helper mirrors the constant-vus branch. Pin the
+  // branch so a future refactor that drops the case does not
+  // silently produce 0 for arrival-rate profiles (the
+  // "default" branch is the silent fail).
+  equal(
+    profileTotalSeconds({ type: 'constant-arrival-rate', rate: 50, timeUnitSeconds: 1, durationSeconds: 120, preAllocatedVUs: 10, maxVUs: 100 }),
+    120,
+  )
+})
+
+test('profileTotalSeconds sums the stage durations for ramping-arrival-rate', () => {
+  // Mirror of the ramping-vus branch: the total run length
+  // is the sum of every stage's durationSeconds. A regression
+  // that drops the case would land on the "default" branch
+  // and return undefined — the timeline chart would silently
+  // shrink to the 60-second fallback.
+  const profile: ReportLoadProfile = {
+    type: 'ramping-arrival-rate',
+    startRate: 0,
+    stages: [
+      { target: 100, durationSeconds: 30 },
+      { target: 100, durationSeconds: 60 },
+      { target: 0, durationSeconds: 30 },
+    ],
+  }
+  equal(profileTotalSeconds(profile), 120)
+})
+
+test('profileTotalSeconds returns undefined for an unknown profile type', () => {
+  // The `default` branch of [profileTotalSeconds] covers any
+  // profile shape that does not match the four known k6
+  // executor types. Cast through `unknown` so the fixture
+  // type-checks at compile time without dragging a new
+  // ReportLoadProfile variant into the public model just for
+  // this test.
+  const unknown = { type: 'something-new', virtualUsers: 1 } as unknown as ReportLoadProfile
+  equal(profileTotalSeconds(unknown), undefined)
+})
+
 test('buildSollPath emits the ramp shape for a ramping-vus profile', () => {
   const profile: ReportLoadProfile = {
     type: 'ramping-vus',
@@ -89,6 +132,41 @@ test('buildSollPath emits a horizontal line for constant-arrival-rate', () => {
 test('buildSollPath returns empty string for shared-iterations', () => {
   const profile: ReportLoadProfile = { type: 'shared-iterations', virtualUsers: 10, iterations: 100 }
   const plot = buildRampPlot(profile, [])
+  equal(buildSollPath(plot), '')
+})
+
+test('buildSollPath emits the ramp shape for a ramping-arrival-rate profile', () => {
+  // Mirror of the ramping-vus test for arrival-rate profiles:
+  // the target line walks through every stage's target rate so
+  // the user can compare the configured RPS against the
+  // measured RPS. A regression that drops the case would
+  // land on the default branch and the path would silently
+  // become empty.
+  const profile: ReportLoadProfile = {
+    type: 'ramping-arrival-rate',
+    startRate: 0,
+    stages: [
+      { target: 50, durationSeconds: 30 },
+      { target: 50, durationSeconds: 30 },
+      { target: 0, durationSeconds: 30 },
+    ],
+  }
+  const plot = buildRampPlot(profile, [])
+  const path = buildSollPath(plot)
+  ok(path.startsWith('M '), 'ramping-arrival-rate path starts with M')
+  const segments = path.split('L').length - 1
+  ok(segments >= 5, `expected at least 5 L-segments, got ${segments}`)
+})
+
+test('buildSollPath returns empty string for an unknown profile type', () => {
+  // The `default` branch of [buildSollPoints] (which feeds
+  // [buildSollPath]) must mirror the `default` branch of
+  // [profileTotalSeconds]: anything we do not know how to
+  // render produces an empty path so the chart never shows a
+  // garbage line. Cast through `unknown` so the fixture
+  // type-checks without a new ReportLoadProfile variant.
+  const unknown = { type: 'something-new', virtualUsers: 1 } as unknown as ReportLoadProfile
+  const plot = buildRampPlot(unknown, [])
   equal(buildSollPath(plot), '')
 })
 

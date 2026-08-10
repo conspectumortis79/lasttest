@@ -97,6 +97,7 @@ const HANDLERS: RunActionHandlers = {
   onExportMetrics: () => {},
   onRemove: () => {},
   onRemoveAllOtherFailed: () => {},
+  onClearAll: async () => ({ cancelled: 0, deleted: 0 }),
 }
 
 // Four historical runs at well-separated timestamps so the
@@ -755,6 +756,131 @@ test('natural completion while the user watches the timeline updates the badge w
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
 
     equal(handle.statusBadgeFor('run-1'), 'Passed', 'natural completion must update the badge to "Passed"')
+  } finally {
+    handle.unmount()
+  }
+})
+
+// ---- timeline list retention cap -------------------------------------
+//
+// The list renders up to `MAX_TIMELINE_BADGES` (40) entries
+// per endpoint — the same cap the backend enforces via
+// `TIMELINE_RETENTION_PER_ENDPOINT` in
+// [LocalK6TestRunService]. The two tests below pin the
+// functional contract (the cap and the sort order it
+// preserves); the CSS scrollbar behaviour (`.timeline-tab-list`
+// `overflow-y: auto`) is verified by the Playwright e2e tests
+// in a real browser, where jsdom's lack of stylesheet
+// loading would otherwise leave the computed-style assertion
+// returning the user-agent default (`visible`).
+
+test('timeline list caps the rendered runs at MAX_TIMELINE_BADGES (40) when the endpoint carries more', async () => {
+  // Build 60 runs spaced one minute apart. The component
+  // sorts newest-first, so the cap drops the OLDEST 20. The
+  // assertion checks both the count and the surviving ids:
+  // the newest run (`run-60`) must be in the DOM, the
+  // oldest (`run-1`) must not.
+  const runs: TestRun[] = []
+  for (let i = 1; i <= 60; i++) {
+    runs.push({
+      id: `run-${i}`,
+      status: 'COMPLETED',
+      // One-minute spacing so the newest-first sort is
+      // unambiguous and the +/- 1 s focus match in the
+      // tab cannot accidentally land on two runs.
+      createdAt: `2026-01-01T${String(9 + Math.floor((i - 1) / 60)).padStart(2, '0')}:${String((i - 1) % 60).padStart(2, '0')}:00Z`,
+      configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] },
+    })
+  }
+  // Focus on the newest run so the highlight does not
+  // collide with the cap assertion.
+  const newest = runs[runs.length - 1]!
+  const handle = renderTimeline(newest.id, newest.createdAt, HANDLERS, runs)
+  try {
+    await handle.waitForRuns()
+    const rendered = handle.listIds()
+    equal(rendered.length, 40, 'timeline list must render at most 40 badges')
+    // Newest 40 runs survive (run-21 .. run-60); the
+    // oldest 20 (run-1 .. run-20) are dropped by the cap.
+    // The newest-first sort means the FIRST rendered id is
+    // run-60.
+    equal(rendered[0], 'run-60', 'newest run must be the first rendered badge')
+    equal(rendered[rendered.length - 1], 'run-21', 'oldest surviving run must be run-21')
+    ok(!rendered.includes('run-1'), 'oldest run must be dropped by the cap')
+    ok(!rendered.includes('run-20'), 'the 20th-oldest run must be dropped by the cap')
+  } finally {
+    handle.unmount()
+  }
+})
+
+test('timeline list renders all runs when the count is at or below the cap', async () => {
+  // Below the cap the slice is a no-op — every fetched
+  // run lands in the list. Pin both the boundary (40 runs
+  // = exactly the cap) and a comfortable sub-cap (5 runs)
+  // so a future regression that slices unconditionally
+  // fails here too.
+  for (const count of [5, 40]) {
+    const runs: TestRun[] = []
+    for (let i = 1; i <= count; i++) {
+      runs.push({
+        id: `run-${i}`,
+        status: 'COMPLETED',
+        createdAt: `2026-01-01T10:${String(i - 1).padStart(2, '0')}:00Z`,
+        configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] },
+      })
+    }
+    const newest = runs[runs.length - 1]!
+    const handle = renderTimeline(newest.id, newest.createdAt, HANDLERS, runs)
+    try {
+      await handle.waitForRuns()
+      equal(handle.listIds().length, count, `timeline list must render every fetched run when the count is ${count}`)
+    } finally {
+      handle.unmount()
+    }
+  }
+})
+
+test('rapidly-started runs in the same millisecond bucket do not all share the highlight', async () => {
+  // Regression for the user-reported bug visible in `dd.png`:
+  // when the user starts several load tests back-to-back in
+  // quick succession, the dashboard forwards a `createdAt`
+  // for each new active run, and the timeline ends up with
+  // every run inside the ± 1000 ms "focused run" window at
+  // once. The ± 1000 ms tolerance was a deliberate choice
+  // so the Gantt bar and the list stay in lockstep across
+  // small float drift, but it was never meant to cover
+  // multiple distinct runs that happen to land in the same
+  // second.
+  //
+  // The test runs four `createTestRun` calls in the same
+  // tick. Their `createdAt` values differ by sub-millisecond
+  // jitter (1.000 s apart) so the timestamps are still
+  // distinguishable to `Date.parse`, but every one of them
+  // is inside the focus window of any of the others. With
+  // the buggy code, all four list items would render the
+  // `is-selected` class at once; the fix narrows the focus
+  // match to the run whose `id` matches the parent-owned
+  // `selectedRunId` so the highlight always points at exactly
+  // one run.
+  const runs: TestRun[] = [
+    { id: 'run-A', status: 'COMPLETED', createdAt: '2026-01-01T20:00:00.000Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+    { id: 'run-B', status: 'COMPLETED', createdAt: '2026-01-01T20:00:00.250Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+    { id: 'run-C', status: 'COMPLETED', createdAt: '2026-01-01T20:00:00.500Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+    { id: 'run-D', status: 'COMPLETED', createdAt: '2026-01-01T20:00:00.750Z', configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 1 }, operations: [] } },
+  ]
+  // The parent pushes the most recent run's `createdAt` as
+  // `focusRunCreatedAt` and marks the same run as the
+  // active one in the run-grid.
+  const active = runs[runs.length - 1]!
+  const handle = renderTimeline(active.id, active.createdAt, HANDLERS, runs)
+  try {
+    await handle.waitForRuns()
+    const selected = handle.selectedIds()
+    deepEqual(
+      selected,
+      [active.id],
+      `only the active run must be highlighted, got ${JSON.stringify(selected)}`,
+    )
   } finally {
     handle.unmount()
   }

@@ -328,6 +328,8 @@ class LastTestControllerTest {
                 }
 
                 override fun rerun(id: String): TestRun? = null
+
+                override fun deleteAll(): de.lasttest.domain.TimelineDeleteResult = de.lasttest.domain.TimelineDeleteResult(cancelled = 0, deleted = 0)
             }
         val cancelController =
             LastTestController(
@@ -522,6 +524,32 @@ class LastTestControllerTest {
         assertNull(service.lastCreatedRequest)
     }
 
+    // ---- DELETE /api/test-runs -----------------------------------------
+    // The "Alle löschen" button on the timeline tab calls
+    // this endpoint to wipe the entire run history. The
+    // controller is a thin pass-through to
+    // [TestRunService.deleteAll], but a regression that
+    // accidentally swaps the verb, changes the path or drops
+    // the response body would silently break the timeline —
+    // pin the contract here so the dashboard keeps working.
+
+    @Test
+    fun `deleteAll returns the service result and a 200 status code`() {
+        // The button click handler relies on the
+        // (cancelled, deleted) counts in the body to show
+        // a "2229 runs cleared" confirmation. A regression
+        // that swapped to a 204 No Content would surface
+        // here as a missing body.
+        service.deleteAllReturn = de.lasttest.domain.TimelineDeleteResult(cancelled = 2, deleted = 2229)
+
+        val response = controller.deleteAll()
+
+        assertEquals(200, response.statusCode.value())
+        val body = assertNotNull(response.body)
+        assertEquals(2, body.cancelled)
+        assertEquals(2229, body.deleted)
+    }
+
     private class RecordingTestRunService(
         private val run: TestRun,
         private val additionalRuns: Map<String, TestRun> = emptyMap(),
@@ -533,6 +561,8 @@ class LastTestControllerTest {
         var cancelReturn: Boolean = true
         var rerunReturn: TestRun? = null
         var lastRerunId: String? = null
+        var deleteAllReturn: de.lasttest.domain.TimelineDeleteResult =
+            de.lasttest.domain.TimelineDeleteResult(cancelled = 0, deleted = 0)
 
         override fun create(request: CreateTestRunRequest): TestRun {
             lastCreatedRequest = request
@@ -564,6 +594,8 @@ class LastTestControllerTest {
             lastRerunId = id
             return rerunReturn
         }
+
+        override fun deleteAll(): de.lasttest.domain.TimelineDeleteResult = deleteAllReturn
     }
 
     private class RecordingRemoteSpecificationFetcher : RemoteSpecificationFetcher {

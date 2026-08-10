@@ -1400,13 +1400,13 @@ textarea { width: 100%; min-height: 300px; resize: vertical; border: 1px solid #
   border-color: #7d63ff;
   box-shadow: 0 0 0 1px #7d63ff, 0 6px 18px -6px #7d63ff66;
 }
-.run-badge.running,
-.run-badge.queued    { border-left-color: #d4a72c; }
-.run-badge.stopping  { border-left-color: #d4a72c; }
-.run-badge.completed { border-left-color: #2d6a4f; }
-.run-badge.stopped   { border-left-color: #5a4293; }
-.run-badge.failed    { border-left-color: #793b4b; }
-.run-badge.aborted   { border-left-color: #793b4b; }
+.run-badge-running,
+.run-badge-queued,
+.run-badge-stopping  { border-left-color: #d4a72c; }
+.run-badge-completed { border-left-color: #2d6a4f; }
+.run-badge-stopped   { border-left-color: #5a4293; }
+.run-badge-failed,
+.run-badge-aborted   { border-left-color: #793b4b; }
 
 .run-badge-method {
   flex-shrink: 0;
@@ -2786,16 +2786,136 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
 .timeline-tab-list-head {
   color: #fff; font-weight: 700; font-size: 14px;
   margin: 8px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.timeline-tab-list-head-text {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .timeline-tab-list-head .sub {
   color: #93a2b8; font-size: 12.5px; font-weight: 400;
   margin-left: 4px;
+}
+.timeline-tab-list-clear {
+  flex: 0 0 auto;
+  background: transparent;
+  color: #ff8a8a;
+  border: 1px solid #5a2a2a;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .02rem;
+  cursor: pointer;
+  transition: background-color .12s ease, color .12s ease, border-color .12s ease;
+}
+.timeline-tab-list-clear:hover:not(:disabled) {
+  background: #2a1212;
+  color: #ffb5c3;
+  border-color: #7a3535;
+}
+.timeline-tab-list-clear:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* Inline confirm dialog for the "Alle löschen" button.
+   Lives in the same dark-theme surface as the rest of the
+   timeline (no modal overlay, no window.confirm) so the
+   styling matches the existing app palette and the user
+   does not have to context-switch to the browser's native
+   chrome. */
+.timeline-tab-list-clear-confirm {
+  margin: 8px 0 12px;
+  padding: 14px 16px;
+  background: #2a1212;
+  border: 1px solid #7a3535;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.timeline-tab-list-clear-confirm-title {
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+}
+.timeline-tab-list-clear-confirm-hint {
+  color: #f0c5c5;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.timeline-tab-list-clear-confirm-error {
+  color: #ffb5c3;
+  font-size: 12.5px;
+}
+.timeline-tab-list-clear-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.timeline-tab-list-clear-confirm-cancel {
+  background: transparent;
+  color: #dbe5f3;
+  border: 1px solid #3a4d6b;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.timeline-tab-list-clear-confirm-cancel:hover:not(:disabled) {
+  background: #1a2638;
+  border-color: #4d5f7a;
+}
+.timeline-tab-list-clear-confirm-delete {
+  background: #b42318;
+  color: #fff;
+  border: 1px solid #b42318;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.timeline-tab-list-clear-confirm-delete:hover:not(:disabled) {
+  background: #c8332a;
+  border-color: #c8332a;
+}
+.timeline-tab-list-clear-confirm-cancel:disabled,
+.timeline-tab-list-clear-confirm-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .timeline-tab-list {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   margin-bottom: 8px;
+  /* The list renders up to [MAX_TIMELINE_BADGES] (40) entries
+     per endpoint — the backend retention cap. With the heatmap
+     and stats grid sitting above the list, a full 40 entries
+     would push the rest of the page off-screen. The viewport-
+     relative max-height keeps the list contained on every
+     desktop size, and `overflow-y: auto` shows a scrollbar
+     exactly when the content height exceeds the cap. The list
+     is the only section that scrolls inside the timeline tab;
+     the heatmap, stats and toolbar stay pinned at the top. */
+  max-height: 60vh;
+  overflow-y: auto;
+  /* Reserve a sliver of right padding so the scrollbar does
+     not overlap the last column of badges on browsers that
+     overlay the scrollbar on top of the content (Chrome on
+     macOS, Edge). The 10px matches the grid `gap` so the
+     visual rhythm stays consistent. */
+  padding-right: 4px;
 }
 .timeline-tab-list-item {
   background: #0f1722;
@@ -3531,6 +3651,152 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
   text-decoration: none;
 }
 .k6-script-external-link:hover { color: #fff; text-decoration: underline; }
+
+/* ====================================================================
+   HTTP-Status-Code-Verteilung (Übersicht-Tab, unter dem Ramp-Chart)
+   ====================================================================
+   Mini-Balken-Grid nach dem Mockup
+   `demo/lastruns-statuscode-mockups/variant-3-mini-bar-grid.html`,
+   angepasst an das Dark-Theme der Run-Detail-Tabs
+   (`.run-detail-tab-body`). Jede Zelle trägt einen farbigen
+   Akzent auf der linken Seite, der den Status-Code-Familie
+   kodiert; der prozentuale Anteil steht oben rechts, der
+   absolute Count darunter, der log-skalierte Mini-Balken am
+   unteren Rand. Die Legende darunter erlaubt dem Nutzer, die
+   Farben den Familien zuzuordnen. Die Klassen `cell-2xx`/
+   `cell-3xx`/`cell-4xx`/`cell-5xx`/`cell-err`/`cell-other`
+   werden über `StatusCodeDistributionCard.tsx` anhand der
+   führenden Ziffer bzw. des Fallback-Codes gesetzt. */
+.status-dist {
+  margin-top: 16px;
+  padding: 16px 18px 18px;
+  background: #0f1722;
+  border: 1px solid #293950;
+  border-radius: 10px;
+}
+.status-dist-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.status-dist-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .06rem;
+  text-transform: uppercase;
+  color: #93a2b8;
+}
+.status-dist-total {
+  font-family: ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+  color: #dbe5f3;
+  font-size: 13px;
+}
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 9px;
+}
+.status-cell {
+  position: relative;
+  padding: 9px 11px;
+  background: #14202f;
+  border: 1px solid #293950;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+  transition: border-color .12s ease;
+}
+/* Akzent-Streifen auf der linken Seite — kodiert die Status-Familie.
+   Die Farben sind gegenüber dem Mockup minimal abgedunkelt, damit
+   sie auf dem dunklen `.run-detail-tab-body`-Hintergrund (#1a2638)
+   noch genug Kontrast haben. */
+.status-cell::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--cell-color, #7d63ff);
+}
+.status-cell.cell-2xx { --cell-color: #2d6a4f; }
+.status-cell.cell-3xx { --cell-color: #1849a9; }
+.status-cell.cell-4xx { --cell-color: #d4a72c; }
+.status-cell.cell-5xx { --cell-color: #b42318; }
+.status-cell.cell-err { --cell-color: #93370d; }
+.status-cell.cell-other { --cell-color: #667085; }
+.status-cell:hover { border-color: #3a4d6b; }
+.status-cell-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.status-cell-code {
+  font-family: ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-weight: 800;
+  font-size: 15px;
+  color: #dbe5f3;
+}
+.status-cell-pct {
+  font-family: ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: #93a2b8;
+}
+.status-cell-count {
+  font-family: ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: #93a2b8;
+}
+.status-cell-count strong {
+  color: #dbe5f3;
+  font-size: 14px;
+  font-weight: 700;
+}
+.status-cell-bar {
+  position: relative;
+  height: 4px;
+  background: #1a2535;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.status-cell-bar-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: var(--cell-color, #7d63ff);
+  border-radius: 2px;
+  box-shadow: 0 0 8px -1px var(--cell-color, #7d63ff);
+  transition: width .25s ease;
+}
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px dashed #293950;
+  font-size: 12px;
+  color: #93a2b8;
+}
+.status-legend .lg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-legend .lg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.lg-dot.lg-2xx { background: #2d6a4f; }
+.lg-dot.lg-3xx { background: #1849a9; }
+.lg-dot.lg-4xx { background: #d4a72c; }
+.lg-dot.lg-5xx { background: #b42318; }
+.lg-dot.lg-err { background: #93370d; }
 
 
 

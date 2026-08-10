@@ -27,6 +27,8 @@ import {
   runElapsedSeconds,
   runRemainingSeconds,
   statusDistribution,
+  statusCodeTotals,
+  totalRequestCount,
   summarizeFailure,
   summariseFailure,
   summariseThresholds,
@@ -280,6 +282,119 @@ test('activeStatusCodes returns only the fallback columns when nothing fired', (
   const rows = [{ operationId: 'a', counts: { '200': 0 }, total: 0 }]
 
   deepEqual(activeStatusCodes(rows), ['err', 'other'])
+})
+
+test('statusCodeTotals sums per-operation counts into a run-wide list in activeStatusCodes order', () => {
+  // Mini-Balken-Grid der Übersicht: pro Code ein Balken über
+  // den GESAMTEN Lauf (alle Endpunkte summiert). Die
+  // Reihenfolge folgt [activeStatusCodes] (also tracked
+  // zuerst, dann err, other), damit die UI stabil bleibt
+  // wenn ein neuer Code hinzukommt.
+  //
+  // Im Gegensatz zum Detail-Report blendet die Übersicht
+  // leere Fallback-Spalten (err, other) aus: ein sauberer
+  // 200-only-Lauf darf nicht trotzdem zwei graue "err" /
+  // "other"-Kacheln rendern, die nur 0 anzeigen.
+  const rows = [
+    { operationId: 'a', counts: { '200': 192, '503': 8, '401': 0 } as Record<string, number>, total: 200 },
+    { operationId: 'b', counts: { '200': 50, '401': 12, 'err': 7 } as Record<string, number>, total: 69 },
+  ]
+
+  const totals = statusCodeTotals(rows)
+
+  // 200 wurde in beiden Operationen gefeuert → 192 + 50 = 242
+  // 401 nur in b → 12
+  // 503 nur in a → 8
+  // err nur in b → 7
+  // other wurde nirgends gefeuert → fällt raus, weil der
+  // Übersicht-Helper nur gefeuerte Codes zurückgibt.
+  deepEqual(totals, [
+    { code: '200', count: 242 },
+    { code: '401', count: 12 },
+    { code: '503', count: 8 },
+    { code: 'err', count: 7 },
+  ])
+})
+
+test('statusCodeTotals omits fallback columns when they never fired', () => {
+  // Regression: ein sauberer 200-only-Lauf darf im
+  // Mini-Balken-Grid nur die 200-Kachel zeigen — keine
+  // leeren err/other-Kacheln. Vor der Umstellung hat der
+  // Helper die Fallback-Codes bedingungslos eingeblendet,
+  // weil [activeStatusCodes] das im Detail-Report so macht.
+  // Hier erzwingen wir explizit das abweichende
+  // Übersicht-Verhalten.
+  const rows = [
+    { operationId: 'a', counts: { '200': 100 } as Record<string, number>, total: 100 },
+  ]
+
+  const totals = statusCodeTotals(rows)
+
+  deepEqual(totals, [{ code: '200', count: 100 }])
+})
+
+test('statusCodeTotals keeps the err column when only err fired and no tracked code did', () => {
+  // Regression: ein Lauf, der nur Netzwerkfehler produziert
+  // (k6 schlug bei jeder Iteration fehl), muss trotzdem die
+  // err-Spalte anzeigen — sonst sieht der Nutzer eine leere
+  // Karte und fragt sich, wo die Fehler hin sind. `other`
+  // bleibt in diesem Fall weg, weil es nicht gefeuert hat.
+  const rows = [
+    { operationId: 'a', counts: { '200': 0, 'err': 4 } as Record<string, number>, total: 4 },
+  ]
+
+  const totals = statusCodeTotals(rows)
+
+  deepEqual(totals, [{ code: 'err', count: 4 }])
+})
+
+test('statusCodeTotals returns an empty list when there are no operations at all', () => {
+  // Edge case: ein Run ohne Operationen (z. B. ein
+  // Synthetic-Fixture). Die Komponente filtert diesen Fall
+  // schon im Voraus, der Helper selbst bleibt trotzdem
+  // defensiv — ohne Rows gefeuert zu haben, gibt es nichts
+  // anzuzeigen.
+  const totals = statusCodeTotals([])
+
+  deepEqual(totals, [])
+})
+
+test('statusCodeTotals sums counts for codes outside the tracked set', () => {
+  // Defensive branch: a row may carry a code that is not in
+  // [ALL_STATUS_CODES] (e.g. an exotic HTTP status like 418
+  // emitted by an upstream proxy). The helper must still
+  // produce a row for it — [activeStatusCodes] filters by
+  // the tracked set so this exercise drives the right-hand
+  // side of the `totals[code] ?? 0` short-circuit in the
+  // inner loop. Without this test the branch stays
+  // uncovered and a regression that drops the nullish
+  // coalescing would slip through.
+  const rows = [
+    { operationId: 'a', counts: { '200': 5, '418': 3 } as Record<string, number>, total: 8 },
+  ]
+  const totals = statusCodeTotals(rows)
+  // Only codes in [ALL_STATUS_CODES] appear in the result;
+  // the exotic '418' is summed internally but filtered by
+  // the helper's output contract.
+  deepEqual(totals, [{ code: '200', count: 5 }])
+})
+
+test('totalRequestCount sums the per-row totals across every operation', () => {
+  // Der "Gesamt: N Requests"-Header in der Mini-Grid-Karte
+  // nutzt diesen Helper statt selbst zu summieren, damit
+  // die Anzeige konsistent mit [statusCodeTotals] ist
+  // (gleiche Datenquelle, gleiche Summen-Definition).
+  const rows = [
+    { operationId: 'a', counts: {} as Record<string, number>, total: 200 },
+    { operationId: 'b', counts: {} as Record<string, number>, total: 69 },
+    { operationId: 'c', counts: {} as Record<string, number>, total: 0 },
+  ]
+
+  equal(totalRequestCount(rows), 269)
+})
+
+test('totalRequestCount returns 0 for an empty row set', () => {
+  equal(totalRequestCount([]), 0)
 })
 
 

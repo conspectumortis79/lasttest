@@ -8,6 +8,7 @@ import {
   pickActiveRunId,
   pickActiveRunIdAfterStart,
   removeAllOtherFailed,
+  clearAllRuns,
   removeRun,
   showsStatusPill,
 } from './runDashboard.ts'
@@ -41,9 +42,12 @@ import { SettingsDrawer } from './SettingsDrawer.tsx'
 import { DocPopup } from './DocPopup.tsx'
 import { WikiPopup } from './WikiPopup.tsx'
 import { LanguageProvider } from './useLanguage.tsx'
+import { usePersistence } from './persistenceStorage.ts'
+import { PersistenceProvider } from './usePersistence.tsx'
 import { useLanguage } from './languageStorage.ts'
 import { translate, formatters, type SupportedLanguage } from './i18n.ts'
 import { RunStatusView, LiveBanner, AktionenTab, LiveRampChart } from './runStatusView.tsx'
+import { StatusCodeDistributionCard } from './StatusCodeDistributionCard.tsx'
 import { vuSamplesToEpochSeconds } from './timeSeries.ts'
 import { computeRampChartParams } from './liveRampChartLayout.ts'
 import { ConsoleTab, ThresholdsTab, ConfigTab, FailureTab, K6ScriptTab } from './runDetailTabs.tsx'
@@ -194,13 +198,15 @@ function App() {
   const demoTrafficParam = params.has('demo-traffic') ? params.get('demo-traffic') ?? undefined : undefined
   return (
     <LanguageProvider>
-      <DemoStatusProvider>
-        {reportRunId
-          ? <TestRunReportPage runId={reportRunId} />
-          : demoTrafficParam !== undefined
-            ? <DemoTrafficPage runId={demoTrafficParam} />
-            : <LoadTestApp />}
-      </DemoStatusProvider>
+      <PersistenceProvider>
+        <DemoStatusProvider>
+          {reportRunId
+            ? <TestRunReportPage runId={reportRunId} />
+            : demoTrafficParam !== undefined
+              ? <DemoTrafficPage runId={demoTrafficParam} />
+              : <LoadTestApp />}
+        </DemoStatusProvider>
+      </PersistenceProvider>
     </LanguageProvider>
   )
 }
@@ -214,6 +220,53 @@ function LoadTestApp() {
   // — not in a deeper component — so the toolbar and drawer share
   // the same language state and stay in sync.
   const { language, setLanguage } = useLanguage()
+  // Timeline-persistence toggle. Forwarded as the `persist`
+  // body field on every `POST /api/test-runs` call so the
+  // backend skips the timeline write when the user has
+  // disabled the setting. The hook lives at the App root so
+  // the Settings drawer (a sibling) and the test-runner
+  // button see the same value without prop-drilling.
+  const { persistRuns } = usePersistence()
+  // One-shot cleanup: when the user has the persistence
+  // toggle OFF at the time the App mounts, wipe the
+  // persisted timeline so a fresh start lands on an empty
+  // dashboard. The intuitive contract is "I disabled
+  // saving — there should be no history"; without this
+  // effect the dashboard would still show the runs that
+  // were saved when the toggle was previously on (or under
+  // the default-true build that shipped before this
+  // feature). The [useRef] guard makes the cleanup run
+  // exactly once per App lifetime so toggling the switch
+  // back on and off does not silently re-trigger the wipe.
+  const cleanupRef = useRef(false)
+  useEffect(() => {
+    if (cleanupRef.current) return
+    if (persistRuns) return
+    cleanupRef.current = true
+    void (async () => {
+      try {
+        const response = await fetch('/api/test-runs', { method: 'DELETE' })
+        if (!response.ok) return
+        // Match the backend's wipe: drop the in-memory
+        // map and clear the active run selection. The
+        // dashboard's first poll re-fetches from an empty
+        // table and renders accordingly.
+        setRuns(clearAllRuns())
+        setActiveRunId(undefined)
+      } catch {
+        // Best-effort: when the backend is unreachable
+        // the polling loop will surface the same
+        // connectivity error on the next tick; no need
+        // to spam the user with a separate toast here.
+      }
+    })()
+    // The effect intentionally fires only on the first
+    // mount with `persistRuns === false`; subsequent
+    // renders must not re-run the cleanup. We depend on
+    // [persistRuns] only so the lint check is happy, the
+    // [cleanupRef] guard short-circuits the body on every
+    // subsequent call.
+  }, [persistRuns])
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Browser-Notification settings. The settings live next to the
   // drawer in App.tsx so the polling effect below can react to
@@ -491,9 +544,26 @@ function LoadTestApp() {
         // (STOPPED → ABORTED) so the user gets exactly one
         // notification per run.
         const next = { ...current }
-        for (const run of updated) {
-          if (run !== null) next[run.id] = run
-        }
+        pendingIds.forEach((id, index) => {
+          const run = updated[index]
+          if (run !== null) {
+            next[run.id] = run
+            return
+          }
+          // The backend no longer knows about this run id
+          // (404 from GET /api/test-runs/{id}). Without this
+          // branch the run would stay in the dashboard map
+          // forever, because the !isTerminalRun() filter on
+          // the next tick would still classify it as
+          // non-terminal and re-issue the same 404-bound
+          // request. The user then sees a permanent
+          // "XHR 404" for /rerun and /time-series on the
+          // stale badge. The fix mirrors the contract of
+          // [handleClearAll]: a row the backend does not
+          // know about is no longer part of the user's
+          // timeline and must drop out of the map.
+          delete next[id]
+        })
         const transitions = detectTerminalTransitions(current, next, notificationSettings)
         fireTerminalNotifications(transitions, language)
         return next
@@ -574,6 +644,14 @@ function LoadTestApp() {
           operationIds: [...selected],
           operationConfigurations,
           loadProfile: serialiseLoadProfile(loadProfile),
+          // The Settings-drawer toggle. When the user has
+          // disabled "Ausgeführte Lasttestkonfigurationen
+          // speichern", the backend skips the timeline
+          // write and the 40-row retention cap, so this
+          // run is dropped on the next container restart.
+          // The live view (polling, single-run endpoints)
+          // keeps working for the duration of the session.
+          persist: persistRuns,
         }),
       })
       const data = await response.json()
@@ -961,6 +1039,28 @@ function LoadTestApp() {
       setActiveRunId(pickActiveRunId(next, activeRunId))
       return next
     }),
+    // Wipe the timeline. The backend handles the
+    // in-flight cancellation + bulk delete via
+    // `DELETE /api/test-runs` (see
+    // [LocalK6TestRunService.deleteAll]); the client just
+    // empties its in-memory map and clears the active run
+    // selection. We swallow fetch errors and return null
+    // so the caller can surface a toast without the
+    // promise itself rejecting.
+    onClearAll: async () => {
+      try {
+        const response = await fetch('/api/test-runs', { method: 'DELETE' })
+        if (!response.ok) {
+          return null
+        }
+        const body = (await response.json()) as { cancelled: number, deleted: number }
+        setRuns(() => clearAllRuns())
+        setActiveRunId(undefined)
+        return body
+      } catch {
+        return null
+      }
+    },
   }), [cancelRun, rerunRun, safeClipboard, downloadScriptById, downloadSummaryById, handleRemoveRun, activeRunId])
 
   /**
@@ -1617,6 +1717,17 @@ function RunDetail({ run, runNow, handlers, timelineRefreshTick, runs }: { run: 
             while the run is in flight, so a finished run does
             not keep firing requests in the background. */}
         <OverviewLiveRamp run={run} now={runNow} />
+        {/* HTTP-Status-Code-Verteilung (Mini-Balken-Grid) für
+            den gesamten Lauf. Die Karte rendert nichts, solange
+            kein k6-Summary vorliegt — ein leeres Grid mit
+            "Gesamt: 0 Requests" wäre verwirrender als die
+            komplette Auslassung. Liegt ein Summary vor, summiert
+            die Karte die Counts über alle Endpunkte und
+            präsentiert sie nach Status-Code-Familie eingefärbt
+            (2xx grün, 4xx gelb, 5xx rot, err braun). Der
+            detaillierte Bericht (Aktionen → "K6 Bericht öffnen")
+            bleibt die Quelle für die Per-Endpunkt-Aufschlüsselung. */}
+        <StatusCodeDistributionCard run={run} />
         {/* The k6 console output and the JSON summary live in
             their own tabs (and in the Aktionen → Roh-Zusammenfassung
             exportieren action). Keeping them out of the Übersicht

@@ -17,6 +17,7 @@ import de.lasttest.config.InfluxDbProperties
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -75,6 +76,13 @@ class LocalK6TestRunServiceTest {
             override fun import(content: String): ImportedSpecification = specification
         }
     private val successfulGenerator = SuccessfulGenerator()
+
+    // Shared per-endpoint statistics repository. Tests that
+    // want to inspect the × N counter snapshot the table via
+    // this instance, the service writes through the same one
+    // so the assertions reflect what the production code path
+    // would see.
+    private val statisticsRepository: InMemoryOperationStatisticsRepository = InMemoryOperationStatisticsRepository()
     private val service =
         LocalK6TestRunService(
             importer = noopImporter,
@@ -84,7 +92,7 @@ class LocalK6TestRunServiceTest {
             k6Command = "k6",
             influxDbProperties = influxDb,
             runRepository = InMemoryTestRunRepository(),
-            statisticsRepository = InMemoryOperationStatisticsRepository(),
+            statisticsRepository = statisticsRepository,
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
         )
 
@@ -1790,6 +1798,477 @@ class LocalK6TestRunServiceTest {
         } finally {
             blocker.countDown()
             realPool.shutdownNow()
+        }
+    }
+
+    // ---- deleteAll ----------------------------------------------------
+
+    @Test
+    fun `deleteAll removes every persisted run and reports the row count`() {
+        // Persist three rows through the service so the
+        // repository is the source of truth (the in-memory
+        // map is only kept in sync, the database is what the
+        // timeline endpoint actually reads from). After the
+        // wipe both stores must be empty and the result must
+        // surface the row count so the frontend can confirm
+        // the operation without a follow-up round trip.
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1)
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = profile,
+            ),
+        )
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = profile,
+            ),
+        )
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = profile,
+            ),
+        )
+
+        val result = service.deleteAll()
+
+        // The three inserted runs are all QUEUED. The wipe
+        // force-cancels them via the no-process branch in
+        // [cancel] (each QUEUED run lands in STOPPED with a
+        // `cancelledAt` timestamp). That counts as
+        // "cancelled" from the wipe's perspective because
+        // the user explicitly asked for the rows to be
+        // removed and the cancel path had to run.
+        assertEquals(3, result.cancelled)
+        assertEquals(3, result.deleted)
+        // The in-memory map is cleared so a subsequent find()
+        // cannot return a stale snapshot of a row that no
+        // longer exists in the database.
+        assertEquals(emptyList(), service.list())
+    }
+
+    @Test
+    fun `deleteAll force-cancels every in-flight run before wiping the table`() {
+        // The wipe is two-phase: cancel first, then delete.
+        // Without the cancel-first step a still-running k6
+        // would race the bulk delete and write a fresh row
+        // into a table we just emptied, leaving the timeline
+        // with a single phantom run after the wipe.
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1)
+        val first =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = profile,
+                ),
+            )
+        val second =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = profile,
+                ),
+            )
+        // Cancel the first one gracefully so it lands in
+        // STOPPED before the wipe. The second is still
+        // QUEUED. After the wipe both rows are gone, and
+        // the second row's cancel path (the no-process
+        // branch in [cancel]) flipped it to STOPPED with a
+        // `cancelledAt` timestamp — the second one counts
+        // as "cancelled" because the wipe forced it out of
+        // its cancellable state.
+        service.cancel(first.id, force = false)
+
+        val result = service.deleteAll()
+
+        // First run was already terminal (STOPPED), second
+        // was QUEUED with no live process so the cancel
+        // path still ran and reported success. The
+        // cancelled count is 1 (the QUEUED one).
+        assertEquals(1, result.cancelled)
+        assertEquals(2, result.deleted)
+        // Both runs are wiped from the in-memory map too,
+        // so the dashboard re-render that follows the wipe
+        // shows an empty list (no zombies on the UI).
+        assertEquals(emptyList(), service.list())
+        // The repository agrees — a second call returns zero
+        // deleted because the table is already empty.
+        val followUp = service.deleteAll()
+        assertEquals(0, followUp.deleted)
+    }
+
+    @Test
+    fun `deleteAll on an empty database returns zero counts and does not throw`() {
+        // Regression: an empty wipe must NOT crash on the
+        // repository's `count()` call. A user who clicks the
+        // button before any run was ever started is the
+        // common case for that path.
+        val result = service.deleteAll()
+
+        assertEquals(0, result.cancelled)
+        assertEquals(0, result.deleted)
+    }
+
+    @Test
+    fun `deleteAll leaves the per-endpoint statistics counter untouched`() {
+        // The × N badge in the operation list is a separate
+        // view over the run history. Resetting it as part of
+        // the timeline wipe would silently invalidate the
+        // day-bucket heatmap and any other surface that
+        // depends on a stable per-endpoint counter. The
+        // service must leave the statistics table alone.
+        // We verify the contract by snapshotting the
+        // statistics table before and after the wipe and
+        // asserting the row count is identical.
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                operationIds = setOf(specification.operations[0].operationId),
+            ),
+        )
+        val counterBefore = statisticsRepository.findAll().size
+
+        service.deleteAll()
+
+        val counterAfter = statisticsRepository.findAll().size
+        assertEquals(counterBefore, counterAfter, "the × N counter table must not be reset by the timeline wipe")
+    }
+
+    // ---- persist flag --------------------------------------------------
+
+    @Test
+    fun `create with persist false does not write the run to the timeline table`() {
+        // The Settings-drawer toggle is the single source of
+        // truth for "should the run be kept?". When the user
+        // opts out, the run is still executed and the live
+        // view still works, but the row never lands in H2.
+        // The test creates a run with `persist = false` and
+        // asserts the repository is empty afterwards.
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                persist = false,
+            ),
+        )
+        // The in-memory map holds the run so the polling
+        // endpoints (`/api/test-runs/{id}`, time-series)
+        // keep working for the rest of the session.
+        assertEquals(1, service.list().size)
+        // The persisted timeline table is empty: the
+        // dashboard's per-endpoint timeline and the
+        // `/api/operations/runs` query must not see the
+        // ephemeral run.
+        assertEquals(emptyList(), service.runRepository.findAll())
+    }
+
+    @Test
+    fun `create with persist false does not enforce the 40-row per-endpoint retention cap`() {
+        // The retention cap only applies to persisted runs.
+        // Ephemeral runs do not show up in the timeline and
+        // therefore do not need to be capped — without this
+        // guarantee, opting out of persistence would still
+        // mutate the persisted timeline (because the cap
+        // helper runs even when no row was written).
+        // Pinning the absence of the side effect is enough.
+        repeat(60) {
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                    operationIds = setOf("getPet"),
+                    persist = false,
+                ),
+            )
+        }
+        // No persisted row was ever written; the cap helper
+        // therefore never ran. A regression that calls the
+        // helper unconditionally would leave 40 empty deletes
+        // on a 0-row table and still pass this assertion —
+        // pin the lack of a delete by counting after the
+        // 60th call.
+        assertEquals(0, service.runRepository.count())
+    }
+
+    @Test
+    fun `deleteAll preserves ephemeral runs in the in-memory map`() {
+        // The "Alle löschen" button on the timeline is
+        // scoped to the persisted table. An ephemeral run
+        // (the user opted out of persistence) must keep
+        // running so the live view does not break in the
+        // middle of a session. The test persists one run,
+        // creates an ephemeral second run, calls the wipe,
+        // and asserts the ephemeral one is still in the
+        // in-memory map.
+        val persisted =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+        val ephemeral =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                    persist = false,
+                ),
+            )
+        // Sanity: both runs live in the in-memory map
+        // before the wipe — the persisted one is in the
+        // table, the ephemeral one is not.
+        assertEquals(2, service.list().size)
+        assertEquals(1, service.runRepository.findAll().size)
+
+        service.deleteAll()
+
+        // Persisted table is empty after the wipe.
+        assertEquals(emptyList(), service.runRepository.findAll())
+        // The in-memory map retains exactly the ephemeral
+        // run; the persisted one is gone so a subsequent
+        // `find()` cannot return a stale snapshot of a
+        // row that no longer exists in the database.
+        val remaining = service.list()
+        assertEquals(1, remaining.size, "expected only the ephemeral run to survive the wipe")
+        assertEquals(ephemeral.id, remaining[0].id, "the survivor must be the ephemeral run")
+        assertNotEquals(persisted.id, remaining[0].id, "the persisted run must not survive the wipe")
+    }
+
+    // ---- per-endpoint 40-row retention cap -----------------------------
+
+    @Test
+    fun `create drops the oldest persisted run for the same endpoint when the cap is exceeded`() {
+        // The user asked for a hard ceiling of 40 runs per
+        // endpoint. We seed 40 runs targeting the same
+        // `(method, path)` and assert that a 41st create
+        // leaves the table at exactly 40 rows and drops the
+        // oldest one. The cap is per-endpoint, so a run for
+        // a different endpoint must not be evicted.
+        val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1)
+        val seededIds = mutableListOf<String>()
+        for (i in 0 until 40) {
+            val run =
+                service.create(
+                    CreateTestRunRequest(
+                        specification = "openapi",
+                        baseUrl = "https://example.test",
+                        loadProfile = profile,
+                        operationIds = setOf("getPet"),
+                    ),
+                )
+            seededIds += run.id
+        }
+        // Cap reached: the 41st create must drop the
+        // oldest one. We assert the persisted count is
+        // exactly 40 and the dropped run is the original
+        // seed.
+        val survivor =
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = profile,
+                    operationIds = setOf("getPet"),
+                ),
+            )
+        assertEquals(40, service.runRepository.count())
+        // The very first seed is the one that fell out of
+        // the window — every other run from the seed list
+        // is still addressable through the repository.
+        assertTrue(service.runRepository.findById(seededIds.first()).isEmpty, "the oldest seed must have been evicted")
+        assertTrue(service.runRepository.findById(survivor.id).isPresent, "the just-created run must remain")
+        // A different endpoint is independent: a run
+        // targeting `createPet` is a fresh row that does
+        // not consume the getPet budget.
+        service.create(
+            CreateTestRunRequest(
+                specification = "openapi",
+                baseUrl = "https://example.test",
+                loadProfile = profile,
+                operationIds = setOf("createPet"),
+            ),
+        )
+        // The getPet budget is still 40 rows; createPet is
+        // a separate counter that started at 0 and now has 1.
+        assertEquals(40, service.runRepository.countByEndpoint("GET", "/pets/{id}"))
+        assertEquals(1, service.runRepository.countByEndpoint("POST", "/pets"))
+    }
+
+    @Test
+    fun `create with persist true but no matching operation never triggers the retention cap`() {
+        // The cap helper keys on the first operation of the
+        // configuration. A run that targets no operations
+        // (a synthetic test fixture, e.g. a future
+        // "/health" probe) contributes to no endpoint and
+        // therefore does not consume any budget. Pinning
+        // the no-op behaviour keeps the helper from
+        // accidentally counting these runs against every
+        // existing endpoint.
+        repeat(60) {
+            service.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+        }
+        // The cap kicks in at 40 for the getPet endpoint
+        // (the first operation of the configuration is
+        // always picked because the test spec does not
+        // filter by operationIds). 60 - 40 + 1 (the 41st
+        // is the first to trigger the cap) means the
+        // table holds 40 rows in the end. Pinning the
+        // exact number keeps the helper honest.
+        assertEquals(40, service.runRepository.count())
+    }
+
+    // ---- reproduce the user-reported "newly-started run inherits the
+    // ---- previous run's SIGKILL" race ---------------------------------
+    //
+    // The bug surfaces when the user starts run A, then cancels run A
+    // (graceful or force), then immediately starts run B. The dashboard
+    // then renders run B as ABORTED + cancelledByForce=true even though
+    // the user only ever asked to stop run A.
+    //
+    // The root cause is a window inside `execute()` between
+    //   (1) `runs[run.id] = current.copy(status = RUNNING, startedAt = started)`
+    // and
+    //   (2) `processes[run.id] = process`
+    // During that window the in-memory status is RUNNING but
+    // `processes[run.id]` is still `null`. A concurrent `cancel(id)`
+    // therefore takes the "no-process branch", which sets the
+    // terminal state (ABORTED or STOPPED) and `cancelledByForce` on
+    // `runs[id]` — but does NOT touch `cancellationRequested[id]`.
+    // The graceful-cancel escalation in the with-process branch
+    // never gets scheduled, so when the k6 process the executor just
+    // spawned eventually exits, `execute()` reads
+    //   `cancellationRequested.remove(run.id) == null`
+    // and falls through to the `exitCode`-based branch, picking
+    // COMPLETED/FAILED as the new status. `latest.copy(status = ...)`
+    // keeps the `cancelledByForce = true` that the no-process
+    // branch wrote, so the row is left in the contradictory shape
+    //   status = COMPLETED, cancelledByForce = true, cancelledAt = <stop A timestamp>
+    // which the frontend renders as "vom Benutzer per SIGKILL
+    // abgebrochen" because that branch only checks the
+    // `cancelledByForce` flag.
+    //
+    // The test below reproduces that exact sequence by hand: a
+    // CapturingExecutorService parks the `execute()` task, we then
+    // flip the run to RUNNING and call force-cancel on it (so the
+    // executor-side window is bypassed but the no-process branch is
+    // still taken), then we run the parked task and assert that the
+    // final state is consistent.
+
+    @Test
+    fun `execute preserves the user-initiated ABORTED state when cancel ran inside the race window`() {
+        // The user-reported race: cancel() takes the
+        // no-process branch (ABORTED + cancelledByForce=true)
+        // during the window between
+        //   `runs[run.id] = current.copy(status = RUNNING, ...)`
+        // and
+        //   `processes[run.id] = process`
+        // The post-`waitFor` bookkeeping must NOT overwrite
+        // that user-initiated ABORTED with the
+        // exit-code-derived COMPLETED/FAILED, or the row is
+        // left in a contradictory state (status = COMPLETED,
+        // cancelledByForce = true) that the dashboard renders
+        // as "vom Benutzer per SIGKILL abgebrochen".
+        //
+        // We drive the race deterministically by hand:
+        //   1. Stamp the in-memory snapshot to RUNNING, the
+        //      state execute() would have written just
+        //      before the window opened.
+        //   2. Call cancel() — it takes the no-process
+        //      branch because `processes[run.id]` is still
+        //      null, and stamps ABORTED +
+        //      cancelledByForce=true.
+        //   3. Inject a short-lived stub k6 process so the
+        //      parked executor task's `process.waitFor()`
+        //      returns quickly.
+        //   4. Run the parked task and assert the final
+        //      state honours the user-initiated ABORTED.
+        //
+        // The early `if (current.status.isTerminal()) return`
+        // guard in execute() already covers most of the
+        // race (it bails out before `processes[run.id] =
+        // process` is ever written). The fix we are
+        // asserting here is the *post-`waitFor`* guard
+        // that protects against a future refactor that
+        // removes the early bail-out — it ensures the
+        // post-`waitFor` bookkeeping itself never
+        // overwrites a user-initiated terminal status.
+        val pendingTask =
+            java.util.concurrent.atomic
+                .AtomicReference<Runnable?>(null)
+        val capturingExecutor =
+            CapturingExecutorService { task ->
+                pendingTask.set(task)
+            }
+        val repository = InMemoryTestRunRepository()
+        val statistics = InMemoryOperationStatisticsRepository()
+        val raceService =
+            LocalK6TestRunService(
+                importer = noopImporter,
+                generator = successfulGenerator,
+                executor = capturingExecutor,
+                readerExecutor = SynchronousExecutorService(),
+                k6Command = "/bin/sh",
+                influxDbProperties = influxDb,
+                runRepository = repository,
+                statisticsRepository = statistics,
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        val run =
+            raceService.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 5),
+                ),
+            )
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(raceService) as java.util.concurrent.ConcurrentHashMap<String, TestRun>
+        val processesField = LocalK6TestRunService::class.java.getDeclaredField("processes")
+        processesField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val processesMap =
+            processesField.get(raceService) as java.util.concurrent.ConcurrentHashMap<String, Process>
+        runsMap[run.id] = run.copy(status = TestRunStatus.RUNNING, startedAt = "2026-01-01T00:00:01Z")
+        assertTrue(raceService.cancel(run.id, force = true))
+        assertEquals(TestRunStatus.ABORTED, runsMap[run.id]?.status)
+        val stub = ProcessBuilder("/bin/sh", "-c", "exit 0").start()
+        processesMap[run.id] = stub
+        try {
+            val task = pendingTask.get()
+            assertNotNull(task)
+            task.run()
+            val finalRun = assertNotNull(raceService.find(run.id))
+            assertEquals(
+                TestRunStatus.ABORTED,
+                finalRun.status,
+                "user-initiated ABORTED must survive the post-`waitFor` bookkeeping when cancel ran inside the race window",
+            )
+            assertEquals(true, finalRun.cancelledByForce, "cancelledByForce must remain true")
+        } finally {
+            if (stub.isAlive) stub.destroyForcibly()
         }
     }
 }

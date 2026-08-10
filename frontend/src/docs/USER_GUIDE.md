@@ -16,6 +16,7 @@
    - 3.1 [Docker (recommended)](#31-docker-recommended)
    - 3.2 [Docker with InfluxDB + Grafana (time-series)](#32-docker-with-influxdb--grafana-time-series)
    - 3.3 [Local development install](#33-local-development-install)
+   - 3.4 [Optional — trust a custom TLS certificate](#34-optional--trust-a-custom-tls-certificate-staging-internal-ca)
 4. [First run and the demo API](#4-first-run-and-the-demo-api)
    - 4.1 [Loading the demo](#loading-the-demo)
    - 4.2 [Toggling the demo on and off](#toggling-the-demo-on-and-off)
@@ -266,6 +267,34 @@ In dev mode two URLs are exposed; they are **not** interchangeable:
 For a single-URL deployment where the backend serves both the API and
 the UI on port 8286, use `./docker-start.sh` (or `docker compose up --build`)
 instead.
+
+### 3.4 Optional — trust a custom TLS certificate (staging, internal CA)
+
+> **Skip this section if your target API uses a public certificate** — it is only needed when the target API is signed by a self-signed or internal CA and lasttest / k6 cannot establish the TLS handshake out of the box.
+
+The bundled `docker-compose.yml` already wires a mount for a custom CA
+at `certs/custom-ca.pem`. Drop your company's root CA (PEM format,
+possibly with multiple `-----BEGIN CERTIFICATE-----` blocks) at that
+path on the host **before** starting the container:
+
+```bash
+# example: copy the internal root CA shipped by your platform team
+cp ~/Downloads/internal-root-ca.pem certs/custom-ca.pem
+
+docker compose up -d --build
+```
+
+After the next restart the backend loads the file as an additional
+TrustStore, and k6 receives the same PEM via `SSL_CERT_FILE` — both
+the spec import (Step 1) and the actual load test (Step 4) can then
+talk to a target signed by that CA without `PKIX path building
+failed` or `x509: certificate signed by unknown authority`. Public CAs
+keep working — the certificate is *added* on top of the defaults, not
+used to replace them.
+
+For the full configuration reference, PKCS12 / JKS variants, local
+development mode, and limitations see
+[Section 14.1 — Trusting custom TLS certificates](#141-trusting-custom-tls-certificates).
 
 ---
 
@@ -1499,6 +1528,38 @@ You have two ways to re-run the same scenario:
   and click **k6-Lasttest starten** again. The new run has no
   genealogical link to the old one; the old row stays in the
   dashboard unchanged.
+
+> ⚠ **Important — timeline storage is opt-in and disabled by
+> default.** A fresh install does not save any runs; the
+> timeline tab stays empty until you open **Settings** (gear icon
+> in the toolbar) and flip the **Save executed test
+> configurations** toggle to enabled. The choice is remembered in
+> `localStorage` (under `lasttest.persistRuns`) and re-applied on
+> every visit. When the toggle is off, every subsequent
+> `POST /api/test-runs` sends `persist: false` so the backend
+> skips the timeline write and the live view is the only surface
+> that shows the run — it disappears at the next container
+> restart. The 40-row per-endpoint retention cap only applies to
+> runs created with persistence enabled.
+
+> ⚠ **Important — timeline rows are stored encrypted.** Every
+> row you see in the `Letzte Läufe` panel is persisted encrypted
+> on the H2 volume: the `CreateTestRunRequest` and the run's
+> configuration JSON are AES-GCM encrypted with a 256-bit key
+> that is auto-generated on first start and persisted next to the
+> H2 file (or supplied explicitly via the `LASTTEST_ENCRYPTION_KEY`
+> environment variable or the `lasttest.encryption.key` property).
+> The plaintext is materialised in memory **only** when you
+> right-click a terminal row and pick **Rerun** — that is the
+> single path through which the backend decrypts the original
+> request and re-queues a new run. Polling `/api/test-runs`, the
+> dashboard re-render, the printable k6 report, and the
+> per-endpoint `/api/operations/runs` endpoint all read the
+> encrypted blob straight from disk and never touch the plaintext.
+> Set `lasttest.encryption.enabled=false` to switch to a no-op
+> encryptor (useful for forensics or for environments that
+> already provide volume-level encryption). See the **Walkthrough**
+> step 4 (annotation 9) for the same note in popup form.
 
 ---
 

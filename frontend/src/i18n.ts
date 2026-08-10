@@ -46,8 +46,20 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'drawer.notifications.enabled.hint': 'Show a desktop notification when a k6 run finishes — successful or failed.',
     'drawer.notifications.permission.denied': 'Notifications are blocked by the browser. Enable them in the site settings to use this feature.',
     'drawer.section.demo': 'Demo API',
+    'drawer.section.timeline': 'Timeline',
     'drawer.demo.enabled': 'Enable the bundled demo API',
     'drawer.demo.enabled.hint': 'Spins up the in-process /demo-api/* endpoints so you can drive load against a real, full-fidelity REST API without a separate backend. No auto-detection: the demo stays off until you flip this switch. Your choice is remembered across restarts.',
+    // Persistence toggle for the timeline. When OFF, the run
+    // is still executed and the live view keeps working, but
+    // the row never lands in the per-endpoint timeline and
+    // is dropped on the next container restart. When ON,
+    // runs are persisted, the per-endpoint timeline shows
+    // them, and the 40-row retention cap is enforced. The
+    // default is OFF so a fresh install does not silently
+    // grow the timeline just because the user clicked the
+    // "Start test" button.
+    'drawer.persistence.saveExecutions': 'Archive executed load tests',
+    'drawer.persistence.saveExecutions.hint': 'When enabled, the detailed k6 report for every executed load test is saved and shown in the timeline. The timeline keeps at most 40 runs per endpoint; older runs are dropped automatically. When disabled, the run is still executed and the live view works, but it is not saved and disappears when the container restarts.',
     'notification.completed.title': 'k6 run completed',
     'notification.completed.body': 'Run {id} finished successfully.',
     'notification.failed.title': 'k6 run finished with a failure',
@@ -65,6 +77,8 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step1.ann.3.body': 'Paste or edit the spec directly here. Handy when you only want to test a subset of a large spec.',
     'walk.step1.ann.4.title': 'Upload file',
     'walk.step1.ann.4.body': 'Alternative to the URL: upload a YAML or JSON file. lasttest accepts both formats and converts Swagger 2.0 to OpenAPI 3 automatically.',
+    'walk.step1.ann.5.title': 'Custom TLS certificate',
+    'walk.step1.ann.5.body': 'If your target API uses a self-signed or internal CA, drop the PEM at certs/custom-ca.pem on the host before docker compose up — lasttest and k6 pick it up automatically so the requests can go through. See §14.1 for the full reference (PKCS12, local-dev, limitations).',
 
     'walk.step2.title': 'Pick endpoints',
     'walk.step2.intro': 'Step 2 lists every endpoint imported from the spec. Select the endpoints k6 should drive. Expand each endpoint to configure parameters, body, the payload pool and authentication (Bearer, Basic, API key, OAuth2, OIDC).',
@@ -438,6 +452,22 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'report.payload.auth.heading': 'Authentication',
     'report.statusCode.intro': 'Exact HTTP response codes per endpoint. "err" stands for network or connection errors (status 0, e.g. connection drop, DNS failure, or TLS handshake failure). "other" collects responses with status codes not in the predefined list.',
 
+    // Status-code distribution card on the Übersicht tab.
+    // Renders the same wire as the detailed report but
+    // aggregated across every endpoint so the user gets a
+    // run-wide view at a glance.
+    'overview.statusCode.aria': 'HTTP status code distribution for this test run',
+    'overview.statusCode.title': 'HTTP status code distribution',
+    'overview.statusCode.total': 'Total: {count} requests',
+    'overview.statusCode.requests': 'requests',
+    'overview.statusCode.legendAria': 'Status code family legend',
+    'overview.statusCode.legend.2xx': '2xx — success',
+    'overview.statusCode.legend.3xx': '3xx — redirect',
+    'overview.statusCode.legend.4xx': '4xx — client error',
+    'overview.statusCode.legend.5xx': '5xx — server error',
+    'overview.statusCode.legend.err': 'err — network / TLS failure',
+    'overview.statusCode.cellTitle': '{code} · {count} requests ({pct})',
+    'overview.statusCode.empty': 'No status code data available for this run yet.',
     // Detail report
     'report.title': 'Detailed k6 Test Report',
     'report.open': 'Open detailed k6 report',
@@ -726,6 +756,19 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'detail.timeline.dayLabel.past': '{n}d ago',
     'detail.timeline.list.head': 'Visible in window',
     'detail.timeline.list.sub': '· {count} runs · newest first',
+    // Wipe the entire timeline. Triggered by the "Clear all"
+    // button next to the "Visible in window · N runs" header
+    // on the per-endpoint timeline tab. Two-step UX: a
+    // confirm dialog must be accepted before the DELETE
+    // request goes out, because the wipe force-cancels
+    // every in-flight run as part of the operation.
+    'detail.timeline.list.clearAll': 'Clear all',
+    'detail.timeline.list.clearAll.confirm': 'Permanently delete all test runs?',
+    'detail.timeline.list.clearAll.confirmHint': 'In-flight tests will be force-cancelled. This action cannot be undone.',
+    'detail.timeline.list.clearAll.confirmButton': 'Delete everything',
+    'detail.timeline.list.clearAll.cancelButton': 'Cancel',
+    'detail.timeline.list.clearAll.error': 'Could not clear the timeline: {message}',
+    'detail.timeline.list.clearAll.success': 'Cleared {deleted} runs ({cancelled} in-flight cancelled).',
     'detail.timeline.list.item': 'Klick springt im Zeitstrahl zu dieser Zeit',
     'detail.timeline.legend.passed': 'Passed',
     'detail.timeline.legend.failed': 'Failed',
@@ -829,6 +872,8 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step1.ann.3.body': 'Hier kannst du die Spezifikation direkt einfügen oder vor dem Import bearbeiten. Praktisch, wenn du nur einen Teil einer großen Spec testen willst.',
     'walk.step1.ann.4.title': 'Datei hochladen',
     'walk.step1.ann.4.body': 'Alternative zur URL: lade eine YAML- oder JSON-Datei hoch. lasttest akzeptiert beide Formate und konvertiert Swagger 2.0 automatisch nach OpenAPI 3.',
+    'walk.step1.ann.5.title': 'Eigenes TLS-Zertifikat',
+    'walk.step1.ann.5.body': 'Wenn deine Ziel-API eine self-signed oder interne CA nutzt, lege die PEM vor docker compose up unter certs/custom-ca.pem auf dem Host ab — lasttest und k6 laden sie automatisch, damit die Requests durchgehen. Details in §14.1 (PKCS12, lokaler Dev-Modus, Einschränkungen).',
 
     'walk.step2.title': 'Endpunkte wählen',
     'walk.step2.intro': 'Schritt 2 listet alle aus der Spec importierten Endpunkte. Wähle die Endpunkte, die k6 später ansteuern soll. Klappe jeden Endpunkt auf, um Parameter, Body, den Payload-Pool und die Authentifizierung (Bearer, Basic, API-Key, OAuth2, OIDC) zu konfigurieren.',
@@ -913,7 +958,20 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'drawer.notifications.enabled.hint': 'Desktop-Benachrichtigung anzeigen, wenn ein k6-Lauf endet — erfolgreich oder fehlgeschlagen.',
     'drawer.notifications.permission.denied': 'Benachrichtigungen sind im Browser blockiert. Aktiviere sie in den Website-Einstellungen, um diese Funktion zu nutzen.',
     'drawer.section.demo': 'Demo-API',
+    'drawer.section.timeline': 'Timeline',
     'drawer.demo.enabled': 'Mitgelieferte Demo-API aktivieren',
+    // Speicher-Schalter für die Timeline. Bei AUS wird der
+    // Run weiterhin ausgeführt und die Live-Ansicht
+    // funktioniert, aber er landet nicht in der
+    // Endpunkt-Timeline und ist nach dem nächsten
+    // Container-Neustart weg. Bei AN werden Runs
+    // persistiert, in der Timeline angezeigt und das
+    // 40-Zeilen-Limit pro Endpunkt greift. Standard
+    // ist AUS, damit eine frische Installation nicht
+    // still die Timeline füllt, nur weil der Nutzer
+    // "Test starten" geklickt hat.
+    'drawer.persistence.saveExecutions': 'Ausgeführte Lasttest historisieren',
+    'drawer.persistence.saveExecutions.hint': 'Wenn aktiv, wird der ausführliche k6-Bericht jedes ausgeführten Lasttests gespeichert und in der Timeline angezeigt. Die Timeline behält maximal 40 Läufe pro Endpunkt — ältere werden automatisch entfernt. Wenn deaktiviert, wird der Run trotzdem ausgeführt und die Live-Ansicht funktioniert, aber er wird nicht gespeichert und verschwindet beim Container-Neustart.',
     'drawer.demo.enabled.hint': 'Startet die im Prozess laufenden /demo-api/*-Endpunkte, damit du eine echte, vollständige REST-API mit Last treiben kannst — ohne separates Backend. Keine Auto-Erkennung: die Demo bleibt aus, bis du diesen Schalter umlegst. Deine Auswahl wird über Neustarts hinweg gemerkt.',
     'notification.completed.title': 'k6-Lauf abgeschlossen',
     'notification.completed.body': 'Lauf {id} wurde erfolgreich beendet.',
@@ -1238,6 +1296,21 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'report.payload.auth.heading': 'Authentifizierung',
     'report.statusCode.intro': 'Exakte HTTP-Antwortcodes pro Endpunkt. „err" steht für Netzwerk- oder Verbindungsfehler (Status 0, z. B. Verbindungsabbruch, DNS-Fehler oder TLS-Handshake fehlgeschlagen). „other" sammelt Antworten mit Statuscodes, die nicht in der vordefinierten Liste enthalten sind.',
 
+    // Status-Code-Verteilung auf der Übersicht-Tab. Zeigt die
+    // gleichen Daten wie der ausführliche Bericht, aber über
+    // alle Endpunkte aggregiert.
+    'overview.statusCode.aria': 'HTTP-Status-Code-Verteilung dieses Testlaufs',
+    'overview.statusCode.title': 'HTTP-Status-Code-Verteilung',
+    'overview.statusCode.total': 'Gesamt: {count} Requests',
+    'overview.statusCode.requests': 'Requests',
+    'overview.statusCode.legendAria': 'Legende der Status-Code-Familien',
+    'overview.statusCode.legend.2xx': '2xx — Erfolg',
+    'overview.statusCode.legend.3xx': '3xx — Redirect',
+    'overview.statusCode.legend.4xx': '4xx — Client-Fehler',
+    'overview.statusCode.legend.5xx': '5xx — Server-Fehler',
+    'overview.statusCode.legend.err': 'err — Netzwerk- / TLS-Fehler',
+    'overview.statusCode.cellTitle': '{code} · {count} Requests ({pct})',
+    'overview.statusCode.empty': 'Für diesen Lauf liegen noch keine Status-Code-Daten vor.',
     // Detail report
     'report.title': 'Ausführlicher k6 Testbericht',
     'report.open': 'Ausführlicher K6-Testbericht',
@@ -1526,6 +1599,19 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'detail.timeline.dayLabel.past': 'vor {n} T',
     'detail.timeline.list.head': 'Sichtbar im Zeitfenster',
     'detail.timeline.list.sub': '· {count} Läufe · neueste zuerst',
+    // Gesamte Timeline leeren. Wird durch den "Alle
+    // löschen"-Button neben der Überschrift "Sichtbar
+    // im Zeitfenster · N Läufe" auf der
+    // Endpoint-Timeline-Tab ausgelöst. Zwei-Schritt-UX:
+    // ein Bestätigungsdialog muss bestätigt werden, weil
+    // der Wipe alle laufenden Tests hart abbricht.
+    'detail.timeline.list.clearAll': 'Alle löschen',
+    'detail.timeline.list.clearAll.confirm': 'Sollen wirklich alle Testläufe gelöscht werden?',
+    'detail.timeline.list.clearAll.confirmHint': 'Laufende Tests werden hart abgebrochen. Diese Aktion kann nicht rückgängig gemacht werden.',
+    'detail.timeline.list.clearAll.confirmButton': 'Alle löschen',
+    'detail.timeline.list.clearAll.cancelButton': 'Abbrechen',
+    'detail.timeline.list.clearAll.error': 'Timeline konnte nicht geleert werden: {message}',
+    'detail.timeline.list.clearAll.success': '{deleted} Läufe gelöscht ({cancelled} laufende abgebrochen).',
     'detail.timeline.list.item': 'Klick springt im Zeitstrahl zu dieser Zeit',
     'detail.timeline.legend.passed': 'Bestanden',
     'detail.timeline.legend.failed': 'Fehlgeschlagen',

@@ -345,6 +345,21 @@ data class CreateTestRunRequest(
     @Deprecated("Use loadProfile instead.") val virtualUsers: Int? = null,
     @Deprecated("Use loadProfile instead.") val durationSeconds: Int? = null,
     @Deprecated("Use loadProfile instead.") val useIterations: Boolean? = null,
+    /**
+     * Opt-in flag that decides whether the run is persisted to
+     * the timeline. Defaults to `true` for backward compatibility
+     * with clients that pre-date the toggle, and is rendered
+     * as a checkbox in the Settings drawer
+     * (`detail.timeline.list.saveExecutions` / "Ausgeführte
+     * Lasttestkonfigurationen speichern"). When `false` the run
+     * is still executed and exposed via the single-run
+     * endpoints (`/api/test-runs/{id}` and the time-series
+     * polling), so the dashboard's live view works for the
+     * duration of the session — it just does not show up in
+     * the per-endpoint timeline and is dropped on the next
+     * container restart.
+     */
+    val persist: Boolean = true,
 )
 
 data class TestRunConfiguration(

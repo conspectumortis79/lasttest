@@ -14,6 +14,7 @@
    - 3.1 [Docker (empfohlen)](#31-docker-empfohlen)
    - 3.2 [Docker mit InfluxDB + Grafana (Zeitreihen)](#32-docker-mit-influxdb--grafana-zeitreihen)
    - 3.3 [Lokales Entwicklungs-Setup](#33-lokales-entwicklungs-setup)
+   - 3.4 [Optional — Eigenes TLS-Zertifikat hinterlegen](#34-optional--eigenes-tls-zertifikat-hinterlegen-staging-interne-ca)
 4. [Erster Start und die Demo-API](#4-erster-start-und-die-demo-api)
    - 4.1 [Demo laden](#demo-laden)
    - 4.2 [Demo an- und ausschalten](#demo-an-und-ausschalten)
@@ -270,6 +271,36 @@ austauschbar:
 Für ein Single-URL-Deployment, bei dem das Backend API und UI auf
 Port 8286 bedient, verwende stattdessen `./docker-start.sh` (oder
 `docker compose up --build`).
+
+### 3.4 Optional — Eigenes TLS-Zertifikat hinterlegen (Staging, interne CA)
+
+> **Überspringe diesen Abschnitt, wenn deine Ziel-API ein öffentliches Zertifikat verwendet** — er ist nur nötig, wenn die Ziel-API von einer self-signed oder internen CA signiert ist und lasttest / k6 den TLS-Handshake nicht ohne Hilfe aufbauen können.
+
+Das mitgelieferte `docker-compose.yml` ist bereits auf einen Mount für
+eine eigene CA unter `certs/custom-ca.pem` vorbereitet. Lege die
+Root-CA deines Unternehmens (PEM-Format, ggf. mit mehreren
+`-----BEGIN CERTIFICATE-----`-Blöcken) **vor** dem Container-Start
+unter diesem Pfad auf dem Host ab:
+
+```bash
+# Beispiel: die vom Platform-Team bereitgestellte interne Root-CA kopieren
+cp ~/Downloads/internal-root-ca.pem certs/custom-ca.pem
+
+docker compose up -d --build
+```
+
+Nach dem nächsten Neustart lädt das Backend die Datei als zusätzlichen
+TrustStore, und k6 erhält dieselbe PEM über `SSL_CERT_FILE` — sowohl
+der Spec-Import (Schritt 1) als auch der eigentliche Lasttest
+(Schritt 4) können dann mit einem Target sprechen, das von dieser CA
+signiert ist, ohne `PKIX path building failed` oder `x509:
+certificate signed by unknown authority`. Public CAs funktionieren
+weiterhin — das Zertifikat wird auf die Defaults *aufgeschichtet*,
+nicht als Ersatz verwendet.
+
+Die vollständige Konfigurationsreferenz, PKCS12-/JKS-Varianten, den
+lokalen Entwicklungsmodus und die Einschränkungen findest du in
+[Abschnitt 14.1 — Eigene TLS-Zertifikate vertrauen](#141-eigene-tls-zertifikate-vertrauen).
 
 ---
 
@@ -1613,6 +1644,42 @@ Du hast zwei Wege, dasselbe Szenario erneut auszuführen:
   Schritt 2 oder 3 und klick erneut **k6-Lasttest starten**. Der neue
   Lauf hat keine genealogische Verbindung zum alten; die alte Zeile
   bleibt unverändert im Dashboard.
+
+> ⚠ **Wichtig — Timeline-Speicherung ist opt-in und standardmäßig
+> deaktiviert.** Eine frische Installation speichert keine Läufe;
+> der Timeline-Tab bleibt leer, bis du die **Einstellungen**
+> (Zahnrad-Symbol in der Toolbar) öffnest und den Schalter
+> **Ausgeführte Lasttestkonfigurationen speichern** umlegst. Die
+> Wahl wird in `localStorage` gespeichert (unter
+> `lasttest.persistRuns`) und bei jedem weiteren Besuch übernommen.
+> Bei deaktiviertem Schalter sendet jeder `POST /api/test-runs`
+> `persist: false`, sodass das Backend den Timeline-Write
+> überspringt — die Live-Ansicht funktioniert weiterhin, der Lauf
+> verschwindet aber beim nächsten Container-Neustart. Die
+> 40-Läufe-pro-Endpunkt-Retention greift nur bei aktivierter
+> Persistierung.
+
+> ⚠ **Wichtig — Timeline-Zeilen sind verschlüsselt gespeichert.**
+> Jede Zeile, die du im `Letzte Läufe`-Panel siehst, liegt
+> verschlüsselt auf dem H2-Volume: der `CreateTestRunRequest` und
+> die Konfigurations-JSON des Laufs sind mit AES-GCM und einem
+> 256-Bit-Schlüssel verschlüsselt, der beim ersten Start
+> automatisch erzeugt und neben der H2-Datei abgelegt wird
+> (alternativ über die Umgebungsvariable `LASTTEST_ENCRYPTION_KEY`
+> bzw. die Property `lasttest.encryption.key` gesetzt). Der
+> Klartext wird **ausschließlich** dann im Speicher
+> rekonstruiert, wenn du per Rechtsklick auf einer Terminal-Zeile
+> **Erneut ausführen** wählst — das ist der einzige Pfad, über
+> den das Backend den ursprünglichen Request entschlüsselt und
+> einen neuen Lauf einreiht. Das Polling von `/api/test-runs`, das
+> Re-Render des Dashboards, der druckbare k6-Bericht und der
+> Pro-Endpunkt-Endpoint `/api/operations/runs` lesen den
+> verschlüsselten Blob direkt von der Platte und kommen nie mit
+> dem Klartext in Berührung. Über `lasttest.encryption.enabled=false`
+> schaltest du auf einen No-Op-Encryptor um (nützlich für Forensik
+> oder für Umgebungen, die bereits Volume-Level-Verschlüsselung
+> mitbringen). Die gleiche Info findest du im **Walkthrough** in
+> Schritt 4 (Annotation 9) als Popup.
 
 ---
 

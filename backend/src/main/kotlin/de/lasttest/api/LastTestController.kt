@@ -19,6 +19,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.CrossOrigin
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -49,6 +50,17 @@ class LastTestController(
     // need the module because Jackson can serialise Kotlin data
     // classes via reflection without it.
     private val objectMapper: ObjectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build()),
+    /**
+     * Decrypts the timeline's sensitive columns when the
+     * controller reads them straight from the database (the
+     * per-endpoint `runsForOperation` endpoint, the rerun
+     * lookup). Defaults to a no-op so unit tests that
+     * construct the controller without the Spring container
+     * keep working — production wires the real
+     * [de.lasttest.domain.AesGcmTestRunPayloadEncryptor]
+     * via [de.lasttest.config.TestRunEncryptionConfiguration].
+     */
+    private val payloadEncryptor: de.lasttest.domain.TestRunPayloadEncryptor = de.lasttest.domain.NoOpTestRunPayloadEncryptor,
 ) {
     @GetMapping("/demo-specification", produces = [DEMO_SPECIFICATION_MEDIA_TYPE])
     fun demoSpecification(): String = demoSpecificationProvider.load()
@@ -67,6 +79,23 @@ class LastTestController(
     fun create(
         @Valid @RequestBody request: CreateTestRunRequest,
     ): ResponseEntity<TestRun> = ResponseEntity.status(HttpStatus.ACCEPTED).body(testRuns.create(request))
+
+    /**
+     * Wipes the entire timeline: force-cancels every in-flight
+     * run and then deletes every [TestRunEntity] row from H2.
+     * Returns the two counts so the frontend can confirm the
+     * operation without a follow-up round trip.
+     *
+     * The endpoint is `DELETE /api/test-runs` rather than
+     * `DELETE /api/test-runs/all` because the entire timeline
+     * IS the resource at that path — there is no per-id
+     * counterpart to keep. A 405 on `DELETE /api/test-runs/{id}`
+     * (the more REST-y shape) would be misleading: a single
+     * run cannot be deleted today, only the full timeline can
+     * be cleared.
+     */
+    @DeleteMapping("/test-runs")
+    fun deleteAll(): ResponseEntity<de.lasttest.domain.TimelineDeleteResult> = ResponseEntity.ok(testRuns.deleteAll())
 
     @GetMapping("/test-runs")
     fun list(): ResponseEntity<List<TestRun>> = ResponseEntity.ok(testRuns.list())
@@ -255,8 +284,9 @@ class LastTestController(
         val json =
             persisted.originalRequestJson
                 ?: return RerunLookup.NoPreservedRequest
+        val decrypted = payloadEncryptor.decrypt(json) ?: return RerunLookup.NoPreservedRequest
         val request =
-            runCatching { objectMapper.readValue(json, CreateTestRunRequest::class.java) }
+            runCatching { objectMapper.readValue(decrypted, CreateTestRunRequest::class.java) }
                 .getOrNull()
                 ?: return RerunLookup.NoPreservedRequest
         return RerunLookup.Ready(request)
@@ -326,7 +356,7 @@ class LastTestController(
         ResponseEntity.ok(
             runRepository
                 .findByOperationMethodAndOperationPathOrderByCreatedAtDesc(method, path)
-                .map { it.toTestRun() },
+                .map { it.toTestRun(objectMapper, payloadEncryptor) },
         )
 
     /**

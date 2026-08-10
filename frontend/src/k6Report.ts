@@ -358,10 +358,20 @@ export function statusDistribution(summary: K6Summary, operationIds: string[]): 
 
 // Returns the subset of status codes that fired at least once across
 // all rows, keeping the original code order so the table columns stay
-// stable between runs. Fallback columns (`err`, `other`) are always
-// shown because the user wants to see at a glance whether there were
-// network or unexpected responses.
-export function activeStatusCodes(rows: StatusDistributionRow[]): (TrackedStatusCode | FallbackCode)[] {
+// stable between runs. Fallback columns (`err`, `other`) are included
+// by default because the detailed report wants to render them even
+// when they never fired (a column header labelled "err" with a 0 in
+// the row is the user's signal "no network failures during this
+// run"). Surfaces that already show empty cells (the mini bar grid
+// on the Übersicht tab) opt out via `{ includeFallbacks: false }`
+// so a clean 200-only run does not also render two empty grey
+// cells — but `err` / `other` still surface when they actually
+// fired, so a network-failure-only run shows the user the err cell.
+export function activeStatusCodes(
+  rows: StatusDistributionRow[],
+  options: { includeFallbacks?: boolean } = {},
+): (TrackedStatusCode | FallbackCode)[] {
+  const includeFallbacks = options.includeFallbacks ?? true
   const seen = new Set<string>()
   for (const row of rows) {
     for (const [code, count] of Object.entries(row.counts)) {
@@ -370,9 +380,64 @@ export function activeStatusCodes(rows: StatusDistributionRow[]): (TrackedStatus
   }
   return ALL_STATUS_CODES.filter(code => {
     const key = String(code)
-    if (FALLBACK_CODES.includes(code as FallbackCode)) return true
+    if (FALLBACK_CODES.includes(code as FallbackCode)) {
+      // Fallback columns render either when the caller asked
+      // for them unconditionally (default, detailed report)
+      // or when the run actually produced network / unknown
+      // responses (mini grid, which suppresses the always-on
+      // empty cell but still surfaces real failures).
+      return includeFallbacks || seen.has(key)
+    }
     return seen.has(key)
   })
+}
+
+// Aggregate bucket for the overview's mini bar grid. One row per
+// status code that fired in the run, regardless of which endpoint
+// produced it. The bar grid renders the rows in the same order
+// [activeStatusCodes] would have produced so the dashboard and the
+// detailed report stay visually consistent.
+export type StatusCodeTotal = {
+  code: string
+  count: number
+}
+
+// Build the aggregated status-code totals across every operation
+// in the run. The function takes the rows from [statusDistribution]
+// (one per operation) and sums the per-code counts so the overview
+// tab can render a single, run-wide bar grid without having to
+// re-parse the k6 summary. Without this helper the mini grid would
+// either need its own summary traversal (duplicate work) or show
+// one grid per endpoint (visually noisy on multi-endpoint runs).
+//
+// The mini bar grid only shows codes that actually fired: a clean
+// 200-only run must not also surface empty `err` and `other`
+// cells. The detailed report keeps the opposite behaviour
+// (always show the fallback columns) and calls
+// [activeStatusCodes] directly.
+export function statusCodeTotals(rows: StatusDistributionRow[]): StatusCodeTotal[] {
+  const totals: Record<string, number> = {}
+  for (const code of ALL_STATUS_CODES) totals[String(code)] = 0
+  for (const row of rows) {
+    for (const [code, count] of Object.entries(row.counts)) {
+      totals[code] = (totals[code] ?? 0) + count
+    }
+  }
+  return activeStatusCodes(rows, { includeFallbacks: false }).map(code => ({
+    code: String(code),
+    count: totals[String(code)] ?? 0,
+  }))
+}
+
+// Returns the run-wide request count, summed over every
+// operation. Mirrors what [statusCodeTotals] renders in the
+// mini grid's "Gesamt" header; pulling it out into a helper
+// keeps the React component focused on the presentation
+// layer instead of re-doing the sum on every render.
+export function totalRequestCount(rows: StatusDistributionRow[]): number {
+  let total = 0
+  for (const row of rows) total += row.total
+  return total
 }
 
 export function checkSuccessRate(summary: K6Summary): number | undefined {
@@ -1144,8 +1209,14 @@ export function summarizeFailure(run: TestRun): FailureSummary {
         ],
       }
     }
-    case 'unknown':
     default:
+      // The [failureCategory] helper only ever returns one of the
+      // explicit categories above. The `unknown` bucket is the
+      // catch-all fall-through — we do not split it into a separate
+      // `case 'unknown':` because that would create a second,
+      // unreachable branch (TypeScript also flags this as
+      // dead code) and inflate the branch-coverage denominator
+      // for no behavioural gain.
       return {
         category: 'unknown',
         diagnosis: excerpt ? 'k6-Lauf fehlgeschlagen' : 'Unbekannter Fehler',

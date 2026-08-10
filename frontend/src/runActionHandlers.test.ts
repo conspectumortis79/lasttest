@@ -40,6 +40,7 @@ function makeRecordedHandlers(): {
     onExportMetrics: [],
     onRemove: [],
     onRemoveAllOtherFailed: [],
+    onClearAll: [],
   }
   const handlers: RunActionHandlers = {
     onFocusRun: (id) => { calls.onFocusRun.push(id) },
@@ -52,6 +53,7 @@ function makeRecordedHandlers(): {
     onExportMetrics: (id) => { calls.onExportMetrics.push(id) },
     onRemove: (id) => { calls.onRemove.push(id) },
     onRemoveAllOtherFailed: (id) => { calls.onRemoveAllOtherFailed.push(id) },
+    onClearAll: async () => { calls.onClearAll.push(true); return { cancelled: 0, deleted: 0 } },
   }
   return { handlers, calls }
 }
@@ -137,6 +139,7 @@ test('dispatch awaits async handlers before resolving', async () => {
     onExportMetrics: async () => { await new Promise(resolve => setTimeout(resolve, 5)); order.push('export-done') },
     onRemove: () => {},
     onRemoveAllOtherFailed: () => {},
+    onClearAll: async () => ({ cancelled: 0, deleted: 0 }),
   }
   await dispatchRunMenuAction(makeItem('export-metrics'), handlers, 'run-a')
   deepEqual(order, ['export-done'])

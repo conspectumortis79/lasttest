@@ -16,6 +16,7 @@ import {
   type NotificationSettings,
 } from './runNotifications.ts'
 import { useDemoStatus } from './useDemoStatusState.ts'
+import { usePersistence } from './persistenceStorage.ts'
 
 type SettingsDrawerProps = {
   open: boolean
@@ -153,6 +154,11 @@ export function SettingsDrawer({
             : null}
         </div>
 
+        <h3 className="drawer-section">{translate(language, 'drawer.section.timeline')}</h3>
+        <div className="drawer-checkbox-group" role="group" aria-label={translate(language, 'drawer.section.timeline')}>
+          <SaveExecutionsSwitch language={language} />
+        </div>
+
         <h3 className="drawer-section">{translate(language, 'drawer.section.demo')}</h3>
         <div className="drawer-checkbox-group" role="group" aria-label={translate(language, 'drawer.section.demo')}>
           <DemoApiSwitch language={language} />
@@ -182,6 +188,35 @@ function DemoApiSwitch({ language }: { language: SupportedLanguage }): React.Rea
     <span className="drawer-checkbox-text">
       <span className="drawer-checkbox-label">{translate(language, 'drawer.demo.enabled')}</span>
       <span className="drawer-checkbox-hint">{translate(language, 'drawer.demo.enabled.hint')}</span>
+    </span>
+  </label>
+}
+
+/**
+ * The "Ausgeführte Lasttestkonfigurationen speichern" /
+ * "Save executed test configurations" toggle. Sits in its
+ * own Timeline section in the Settings drawer (above the
+ * Demo-API section) because the setting controls the
+ * timeline persistence, not anything demo-related. When the
+ * user disables this toggle, every subsequent
+ * `POST /api/test-runs` call sends `persist: false` so the
+ * backend skips the timeline write and the live view is the
+ * only surface that shows the run. The 40-row per-endpoint
+ * retention cap is therefore only enforced for runs created
+ * with persistence enabled.
+ */
+function SaveExecutionsSwitch({ language }: { language: SupportedLanguage }): React.ReactElement {
+  const { persistRuns, setPersistRuns } = usePersistence()
+  return <label className={`drawer-checkbox ${persistRuns ? 'is-selected' : ''}`}>
+    <input
+      type="checkbox"
+      checked={persistRuns}
+      onChange={event => { setPersistRuns(event.target.checked) }}
+      data-testid="settings-save-executions-switch"
+    />
+    <span className="drawer-checkbox-text">
+      <span className="drawer-checkbox-label">{translate(language, 'drawer.persistence.saveExecutions')}</span>
+      <span className="drawer-checkbox-hint">{translate(language, 'drawer.persistence.saveExecutions.hint')}</span>
     </span>
   </label>
 }

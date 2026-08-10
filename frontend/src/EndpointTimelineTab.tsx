@@ -81,6 +81,19 @@ const WINDOW_DAYS: Record<Window, number> = {
   '90d': 90,
 }
 
+/**
+ * Hard cap on the number of badges the timeline list
+ * renders for one endpoint. Mirrors the backend's
+ * `TIMELINE_RETENTION_PER_ENDPOINT` constant
+ * ([LocalK6TestRunService]) so the UI never claims to show
+ * runs the backend has already dropped. The list scrolls
+ * internally when the content exceeds the available
+ * window space (see `.timeline-tab-list` in [App.css]); the
+ * cap is the upper bound the scrollbar can reach, not a
+ * goal in itself.
+ */
+const MAX_TIMELINE_BADGES = 40
+
 type DayBucket = {
   start: number
   end: number
@@ -116,6 +129,16 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
    * screen). `null` when no menu is open.
    */
   const [runMenu, setRunMenu] = useState<{ runId: string, x: number, y: number } | null>(null)
+  // "Alle löschen" button: a two-step UX (button → confirm
+  // dialog → DELETE request) so a stray click cannot wipe
+  // the entire timeline. The dialog is rendered inline in
+  // the tab body so it lives in the same dark-theme surface
+  // as the rest of the timeline; the alternative (window.confirm)
+  // would have rendered in the browser's default chrome and
+  // looked out of place next to the styled buttons.
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false)
+  const [clearAllInFlight, setClearAllInFlight] = useState(false)
+  const [clearAllError, setClearAllError] = useState<string | null>(null)
   const runMenuRef = useRef<HTMLDivElement | null>(null)
 
   /**
@@ -495,23 +518,113 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
 
     {/* Compact list of the most-recent runs in the window */}
     <div className="timeline-tab-list-head">
-      {translate(language, 'detail.timeline.list.head')} <span className="sub">{translate(language, 'detail.timeline.list.sub', { count: windowedRuns.length })}</span>
+      <div className="timeline-tab-list-head-text">
+        {translate(language, 'detail.timeline.list.head')} <span className="sub">{translate(language, 'detail.timeline.list.sub', { count: windowedRuns.length })}</span>
+      </div>
+      <button
+        type="button"
+        className="timeline-tab-list-clear"
+        onClick={() => setShowClearAllConfirm(true)}
+        disabled={!handlers.onClearAll || timelineRuns.length === 0}
+        title={translate(language, 'detail.timeline.list.clearAll')}
+        aria-label={translate(language, 'detail.timeline.list.clearAll')}
+      >
+        {translate(language, 'detail.timeline.list.clearAll')}
+      </button>
     </div>
+    {showClearAllConfirm ? (
+      <div className="timeline-tab-list-clear-confirm" role="alertdialog" aria-modal="true">
+        <div className="timeline-tab-list-clear-confirm-title">
+          {translate(language, 'detail.timeline.list.clearAll.confirm')}
+        </div>
+        <div className="timeline-tab-list-clear-confirm-hint">
+          {translate(language, 'detail.timeline.list.clearAll.confirmHint')}
+        </div>
+        {clearAllError ? (
+          <div className="timeline-tab-list-clear-confirm-error">
+            {translate(language, 'detail.timeline.list.clearAll.error', { message: clearAllError })}
+          </div>
+        ) : null}
+        <div className="timeline-tab-list-clear-confirm-actions">
+          <button
+            type="button"
+            className="timeline-tab-list-clear-confirm-cancel"
+            disabled={clearAllInFlight}
+            onClick={() => {
+              setShowClearAllConfirm(false)
+              setClearAllError(null)
+            }}
+          >
+            {translate(language, 'detail.timeline.list.clearAll.cancelButton')}
+          </button>
+          <button
+            type="button"
+            className="timeline-tab-list-clear-confirm-delete"
+            disabled={clearAllInFlight}
+            onClick={async () => {
+              if (!handlers.onClearAll) return
+              setClearAllInFlight(true)
+              setClearAllError(null)
+              const result = await handlers.onClearAll()
+              setClearAllInFlight(false)
+              if (result === null) {
+                setClearAllError(translate(language, 'detail.timeline.list.clearAll.error', { message: '–' }))
+                return
+              }
+              setShowClearAllConfirm(false)
+            }}
+          >
+            {clearAllInFlight
+              ? '…'
+              : translate(language, 'detail.timeline.list.clearAll.confirmButton')}
+          </button>
+        </div>
+      </div>
+    ) : null}
     <div className="timeline-tab-list">
-      {windowedRuns
-        .slice()
-        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-        .slice(0, 8)
-        .map(run => {
+      {(() => {
+        // Pre-compute the id of the run whose `createdAt` is
+        // closest to `centerTs` so the list below can mark
+        // exactly one row, no matter how many runs the user
+        // started in the same second. The pre-fix code used
+        // `Math.abs(listTs - centerTs) < 1000` per item, which
+        // lit up every run inside the focus window at once —
+        // visibly wrong in `dd.png`, where four quick back-to-
+        // back starts all shared the highlight. The
+        // "closest" reduction here matches the Gantt-bar logic
+        // above and keeps the contract that exactly one
+        // timeline row (and one Gantt bar) is highlighted at a
+        // time.
+        const sortedWindowedRuns = windowedRuns
+          .slice()
+          .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        const sortedForFocus = sortedWindowedRuns.slice(0, MAX_TIMELINE_BADGES)
+        let focusedListId: string | null = null
+        if (isFocused) {
+          let bestDelta = Number.POSITIVE_INFINITY
+          for (const run of sortedForFocus) {
+            const ts = Date.parse(run.createdAt)
+            if (!Number.isFinite(ts)) continue
+            const delta = Math.abs(ts - centerTs)
+            if (delta < bestDelta) {
+              bestDelta = delta
+              focusedListId = run.id
+            }
+          }
+        }
+        return sortedForFocus.map(run => {
           // Ein Listeneintrag gilt als „fokussiert", wenn sein
-          // `createdAt` mit dem aktuellen `centerTs` überein­
-          // stimmt. Das matcht das Verhalten des Gantt-Balkens
-          // (siehe `isFocusedRun` weiter oben), damit der
-          // visuell hervorgehobene Eintrag in der Liste immer
-          // derselbe ist, dessen Zeitpunkt im Diagramm zentriert
-          // ist.
+          // `createdAt` dem `centerTs` am nächsten liegt. Das
+          // matcht das Verhalten des Gantt-Balkens (siehe
+          // `isFocusedRun` weiter oben), damit der visuell
+          // hervorgehobene Eintrag in der Liste immer
+          // derselbe ist, dessen Zeitpunkt im Diagramm
+          // zentriert ist. Wir wählen den **engsten** Run statt
+          // alle innerhalb von ± 1000 ms, weil der User mehrere
+          // Lasttests in derselben Sekunde starten kann und
+          // dann alle innerhalb der ± 1000-ms-Toleranz liegen.
           const listTs = Date.parse(run.createdAt)
-          const isListFocused = isFocused && Math.abs(listTs - centerTs) < 1000
+          const isListFocused = isFocused && run.id === focusedListId
           return <div
             key={run.id}
             data-run-id={run.id}
@@ -597,7 +710,8 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
               <span className="rid">{exitOrError(run, language)}</span>
             </div>
           </div>
-        })}
+        })
+      })()}
       {windowedRuns.length === 0 && !loading && (
         <div className="run-tab-empty" style={{ gridColumn: '1 / -1' }}>
           <div className="run-tab-empty-title">{translate(language, 'detail.timeline.empty.title')}</div>
@@ -608,11 +722,25 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
       )}
     </div>
     {/* Right-click menu — same component as the overview uses,
-        so the item list (status-dependent focus / rerun /
-        share / cleanup actions) stays in lockstep by
-        construction. The menu state is local to this tab so
-        closing it does not affect the parent dashboard's
-        overview-badge menu. */}
+        so the item list (status-dependent share / cleanup
+        actions) stays in lockstep by construction. The
+        timeline deliberately hides two actions via the
+        [RunContextMenu] flags:
+          - `showRerun=false`: timeline rows are a passive
+            history view and the payload data a rerun would
+            replay was intentionally stripped from the
+            timeline persist path, so a rerun from here
+            would produce a half-replayed run the user has
+            no way to preview.
+          - `showExportMetrics=false`: exporting the k6
+            summary from a timeline row would either trigger
+            an extra round trip per click or silently hand
+            the user a stale blob — see the KDoc on
+            [buildRunMenuItems.showExportMetrics] for the
+            full rationale.
+        The menu state is local to this tab so closing it
+        does not affect the parent dashboard's overview-
+        badge menu. */}
     {runMenu && (() => {
       // Resolve the run (and its sibling scan for "remove all
       // other failed") from a merged source. The dashboard map
@@ -628,6 +756,8 @@ export function EndpointTimelineTab({ method, path, apiTitle, refreshTick, focus
         run={menuRuns[runMenu.runId]}
         runs={menuRuns}
         language={language}
+        showRerun={false}
+        showExportMetrics={false}
         onAction={runMenuAction}
         onClose={() => setRunMenu(null)}
         menuRef={runMenuRef}

@@ -26,6 +26,15 @@ export type RunActionHandlers = {
   onExportMetrics: (runId: string) => void | Promise<void>
   onRemove: (runId: string) => void
   onRemoveAllOtherFailed: (runId: string) => void
+  /**
+   * Wipe the entire timeline. The handler is the one place
+   * that talks to the backend (the "Alle löschen" button on
+   * the per-endpoint timeline tab) and resets the
+   * in-memory `runs` map. Returns a promise so the caller
+   * can surface a confirmation toast or an error message
+   * based on the result.
+   */
+  onClearAll: () => Promise<{ cancelled: number, deleted: number } | null>
 }
 
 /**
