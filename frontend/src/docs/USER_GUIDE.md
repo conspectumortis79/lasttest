@@ -16,6 +16,7 @@
    - 3.1 [Docker (recommended)](#31-docker-recommended)
    - 3.2 [Docker with InfluxDB + Grafana (time-series)](#32-docker-with-influxdb--grafana-time-series)
    - 3.3 [Local development install](#33-local-development-install)
+   - 3.4 [Optional — trust a custom TLS certificate](#34-optional--trust-a-custom-tls-certificate-staging-internal-ca)
 4. [First run and the demo API](#4-first-run-and-the-demo-api)
    - 4.1 [Loading the demo](#loading-the-demo)
    - 4.2 [Toggling the demo on and off](#toggling-the-demo-on-and-off)
@@ -266,6 +267,34 @@ In dev mode two URLs are exposed; they are **not** interchangeable:
 For a single-URL deployment where the backend serves both the API and
 the UI on port 8286, use `./docker-start.sh` (or `docker compose up --build`)
 instead.
+
+### 3.4 Optional — trust a custom TLS certificate (staging, internal CA)
+
+> **Skip this section if your target API uses a public certificate** — it is only needed when the target API is signed by a self-signed or internal CA and lasttest / k6 cannot establish the TLS handshake out of the box.
+
+The bundled `docker-compose.yml` already wires a mount for a custom CA
+at `certs/custom-ca.pem`. Drop your company's root CA (PEM format,
+possibly with multiple `-----BEGIN CERTIFICATE-----` blocks) at that
+path on the host **before** starting the container:
+
+```bash
+# example: copy the internal root CA shipped by your platform team
+cp ~/Downloads/internal-root-ca.pem certs/custom-ca.pem
+
+docker compose up -d --build
+```
+
+After the next restart the backend loads the file as an additional
+TrustStore, and k6 receives the same PEM via `SSL_CERT_FILE` — both
+the spec import (Step 1) and the actual load test (Step 4) can then
+talk to a target signed by that CA without `PKIX path building
+failed` or `x509: certificate signed by unknown authority`. Public CAs
+keep working — the certificate is *added* on top of the defaults, not
+used to replace them.
+
+For the full configuration reference, PKCS12 / JKS variants, local
+development mode, and limitations see
+[Section 14.1 — Trusting custom TLS certificates](#141-trusting-custom-tls-certificates).
 
 ---
 

@@ -41,6 +41,7 @@ export const STEPS: WalkthroughStep[] = [
       { n: 2, titleKey: 'walk.step1.ann.2.title', bodyKey: 'walk.step1.ann.2.body' },
       { n: 3, titleKey: 'walk.step1.ann.3.title', bodyKey: 'walk.step1.ann.3.body' },
       { n: 4, titleKey: 'walk.step1.ann.4.title', bodyKey: 'walk.step1.ann.4.body' },
+      { n: 5, titleKey: 'walk.step1.ann.5.title', bodyKey: 'walk.step1.ann.5.body' },
     ],
   },
   {

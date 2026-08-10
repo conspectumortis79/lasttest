@@ -18,19 +18,30 @@ import java.time.Instant
  * absent keys. The dashboard tolerates that state (it falls back
  * to a synthesised display name).
  *
+ * When [encryptor] is provided, the read path decrypts the two
+ * JSON columns before deserialising so the rest of the pipeline
+ * (the controller, the report builder, the k6 generator) sees
+ * plaintext JSON. Plaintext rows from older builds (no magic
+ * prefix on the column) are passed through unchanged by the
+ * encryptor's no-op branch, so a fresh deploy with a new key
+ * can still read rows written by an older version.
+ *
  * Lives at file scope (not as a member of [TestRunEntity]) so the
  * REST controller can call it without pulling the service into
- * the request-handling path; a Jackson [ObjectMapper] is injected
- * by the call site.
+ * the request-handling path; a Jackson [ObjectMapper] and the
+ * [TestRunPayloadEncryptor] are injected by the call site.
  */
-fun TestRunEntity.toTestRun(mapper: ObjectMapper = ObjectMapper()): TestRun {
+fun TestRunEntity.toTestRun(
+    mapper: ObjectMapper = ObjectMapper(),
+    encryptor: TestRunPayloadEncryptor = NoOpTestRunPayloadEncryptor,
+): TestRun {
     val configuration =
-        configurationJson?.let {
-            runCatching { mapper.readValue(it, TestRunConfiguration::class.java) }.getOrNull()
+        encryptor.decrypt(configurationJson)?.let { decrypted ->
+            runCatching { mapper.readValue(decrypted, TestRunConfiguration::class.java) }.getOrNull()
         }
     val originalRequest =
-        originalRequestJson?.let {
-            runCatching { mapper.readValue(it, CreateTestRunRequest::class.java) }.getOrNull()
+        encryptor.decrypt(originalRequestJson)?.let { decrypted ->
+            runCatching { mapper.readValue(decrypted, CreateTestRunRequest::class.java) }.getOrNull()
         }
     val summary =
         summaryJson?.let { raw -> mapOf("raw" to raw) }
@@ -59,6 +70,14 @@ fun TestRunEntity.toTestRun(mapper: ObjectMapper = ObjectMapper()): TestRun {
  * what [toTestRun] reads back; the test run survives a full
  * round trip through the database.
  *
+ * When [encryptor] is provided, the write path encrypts the
+ * two sensitive columns ([configurationJson] and
+ * [originalRequestJson]) before they are handed to JPA. The
+ * encryption layer detects plaintext on the read path, so
+ * switching the property on in an existing deployment does
+ * not require a migration: existing rows stay readable, and
+ * every new write / rewrite is encrypted in place.
+ *
  * Malformed JSON (e.g. an exotic [CreateTestRunRequest] shape
  * Jackson cannot serialise) is swallowed the same way the read
  * path swallows parse errors: the affected column stays null
@@ -66,7 +85,10 @@ fun TestRunEntity.toTestRun(mapper: ObjectMapper = ObjectMapper()): TestRun {
  * originalRequest is recoverable (the run is still listed);
  * losing the whole save is not.
  */
-fun TestRun.toTestRunEntity(mapper: ObjectMapper = ObjectMapper()): TestRunEntity {
+fun TestRun.toTestRunEntity(
+    mapper: ObjectMapper = ObjectMapper(),
+    encryptor: TestRunPayloadEncryptor = NoOpTestRunPayloadEncryptor,
+): TestRunEntity {
     val entity = TestRunEntity()
     entity.id = id
     entity.status = status
@@ -76,7 +98,8 @@ fun TestRun.toTestRunEntity(mapper: ObjectMapper = ObjectMapper()): TestRunEntit
     entity.exitCode = exitCode
     entity.configurationJson =
         configuration?.let {
-            runCatching { mapper.writeValueAsString(it) }.getOrNull()
+            val serialised = runCatching { mapper.writeValueAsString(it) }.getOrNull()
+            serialised?.let { encryptor.encrypt(it) }
         }
     // `summary` is a free-form `Map<String, Any?>` with a single
     // `raw` key today; persist the raw k6 output as a CLOB so the
@@ -89,7 +112,8 @@ fun TestRun.toTestRunEntity(mapper: ObjectMapper = ObjectMapper()): TestRunEntit
     entity.cancelledByForce = cancelledByForce
     entity.originalRequestJson =
         originalRequest?.let {
-            runCatching { mapper.writeValueAsString(it) }.getOrNull()
+            val serialised = runCatching { mapper.writeValueAsString(it) }.getOrNull()
+            serialised?.let { encryptor.encrypt(it) }
         }
     // Flat columns for the per-endpoint × N badge GROUP BY.
     // The configuration is the source of truth, these are a

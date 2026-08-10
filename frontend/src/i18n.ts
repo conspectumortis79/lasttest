@@ -65,6 +65,8 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step1.ann.3.body': 'Paste or edit the spec directly here. Handy when you only want to test a subset of a large spec.',
     'walk.step1.ann.4.title': 'Upload file',
     'walk.step1.ann.4.body': 'Alternative to the URL: upload a YAML or JSON file. lasttest accepts both formats and converts Swagger 2.0 to OpenAPI 3 automatically.',
+    'walk.step1.ann.5.title': 'Custom TLS certificate',
+    'walk.step1.ann.5.body': 'If your target API uses a self-signed or internal CA, drop the PEM at certs/custom-ca.pem on the host before docker compose up — lasttest and k6 pick it up automatically so the requests can go through. See §14.1 for the full reference (PKCS12, local-dev, limitations).',
 
     'walk.step2.title': 'Pick endpoints',
     'walk.step2.intro': 'Step 2 lists every endpoint imported from the spec. Select the endpoints k6 should drive. Expand each endpoint to configure parameters, body, the payload pool and authentication (Bearer, Basic, API key, OAuth2, OIDC).',
@@ -829,6 +831,8 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step1.ann.3.body': 'Hier kannst du die Spezifikation direkt einfügen oder vor dem Import bearbeiten. Praktisch, wenn du nur einen Teil einer großen Spec testen willst.',
     'walk.step1.ann.4.title': 'Datei hochladen',
     'walk.step1.ann.4.body': 'Alternative zur URL: lade eine YAML- oder JSON-Datei hoch. lasttest akzeptiert beide Formate und konvertiert Swagger 2.0 automatisch nach OpenAPI 3.',
+    'walk.step1.ann.5.title': 'Eigenes TLS-Zertifikat',
+    'walk.step1.ann.5.body': 'Wenn deine Ziel-API eine self-signed oder interne CA nutzt, lege die PEM vor docker compose up unter certs/custom-ca.pem auf dem Host ab — lasttest und k6 laden sie automatisch, damit die Requests durchgehen. Details in §14.1 (PKCS12, lokaler Dev-Modus, Einschränkungen).',
 
     'walk.step2.title': 'Endpunkte wählen',
     'walk.step2.intro': 'Schritt 2 listet alle aus der Spec importierten Endpunkte. Wähle die Endpunkte, die k6 später ansteuern soll. Klappe jeden Endpunkt auf, um Parameter, Body, den Payload-Pool und die Authentifizierung (Bearer, Basic, API-Key, OAuth2, OIDC) zu konfigurieren.',

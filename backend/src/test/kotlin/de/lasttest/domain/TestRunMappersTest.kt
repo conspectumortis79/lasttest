@@ -12,10 +12,13 @@ import de.lasttest.api.TestRunConfiguration
 import de.lasttest.api.TestRunOperationConfiguration
 import de.lasttest.api.TestRunStatus
 import java.time.Instant
+import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 // The mappers are the bridge between the API-facing [TestRun]
 // data class and the JPA [TestRunEntity]. Every field that the
@@ -309,5 +312,248 @@ class TestRunMappersTest {
         val roundTripped = run.toTestRunEntity(mapper).toTestRun(mapper)
 
         assertEquals(run, roundTripped)
+    }
+
+    @Test
+    fun `toTestRunEntity encrypts the configuration and originalRequest columns when an encryptor is provided`() {
+        // The at-rest encryption feature: the timeline's
+        // sensitive columns (configuration, original request)
+        // are stored encrypted, not as plaintext JSON. The
+        // mapper must call the encryptor for both columns;
+        // a regression that drops either one of the two
+        // encrypt calls would silently leave the column
+        // readable by anyone with H2 file access.
+        val configuration =
+            TestRunConfiguration(
+                apiTitle = "Demo",
+                apiVersion = "1",
+                baseUrl = "https://target.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                operations =
+                    listOf(
+                        TestRunOperationConfiguration(
+                            operationId = "getThing",
+                            method = "GET",
+                            path = "/things/{id}",
+                            summary = "Get thing",
+                            payloads = emptyList(),
+                            parameterValues = emptyList(),
+                            requestBodyJson = null,
+                        ),
+                    ),
+            )
+        val originalRequest =
+            CreateTestRunRequest(
+                specification = "openapi document",
+                baseUrl = "https://target.test",
+                operationIds = setOf("getThing"),
+                operationConfigurations = emptyList(),
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+            )
+        val run =
+            TestRun(
+                id = "run-1",
+                status = TestRunStatus.QUEUED,
+                createdAt = "2026-01-01T00:00:00Z",
+                configuration = configuration,
+                originalRequest = originalRequest,
+            )
+        val encryptor = AesGcmTestRunPayloadEncryptor(randomKey())
+
+        val entity = run.toTestRunEntity(mapper, encryptor)
+
+        // The persisted columns must NOT match the plaintext
+        // JSON. A regression that drops the encrypt call
+        // would store the literal JSON in the column and
+        // anyone with the H2 file could read the API
+        // credentials. The exact encrypted bytes are not
+        // pinned (a fresh IV produces a different blob on
+        // every call) — only "is it no longer plaintext?".
+        val plainConfig = mapper.writeValueAsString(configuration)
+        val plainRequest = mapper.writeValueAsString(originalRequest)
+        assertNotEquals(plainConfig, entity.configurationJson)
+        assertNotEquals(plainRequest, entity.originalRequestJson)
+        // The encrypted blob must carry the LENC magic so
+        // the read path can tell it apart from a legacy
+        // plaintext row.
+        assertNotNull(entity.configurationJson)
+        assertNotNull(entity.originalRequestJson)
+        assertTrue(entity.configurationJson!!.startsWith("TEVOQ"), "expected encrypted magic prefix, got: ${entity.configurationJson}")
+        assertTrue(entity.originalRequestJson!!.startsWith("TEVOQ"), "expected encrypted magic prefix, got: ${entity.originalRequestJson}")
+    }
+
+    @Test
+    fun `toTestRun decrypts the configuration and originalRequest columns when an encryptor is provided`() {
+        // The read path is the inverse of the write path.
+        // A row that was encrypted by a previous write must
+        // come back to the dashboard as the original DTO,
+        // not as the encrypted blob.
+        val configuration =
+            TestRunConfiguration(
+                apiTitle = "Demo",
+                apiVersion = "1",
+                baseUrl = "https://target.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                operations =
+                    listOf(
+                        TestRunOperationConfiguration(
+                            operationId = "getThing",
+                            method = "GET",
+                            path = "/things/{id}",
+                            summary = "Get thing",
+                            payloads = emptyList(),
+                            parameterValues = emptyList(),
+                            requestBodyJson = null,
+                        ),
+                    ),
+            )
+        val originalRequest =
+            CreateTestRunRequest(
+                specification = "openapi document",
+                baseUrl = "https://target.test",
+                operationIds = setOf("getThing"),
+                operationConfigurations = emptyList(),
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+            )
+        val key = randomKey()
+        val writer = AesGcmTestRunPayloadEncryptor(key)
+        val reader = AesGcmTestRunPayloadEncryptor(key)
+        val run =
+            TestRun(
+                id = "run-1",
+                status = TestRunStatus.QUEUED,
+                createdAt = "2026-01-01T00:00:00Z",
+                configuration = configuration,
+                originalRequest = originalRequest,
+            )
+        val entity = run.toTestRunEntity(mapper, writer)
+
+        val roundTripped = entity.toTestRun(mapper, reader)
+
+        assertEquals(configuration, roundTripped.configuration)
+        assertEquals(originalRequest, roundTripped.originalRequest)
+    }
+
+    @Test
+    fun `encrypted round trip survives when the configuration or request is missing`() {
+        // The encryptor must be called with `null` for
+        // runs that have no configuration (e.g. synthetic
+        // rows in the test suite). A regression that always
+        // serialises — even when the input is null — would
+        // fail the round trip because `mapper.writeValueAsString(null)`
+        // returns the literal string "null", which is a
+        // valid DTO that the dashboard would render as an
+        // empty configuration.
+        val run =
+            TestRun(
+                id = "run-1",
+                status = TestRunStatus.QUEUED,
+                createdAt = "2026-01-01T00:00:00Z",
+            )
+        val encryptor = AesGcmTestRunPayloadEncryptor(randomKey())
+
+        val entity = run.toTestRunEntity(mapper, encryptor)
+        val roundTripped = entity.toTestRun(mapper, encryptor)
+
+        assertNull(entity.configurationJson)
+        assertNull(entity.originalRequestJson)
+        assertNull(roundTripped.configuration)
+        assertNull(roundTripped.originalRequest)
+    }
+
+    @Test
+    fun `toTestRun returns the configuration as null when the encrypted column was written with a different key`() {
+        // Container A encrypts a row with key A, container
+        // B reads with key B. The decrypt path must return
+        // `null` for both columns so the dashboard sees a
+        // row without a configuration (and the user's
+        // "Erneut starten" action 409s with a clean error)
+        // rather than a 500 from a Jackson parse error
+        // against garbage bytes.
+        val configuration =
+            TestRunConfiguration(
+                apiTitle = "Demo",
+                apiVersion = "1",
+                baseUrl = "https://target.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                operations = emptyList(),
+            )
+        val run =
+            TestRun(
+                id = "run-1",
+                status = TestRunStatus.QUEUED,
+                createdAt = "2026-01-01T00:00:00Z",
+                configuration = configuration,
+            )
+        val writer = AesGcmTestRunPayloadEncryptor(randomKey())
+        val reader = AesGcmTestRunPayloadEncryptor(randomKey())
+        val entity = run.toTestRunEntity(mapper, writer)
+
+        val roundTripped = entity.toTestRun(mapper, reader)
+
+        assertNull(roundTripped.configuration)
+    }
+
+    @Test
+    fun `toTestRun reads a plaintext column written by an older build as the original configuration`() {
+        // The backward-compat branch: a row written by a
+        // build before the encryption feature shipped carries
+        // a plain JSON column, not an encrypted blob. The
+        // encryptor must detect the absence of the magic
+        // prefix and return the column unchanged so the
+        // mapper can still parse it. Without this branch a
+        // single deploy would make the entire historical
+        // timeline unreadable until every row is manually
+        // re-encrypted.
+        val configuration =
+            TestRunConfiguration(
+                apiTitle = "Demo",
+                apiVersion = "1",
+                baseUrl = "https://target.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                operations =
+                    listOf(
+                        TestRunOperationConfiguration(
+                            operationId = "getThing",
+                            method = "GET",
+                            path = "/things/{id}",
+                            summary = "Get thing",
+                            payloads = emptyList(),
+                            parameterValues = emptyList(),
+                            requestBodyJson = null,
+                        ),
+                    ),
+            )
+        val entity =
+            TestRunEntity().apply {
+                id = "run-legacy"
+                status = TestRunStatus.QUEUED
+                createdAt = java.time.Instant.parse("2026-01-01T00:00:00Z")
+                // Pre-encryption build wrote the raw JSON straight
+                // into the column. No magic prefix, no Base64.
+                configurationJson = mapper.writeValueAsString(configuration)
+                originalRequestJson = null
+            }
+        val encryptor = AesGcmTestRunPayloadEncryptor(randomKey())
+
+        val roundTripped = entity.toTestRun(mapper, encryptor)
+
+        assertEquals(configuration, roundTripped.configuration)
+    }
+
+    private companion object {
+        /**
+         * Returns a fresh 32-byte key as a [SecretKeySpec] the
+         * encryptor can use directly. A new key per call keeps
+         * the encrypted round-trip test independent from the
+         * other tests (a shared key would silently mask a
+         * regression that re-used a cached blob from a previous
+         * test run).
+         */
+        fun randomKey(): SecretKeySpec {
+            val raw = ByteArray(32)
+            java.security.SecureRandom().nextBytes(raw)
+            return SecretKeySpec(raw, "AES")
+        }
     }
 }

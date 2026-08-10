@@ -94,6 +94,13 @@ function Step1Svg() {
     <AnnotationBadge n={3} x={420} y={170} color={ZONE_COLOR.output} />
     <CalloutLine x1={64} y1={111} x2={140} y2={245} color={ZONE_COLOR.status} />
     <AnnotationBadge n={4} x={140} y={245} color={ZONE_COLOR.status} />
+    {/* Annotation 5 — custom TLS certificate. Points at the URL
+        input (the first place a TLS handshake fails when the
+        target uses an internal / self-signed CA) and lands at
+        the bottom-right of the card where the other badges are
+        not. */}
+    <CalloutLine x1={440} y1={71} x2={495} y2={245} color={ZONE_COLOR.status} />
+    <AnnotationBadge n={5} x={495} y={245} color={ZONE_COLOR.status} />
   </svg>
 }
 

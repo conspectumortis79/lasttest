@@ -114,6 +114,17 @@ class LocalK6TestRunService(
     private val runRepository: TestRunRepository,
     private val statisticsRepository: OperationStatisticsRepository,
     private val timeSeriesWriter: TimeSeriesWriter,
+    /**
+     * Encrypts the timeline's sensitive JSON columns
+     * ([TestRunEntity.configurationJson],
+     * [TestRunEntity.originalRequestJson]) before they are
+     * handed to JPA, and decrypts them on the way back. The
+     * default [NoOpTestRunPayloadEncryptor] keeps the
+     * existing unit tests working without a key file —
+     * production wires the real AES/GCM encryptor via
+     * [de.lasttest.config.TestRunEncryptionConfiguration].
+     */
+    private val payloadEncryptor: TestRunPayloadEncryptor = NoOpTestRunPayloadEncryptor,
 ) : TestRunService {
     private val runs = ConcurrentHashMap<String, TestRun>()
     private val scripts = ConcurrentHashMap<String, String>()
@@ -168,7 +179,7 @@ class LocalK6TestRunService(
         // restart can recover the run instead of dropping it. The
         // entity-to-DTO mapper is the inverse of [toTestRunEntity]
         // so the row round-trips back to the same wire shape.
-        runRepository.save(run.toTestRunEntity())
+        runRepository.save(run.toTestRunEntity(objectMapper, payloadEncryptor))
         executor.execute { execute(run, script, request.baseUrl) }
         return run
     }
@@ -191,7 +202,7 @@ class LocalK6TestRunService(
      * malformed row degrades to a run with null fields rather
      * than a hard error.
      */
-    override fun find(id: String): TestRun? = runs[id] ?: runRepository.findById(id).orElse(null)?.toTestRun(objectMapper)
+    override fun find(id: String): TestRun? = runs[id] ?: runRepository.findById(id).orElse(null)?.toTestRun(objectMapper, payloadEncryptor)
 
     override fun list(): List<TestRun> = runs.values.sortedByDescending { it.createdAt }
 
@@ -216,8 +227,9 @@ class LocalK6TestRunService(
         scripts[id]?.let { return it }
         val entity = runRepository.findById(id).orElse(null) ?: return null
         val requestJson = entity.originalRequestJson ?: return null
+        val decrypted = payloadEncryptor.decrypt(requestJson) ?: return null
         val request =
-            runCatching { objectMapper.readValue(requestJson, CreateTestRunRequest::class.java) }
+            runCatching { objectMapper.readValue(decrypted, CreateTestRunRequest::class.java) }
                 .getOrNull() ?: return null
         val specification = importer.import(request.specification)
         val loadProfile = resolveLoadProfile(request)
@@ -396,7 +408,7 @@ class LocalK6TestRunService(
             // the deserialised configuration / summary blobs
             // survive untouched.
             val recovered =
-                entity.toTestRun(objectMapper).copy(
+                entity.toTestRun(objectMapper, payloadEncryptor).copy(
                     status = TestRunStatus.ABORTED,
                     cancelledAt = now,
                     cancelledByForce = true,
@@ -411,7 +423,7 @@ class LocalK6TestRunService(
             // requests — a client that polls `/api/operations/runs`
             // a few milliseconds after startup must already see
             // the ABORTED status, not the stale QUEUED row.
-            runRepository.save(recovered.toTestRunEntity())
+            runRepository.save(recovered.toTestRunEntity(objectMapper, payloadEncryptor))
         }
         log.info(
             "Recovered {} orphaned run(s) from a previous JVM session — marked them as ABORTED.",
@@ -473,7 +485,7 @@ class LocalK6TestRunService(
             // Persist before returning so a polling client that
             // fetches /api/operations/runs within the same request
             // sees the terminal state, not the stale QUEUED row.
-            runRepository.save(finalRun.toTestRunEntity())
+            runRepository.save(finalRun.toTestRunEntity(objectMapper, payloadEncryptor))
             return true
         }
 
@@ -884,7 +896,7 @@ class LocalK6TestRunService(
             // snapshot that create() wrote. Updates the
             // denormalised per-endpoint counter so the badge ticks
             // up exactly once per run.
-            runRepository.save(finalRun.toTestRunEntity())
+            runRepository.save(finalRun.toTestRunEntity(objectMapper, payloadEncryptor))
             updateOperationStatistics(finalRun)
         } catch (exception: java.io.IOException) {
             // Reading the script or summary file failed. cancel()
@@ -913,7 +925,7 @@ class LocalK6TestRunService(
             // even when the run never produced k6 output we still
             // record the terminal status so the DB row matches the
             // in-memory state and the × N badge ticks up.
-            runRepository.save(finalRun.toTestRunEntity())
+            runRepository.save(finalRun.toTestRunEntity(objectMapper, payloadEncryptor))
             updateOperationStatistics(finalRun)
         } finally {
             processes.remove(run.id)
@@ -982,8 +994,14 @@ class LocalK6TestRunService(
      * when more bytes arrived while we were publishing. The
      * publish is rate-limited to one per 250 ms — anything
      * faster than the polling cadence is wasted CPU.
+     *
+     * `internal` (rather than `private`) so unit tests can
+     * drive the throttle / early-return / inner-thread branches
+     * without having to spawn a real k6 process. The internal
+     * surface is package-local and never crosses the module
+     * boundary.
      */
-    private fun publishLiveTail(
+    internal fun publishLiveTail(
         runId: String,
         output: java.io.ByteArrayOutputStream,
         lock: java.util.concurrent.locks.ReentrantLock,

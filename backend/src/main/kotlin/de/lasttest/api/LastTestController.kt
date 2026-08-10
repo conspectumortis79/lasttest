@@ -49,6 +49,17 @@ class LastTestController(
     // need the module because Jackson can serialise Kotlin data
     // classes via reflection without it.
     private val objectMapper: ObjectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build()),
+    /**
+     * Decrypts the timeline's sensitive columns when the
+     * controller reads them straight from the database (the
+     * per-endpoint `runsForOperation` endpoint, the rerun
+     * lookup). Defaults to a no-op so unit tests that
+     * construct the controller without the Spring container
+     * keep working — production wires the real
+     * [de.lasttest.domain.AesGcmTestRunPayloadEncryptor]
+     * via [de.lasttest.config.TestRunEncryptionConfiguration].
+     */
+    private val payloadEncryptor: de.lasttest.domain.TestRunPayloadEncryptor = de.lasttest.domain.NoOpTestRunPayloadEncryptor,
 ) {
     @GetMapping("/demo-specification", produces = [DEMO_SPECIFICATION_MEDIA_TYPE])
     fun demoSpecification(): String = demoSpecificationProvider.load()
@@ -255,8 +266,9 @@ class LastTestController(
         val json =
             persisted.originalRequestJson
                 ?: return RerunLookup.NoPreservedRequest
+        val decrypted = payloadEncryptor.decrypt(json) ?: return RerunLookup.NoPreservedRequest
         val request =
-            runCatching { objectMapper.readValue(json, CreateTestRunRequest::class.java) }
+            runCatching { objectMapper.readValue(decrypted, CreateTestRunRequest::class.java) }
                 .getOrNull()
                 ?: return RerunLookup.NoPreservedRequest
         return RerunLookup.Ready(request)
@@ -326,7 +338,7 @@ class LastTestController(
         ResponseEntity.ok(
             runRepository
                 .findByOperationMethodAndOperationPathOrderByCreatedAtDesc(method, path)
-                .map { it.toTestRun() },
+                .map { it.toTestRun(objectMapper, payloadEncryptor) },
         )
 
     /**
