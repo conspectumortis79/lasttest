@@ -1,6 +1,6 @@
 // Pinning the Settings-drawer section order. The drawer
 // has four sections today (Language, Notifications,
-// Timeline, Demo API) and the test guards against a
+// Archiving, Demo API) and the test guards against a
 // refactor that silently re-shuffles them — a regression
 // there would move the "Save executed test configurations"
 // toggle back into the Demo API group, where the user
@@ -107,40 +107,40 @@ function extractSections(container: HTMLElement): Section[] {
   })
 }
 
-test('sections are rendered in the documented order (Language → Notifications → Timeline → Demo API)', () => {
+test('sections are rendered in the documented order (Language → Notifications → Archiving → Demo API)', () => {
   // The user reported the toggle belonged nowhere
   // before — it sat under "Demo API" with no heading
   // of its own. Pin the order so a future refactor
   // cannot re-shuffle the sections and silently drop
-  // the Timeline heading again.
+  // the Archiving heading again.
   const handle = renderDrawer('en')
   try {
     const sections = extractSections(handle.container)
     equal(sections.length, 4, 'the drawer must render exactly four sections')
     equal(sections[0].heading, 'Language')
     equal(sections[1].heading, 'Notifications')
-    equal(sections[2].heading, 'Timeline')
+    equal(sections[2].heading, 'Archiving')
     equal(sections[3].heading, 'Demo API')
   } finally {
     handle.unmount()
   }
 })
 
-test('the Timeline section owns the Save-executions toggle', () => {
+test('the Archiving section owns the Save-executions toggle', () => {
   // The regression the user reported: the toggle sat
   // under "Demo API" and had no heading of its own. The
-  // fix moved the toggle into the new "Timeline" group
+  // fix moved the toggle into the new "Archiving" group
   // so the user can see at a glance that the setting
-  // controls the timeline persistence, not the demo.
+  // controls the persistence, not the demo.
   const handle = renderDrawer('en')
   try {
     const sections = extractSections(handle.container)
-    const timeline = sections[2]
-    equal(timeline.heading, 'Timeline')
+    const archiving = sections[2]
+    equal(archiving.heading, 'Archiving')
     equal(
-      timeline.firstTestId,
+      archiving.firstTestId,
       'settings-save-executions-switch',
-      'the Save-executions switch must live in the Timeline section, not the Demo API section',
+      'the Save-executions switch must live in the Archiving section, not the Demo API section',
     )
   } finally {
     handle.unmount()
@@ -170,7 +170,7 @@ test('the Demo API section owns only the bundled-demo-API switch', () => {
   }
 })
 
-test('the Timeline heading uses the standard drawer-section class — no special icon or colour', () => {
+test('the Archiving heading uses the standard drawer-section class — no special icon or colour', () => {
   // The user explicitly asked for the new heading to
   // match the existing headings exactly: same class,
   // no decorative icon, no colour override. A
@@ -180,23 +180,23 @@ test('the Timeline heading uses the standard drawer-section class — no special
   const handle = renderDrawer('en')
   try {
     const headings = Array.from(handle.container.querySelectorAll('.drawer-section'))
-    const timelineHeading = headings.find(heading => heading.textContent?.trim() === 'Timeline')
-    ok(timelineHeading, 'expected a heading labelled "Timeline"')
+    const archivingHeading = headings.find(heading => heading.textContent?.trim() === 'Archiving')
+    ok(archivingHeading, 'expected a heading labelled "Archiving"')
     // The heading must use only the shared class — no
     // helper / utility / colour-override classes that
     // would visually distinguish it from its peers.
-    equal(timelineHeading?.className.trim(), 'drawer-section')
+    equal(archivingHeading?.className.trim(), 'drawer-section')
     // The heading must not contain any decorative
     // glyphs (the user explicitly asked for "kein
     // Stern"). The text content is exactly the
     // translated label.
-    equal(timelineHeading?.textContent?.trim(), 'Timeline')
+    equal(archivingHeading?.textContent?.trim(), 'Archiving')
   } finally {
     handle.unmount()
   }
 })
 
-test('german localisation uses the same order and the translated Timeline heading', () => {
+test('german localisation uses the same order and the translated Archiving heading', () => {
   // Pair with the English test: the German copy
   // describes the drawer in the user's preferred
   // language. Pinning both languages against the same
@@ -207,7 +207,7 @@ test('german localisation uses the same order and the translated Timeline headin
     const sections = extractSections(handle.container)
     equal(sections[0].heading, 'Sprache')
     equal(sections[1].heading, 'Benachrichtigungen')
-    equal(sections[2].heading, 'Timeline')
+    equal(sections[2].heading, 'Historisierung')
     equal(sections[3].heading, 'Demo-API')
   } finally {
     handle.unmount()

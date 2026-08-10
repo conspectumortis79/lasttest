@@ -46,7 +46,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'drawer.notifications.enabled.hint': 'Show a desktop notification when a k6 run finishes — successful or failed.',
     'drawer.notifications.permission.denied': 'Notifications are blocked by the browser. Enable them in the site settings to use this feature.',
     'drawer.section.demo': 'Demo API',
-    'drawer.section.timeline': 'Timeline',
+    'drawer.section.timeline': 'Archiving',
     'drawer.demo.enabled': 'Enable the bundled demo API',
     'drawer.demo.enabled.hint': 'Spins up the in-process /demo-api/* endpoints so you can drive load against a real, full-fidelity REST API without a separate backend. No auto-detection: the demo stays off until you flip this switch. Your choice is remembered across restarts.',
     // Persistence toggle for the timeline. When OFF, the run
@@ -958,7 +958,7 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'drawer.notifications.enabled.hint': 'Desktop-Benachrichtigung anzeigen, wenn ein k6-Lauf endet — erfolgreich oder fehlgeschlagen.',
     'drawer.notifications.permission.denied': 'Benachrichtigungen sind im Browser blockiert. Aktiviere sie in den Website-Einstellungen, um diese Funktion zu nutzen.',
     'drawer.section.demo': 'Demo-API',
-    'drawer.section.timeline': 'Timeline',
+    'drawer.section.timeline': 'Historisierung',
     'drawer.demo.enabled': 'Mitgelieferte Demo-API aktivieren',
     // Speicher-Schalter für die Timeline. Bei AUS wird der
     // Run weiterhin ausgeführt und die Live-Ansicht
