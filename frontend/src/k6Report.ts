@@ -423,10 +423,23 @@ export function statusCodeTotals(rows: StatusDistributionRow[]): StatusCodeTotal
       totals[code] = (totals[code] ?? 0) + count
     }
   }
-  return activeStatusCodes(rows, { includeFallbacks: false }).map(code => ({
-    code: String(code),
-    count: totals[String(code)] ?? 0,
-  }))
+  return statusCodeTotalsFromMap(rows, totals)
+}
+
+// Extracted helper: given an already-populated `totals` map, emit
+// the run-wide list. Splitting the two pieces means the test
+// suite can exercise the `count === undefined` fallback branch
+// by feeding a `totals` map that is missing the entry the
+// helper looks up — without having to monkey-patch the
+// pre-population loop in production code.
+export function statusCodeTotalsFromMap(
+  rows: StatusDistributionRow[],
+  totals: Record<string, number>,
+): StatusCodeTotal[] {
+  return activeStatusCodes(rows, { includeFallbacks: false }).map(code => {
+    const count = totals[String(code)] ?? 0
+    return { code: String(code), count }
+  })
 }
 
 // Returns the run-wide request count, summed over every

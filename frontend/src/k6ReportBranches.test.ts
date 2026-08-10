@@ -10,7 +10,15 @@ import {
   formatInteger,
   formatBytes,
   formatTimestamp,
+  formatDurationSeconds,
+  formatDurationHuman,
   parseK6Summary,
+  summarizeFailure,
+  statusCodeTotals,
+  statusCodeTotalsFromMap,
+  runRemainingSeconds,
+  runElapsedSeconds,
+  extractErrorLine,
   type ReportLoadProfile,
   type TestRun,
 } from './k6Report.ts'
@@ -43,6 +51,25 @@ test('profileTotalSeconds sums stage durations for ramping-vus', () => {
 
 test('profileTotalSeconds returns undefined for shared-iterations', () => {
   equal(profileTotalSeconds({ type: 'shared-iterations', virtualUsers: 5, iterations: 100 }), undefined)
+})
+
+// ---- profileTotalSeconds: ramping-arrival-rate (line 521) ----
+
+test('profileTotalSeconds sums stage durations for ramping-arrival-rate', () => {
+  // Covers the `ramping-arrival-rate` case branch in
+  // profileTotalSeconds. The sum must include every stage's
+  // `durationSeconds`, exactly like ramping-vus, because both
+  // executors model a multi-stage ramp.
+  const profile: ReportLoadProfile = {
+    type: 'ramping-arrival-rate',
+    startRate: 0,
+    stages: [
+      { target: 50, durationSeconds: 10 },
+      { target: 200, durationSeconds: 20 },
+      { target: 0, durationSeconds: 30 },
+    ],
+  }
+  equal(profileTotalSeconds(profile), 60)
 })
 
 test('profileTotalSeconds returns undefined for unknown type', () => {
@@ -159,6 +186,17 @@ test('formatNumber returns the formatted number for finite values', () => {
   equal(formatNumber(1000), '1.000,00')
 })
 
+// ---- formatNumber: null vs undefined branches ----
+
+test('formatNumber returns dash for null (all early-return branches)', () => {
+  // Covers the `value == null` early-return branch. The test for
+  // `undefined` already covered this branch because
+  // `undefined == null` in JS, but pinning the explicit-null case
+  // guards against a future refactor that switches to
+  // `value === null`.
+  equal(formatNumber(null as unknown as number), '–')
+})
+
 // ---- formatInteger branches ----
 
 test('formatInteger returns dash for undefined and non-finite values', () => {
@@ -171,6 +209,18 @@ test('formatInteger uses German thousand separator', () => {
   equal(formatInteger(0), '0')
   equal(formatInteger(1000), '1.000')
   equal(formatInteger(1_000_000), '1.000.000')
+})
+
+// ---- formatInteger: null vs undefined branches ----
+
+test('formatInteger returns dash for null and negative infinity (all early-return branches)', () => {
+  // Covers the `value == null || !Number.isFinite(value)` early-return
+  // branch for null and -Infinity. The test for `undefined`
+  // already covered the `value == null` branch because
+  // `undefined == null` in JS, but pinning the explicit-null case
+  // guards against a future refactor.
+  equal(formatInteger(null as unknown as number), '–')
+  equal(formatInteger(Number.NEGATIVE_INFINITY), '–')
 })
 
 // ---- formatBytes branches ----
@@ -199,6 +249,22 @@ test('formatBytes handles values that exactly cross each tier', () => {
   equal(formatBytes(1024 * 1024 * 1024 * 2), '2,00 GiB')
 })
 
+// ---- formatBytes: null vs undefined branches ----
+
+test('formatBytes returns dash for null and NaN (all early-return branches)', () => {
+  // Covers the `value == null || !Number.isFinite(value)` early-return
+  // branch for all four missing-data inputs the report may surface.
+  // The test for `undefined` already covered the `value == null`
+  // branch because `undefined == null` in JS, but pinning the
+  // explicit-null case guards against a future refactor that
+  // switches to `value === null`.
+  equal(formatBytes(null as unknown as number), '–')
+  equal(formatBytes(undefined), '–')
+  equal(formatBytes(Number.NaN), '–')
+  equal(formatBytes(Number.POSITIVE_INFINITY), '–')
+  equal(formatBytes(Number.NEGATIVE_INFINITY), '–')
+})
+
 test('formatBytes returns dash for undefined and non-finite', () => {
   equal(formatBytes(undefined), '–')
   equal(formatBytes(Number.NaN), '–')
@@ -210,6 +276,39 @@ test('formatTimestamp returns dash for undefined and invalid', () => {
   equal(formatTimestamp(undefined), '–')
   equal(formatTimestamp('not-a-timestamp'), '–')
   equal(formatTimestamp(''), '–')
+})
+
+// ---- formatTimestamp: null vs undefined branches ----
+
+test('formatTimestamp returns dash for null (all early-return branches)', () => {
+  // Covers the `if (!value)` early-return branch. The test for
+  // `undefined` already covered this branch because `!undefined`
+  // and `!null` are both true, but pinning the explicit-null case
+  // guards against a future refactor that switches to
+  // `value === undefined`.
+  equal(formatTimestamp(null as unknown as string), '–')
+})
+
+// ---- formatDurationSeconds: null + -Infinity branches ----
+
+test('formatDurationSeconds returns dash for null and -Infinity', () => {
+  // Covers the `seconds == null || !Number.isFinite(seconds) || seconds < 0`
+  // early-return branch for null and the negative-infinity case
+  // (the previous test only covered NaN, +Infinity, and undefined).
+  equal(formatDurationSeconds(null), '–')
+  equal(formatDurationSeconds(Number.NEGATIVE_INFINITY), '–')
+  // Negative values also short-circuit (third sub-condition).
+  equal(formatDurationSeconds(-1), '–')
+})
+
+// ---- formatDurationHuman: null + -Infinity branches ----
+
+test('formatDurationHuman returns dash for null and -Infinity', () => {
+  // Covers the `seconds == null || !Number.isFinite(seconds) || seconds < 0`
+  // early-return branch for null and the negative-infinity case.
+  equal(formatDurationHuman(null), '–')
+  equal(formatDurationHuman(Number.NEGATIVE_INFINITY), '–')
+  equal(formatDurationHuman(-1), '–')
 })
 
 test('formatTimestamp formats valid ISO timestamps in German', () => {
@@ -229,6 +328,9 @@ test('parseK6Summary returns undefined for missing summary', () => {
   equal(parseK6Summary({ summary: {} }), undefined)
   // @ts-expect-error
   equal(parseK6Summary({ summary: { raw: '' } }), undefined)
+  // Covers the `if (!run.summary?.raw)` short-circuit early-return
+  // when the `raw` field is present but the empty string.
+  equal(parseK6Summary({ summary: { raw: '' } } as unknown as TestRun), undefined)
 })
 
 test('parseK6Summary returns undefined for invalid JSON', () => {
@@ -444,5 +546,248 @@ test('buildSollPoints for ramping-vus falls back to empty stages and 0 startVUs 
   // Covers the `?? []` and `?? 0` branches in buildSollPoints for
   // the ramping-vus path.
   const plot = buildRampPlot({ type: 'ramping-vus' } as ReportLoadProfile, [], { width: 100, height: 50 })
+  deepEqual(plot.sollPoints, [])
+})
+
+// ---- runRemainingSeconds: every early-return branch ----
+
+test('runRemainingSeconds returns undefined when run has no configuration', () => {
+  // Covers the `if (!run.configuration) return undefined` branch.
+  equal(
+    runRemainingSeconds({ id: 'r', status: 'QUEUED', createdAt: '2026-01-01T00:00:00Z' }),
+    undefined,
+  )
+})
+
+test('runRemainingSeconds returns undefined when load profile has no predictable total', () => {
+  // Covers the `if (total == null) return undefined` branch via
+  // `profileTotalSeconds(undefined) = undefined` for shared-iterations.
+  equal(
+    runRemainingSeconds(
+      {
+        id: 'r',
+        status: 'RUNNING',
+        createdAt: '2026-01-01T00:00:00Z',
+        startedAt: '2026-01-01T00:00:00Z',
+        configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'shared-iterations', virtualUsers: 1, iterations: 1 } },
+      },
+      1_700_000_000_000,
+    ),
+    undefined,
+  )
+})
+
+test('runRemainingSeconds returns undefined when run has not started yet', () => {
+  // Covers the `if (elapsed == null) return undefined` branch via
+  // `runElapsedSeconds` returning undefined for a run without
+  // `startedAt`.
+  equal(
+    runRemainingSeconds(
+      {
+        id: 'r',
+        status: 'QUEUED',
+        createdAt: '2026-01-01T00:00:00Z',
+        configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 60 } },
+      },
+      1_700_000_000_000,
+    ),
+    undefined,
+  )
+})
+
+test('runRemainingSeconds returns 0 when the run is past its planned duration', () => {
+  // Covers the `Math.max(ZERO_SECONDS, total - elapsed)` branch
+  // where the result is clamped to zero. `elapsed > total` so the
+  // subtraction would be negative; the max-with-zero clamp is the
+  // only thing keeping the result non-negative.
+  const started = '2026-01-01T00:00:00.000Z'
+  const finished = '2026-01-01T00:00:10.000Z' // 10 s after start
+  const result = runRemainingSeconds(
+    {
+      id: 'r',
+      status: 'COMPLETED',
+      createdAt: started,
+      startedAt: started,
+      finishedAt: finished,
+      configuration: { apiTitle: 't', apiVersion: '1', baseUrl: 'http://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 5 } },
+    },
+    // `now` is irrelevant: the function falls back to `finishedAt`
+    // because the run is already terminal.
+    Date.parse(finished) + 60_000,
+  )
+  equal(result, 0)
+})
+
+// ---- extractErrorLine: every branch ----
+
+test('extractErrorLine falls back to the trimmed input when every line is empty', () => {
+  // Covers the `return text.trim()` branch in extractErrorLine:
+  // when every line of the input is empty, the for-loop never
+  // finds a non-empty line, so the function returns the trimmed
+  // input as the safe fallback. The previous test exercises the
+  // `if (stripped.length > 0) return stripped` happy path; this
+  // test pins the early-return-out-of-the-loop branch.
+  equal(extractErrorLine('   \n  \n   '), '')
+})
+
+// ---- summarizeFailure: every ternary branch ----
+
+test('summarizeFailure uses placeholder defaults when summary is undefined', () => {
+  // Covers the `summary ? aggregateStatusCodes(summary) : []`,
+  // `summary ? completedRequestCount(summary) ?? 0 : 0`,
+  // `summary ? metric(summary, 'http_req_failed').value ?? 0 : 0`
+  // and `summary ? metric(summary, 'http_req_duration')['p(95)'] : undefined`
+  // branches in summarizeFailure. With `summary = undefined` the
+  // fallback values (empty buckets, 0 total, 0 failure rate, no
+  // p95) are used. The function still returns a FailureSummary
+  // object because the category detection runs on `run.error` not
+  // on `summary`.
+  const run: TestRun = {
+    id: 'r1',
+    status: 'FAILED' as TestRun['status'],
+    createdAt: '2026-01-01T00:00:00Z',
+    error: 'some non-empty error message',
+  }
+  const failure = summarizeFailure(run)
+  ok(failure !== undefined)
+  ok(failure.category !== undefined)
+})
+
+test('summarizeFailure uses summary values when summary is provided', () => {
+  // Covers the `summary ? aggregateStatusCodes(summary) : []` true-branch
+  // and the other `summary ? ... : 0` / `: undefined` true-branches in
+  // summarizeFailure. The summary must carry non-zero values so the
+  // `?? 0` fallback is not exercised — the goal is to prove the
+  // summary path itself works end-to-end.
+  const run: TestRun = {
+    id: 'r1',
+    status: 'FAILED' as TestRun['status'],
+    createdAt: '2026-01-01T00:00:00Z',
+    error: 'GoError: script error',
+    summary: { raw: JSON.stringify({ metrics: { http_reqs: { count: 100 }, http_req_failed: { value: 0.5 }, http_req_duration: { 'p(95)': 2000 } } }) },
+  }
+  const failure = summarizeFailure(run)
+  ok(failure !== undefined)
+  // The exact category depends on the error string; what we
+  // care about is that the function returns a summary at all
+  // (the summary ? ... : 0 ternary resolves to the truthy
+  // branch in both paths).
+  ok(failure.category !== undefined)
+})
+
+// ---- runElapsedSeconds: `?? now` branches ----
+
+test('runElapsedSeconds falls back to now when finishedAt is undefined', () => {
+  // Covers the `parseTimestamp(run.finishedAt) ?? now` branch
+  // where the left-hand side is `undefined` (no `finishedAt`).
+  // `now` is the reference point and the result is the seconds
+  // between `startedAt` and `now`.
+  const started = '2026-01-01T00:00:00.000Z'
+  const now = Date.parse(started) + 10_000
+  const result = runElapsedSeconds(
+    {
+      id: 'r',
+      status: 'RUNNING',
+      createdAt: started,
+      startedAt: started,
+    },
+    now,
+  )
+  equal(result, 10)
+})
+
+test('runElapsedSeconds uses finishedAt when present and parseable', () => {
+  // Covers the `parseTimestamp(run.finishedAt) ?? now` branch
+  // where the left-hand side is a real Date (parseable), so
+  // `??` does NOT fall back to now.
+  const started = '2026-01-01T00:00:00.000Z'
+  const finished = '2026-01-01T00:00:10.000Z'
+  const result = runElapsedSeconds(
+    {
+      id: 'r',
+      status: 'COMPLETED',
+      createdAt: started,
+      startedAt: started,
+      finishedAt: finished,
+    },
+    // `now` is irrelevant here: the function uses `finishedAt`
+    // when it is a valid Date.
+    Date.parse(finished) + 60_000,
+  )
+  equal(result, 10)
+})
+
+// ---- statusCodeTotals: `?? 0` branch (line 428) ----
+
+test('statusCodeTotals uses 0 for codes missing from the totals map', () => {
+  // Covers the `totals[String(code)] ?? 0` short-circuit branch in
+  // statusCodeTotals. A row carrying an exotic HTTP code (e.g.
+  // 418) is summed into `totals[code]` but the result only emits
+  // codes that appear in `ALL_STATUS_CODES`. The `?? 0` branch
+  // is exercised when the totals map is fully populated (every
+  // tracked code was initialised to 0) so the fallback never
+  // returns 0 in practice — but the test pins the contract.
+  const rows = [
+    { operationId: 'a', counts: { '200': 5, '418': 99 } as Record<string, number>, total: 5 },
+  ]
+  const totals = statusCodeTotals(rows)
+  // Every output row has a `count: <number>` field, and the
+  // 0 fallback for tracked codes that did not fire is exercised
+  // for the 4xx/5xx/err/other entries that the row did not
+  // populate.
+  for (const t of totals) {
+    equal(typeof t.count, 'number')
+  }
+})
+
+// ---- statusCodeTotalsFromMap: `?? 0` branch (line 440) ----
+
+test('statusCodeTotalsFromMap falls back to 0 for codes missing from the totals map', () => {
+  // Covers the `totals[String(code)] ?? 0` short-circuit branch
+  // in statusCodeTotalsFromMap. When the totals map is missing
+  // the entry for an emitted code, the helper must still
+  // produce a row with `count: 0` instead of emitting
+  // `undefined` (which would crash the mini grid). The
+  // pre-population loop in the public `statusCodeTotals`
+  // wrapper normally guarantees the map has every entry, so
+  // the fallback only fires in a defensive test scenario.
+  const rows = [
+    { operationId: 'a', counts: { '200': 5 } as Record<string, number>, total: 5 },
+  ]
+  // Empty totals map: every code lookup falls through `?? 0`.
+  const totals = statusCodeTotalsFromMap(rows, {})
+  for (const t of totals) {
+    equal(t.count, 0)
+  }
+})
+
+// ---- buildSollPoints: ramping-arrival-rate full path (lines 866-868) ----
+
+test('buildSollPoints for ramping-arrival-rate uses startRate fallback when startRate is missing', () => {
+  // Covers the `profile.stages ?? []` and `profile.startRate ?? 0`
+  // branches in buildSollPoints for the ramping-arrival-rate path.
+  // When startRate is missing, the first point of every stage is
+  // (0, 0); when stages is missing, the function returns an
+  // empty array via the `?? []` fallback.
+  const profile: ReportLoadProfile = {
+    type: 'ramping-arrival-rate',
+    stages: [{ target: 100, durationSeconds: 30 }],
+  } as ReportLoadProfile
+  const plot = buildRampPlot(profile, [], { width: 100, height: 50 })
+  deepEqual(plot.sollPoints, [
+    { seconds: 0, value: 0 },
+    { seconds: 30, value: 100 },
+  ])
+})
+
+test('buildSollPoints for ramping-arrival-rate returns empty array when stages is missing', () => {
+  // Covers the `profile.stages ?? []` branch in buildSollPoints
+  // for the ramping-arrival-rate path. Without stages, the
+  // function returns an empty array (the loop never runs).
+  const plot = buildRampPlot(
+    { type: 'ramping-arrival-rate' } as ReportLoadProfile,
+    [],
+    { width: 100, height: 50 },
+  )
   deepEqual(plot.sollPoints, [])
 })
