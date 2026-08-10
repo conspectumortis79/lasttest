@@ -569,8 +569,12 @@ const SECONDS_PER_MINUTE = 60
 const SECONDS_PER_HOUR = 3600
 
 // Seconds as "MM:SS" or "H:MM:SS" (e.g. "01:23", "1:02:03").
-// Negative or NaN values render as "–".
-export function formatDurationSeconds(seconds: number | undefined): string {
+// Negative or NaN values render as "–". `null` is accepted (not
+// just `undefined`) because the body short-circuits via `seconds
+// == null`, which is true for both. Callers that have an explicit
+// `null` (e.g. from a JSON field that was `null` on the wire) can
+// pass it through without an extra `?? undefined` at the call site.
+export function formatDurationSeconds(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '–'
   const total = Math.floor(seconds)
   const hours = Math.floor(total / SECONDS_PER_HOUR)
@@ -583,8 +587,9 @@ export function formatDurationSeconds(seconds: number | undefined): string {
 // Seconds as "X min Y s" / "Y s" / "H h M min S s". Used for the
 // long form in cards and hint texts — more compact than "MM:SS" and
 // easier to read in longer prose. Segments with value 0 are skipped
-// so that "1 h 0 min 0 s" becomes "1 h".
-export function formatDurationHuman(seconds: number | undefined): string {
+// so that "1 h 0 min 0 s" becomes "1 h". Accepts `null` for the same
+// reason as `formatDurationSeconds` (see comment there).
+export function formatDurationHuman(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '–'
   const total = Math.floor(seconds)
   if (total < SECONDS_PER_MINUTE) return `${total} s`
