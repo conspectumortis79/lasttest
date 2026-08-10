@@ -2889,7 +2889,15 @@ class LocalK6TestRunServiceCoverageTest {
         // the one started by our publishLiveTail call.
         val allThreads = arrayOfNulls<Thread>(Thread.activeCount() * 2)
         val count = Thread.enumerate(allThreads)
-        val reArm = allThreads.filterNotNull().firstOrNull { it.name.contains("Thread") && it != invoker && it != outerThread && it.isAlive }
+        // Match on the JVM's default unnamed-thread prefix
+        // ("Thread-0", "Thread-1", ...) rather than a loose
+        // substring check. A substring match on "Thread" also
+        // matches Gradle's own internal IPC threads (e.g.
+        // "... workers Thread 3"), and interrupting one of
+        // those breaks the socket Gradle uses to talk to this
+        // test worker process, hanging the whole build instead
+        // of just this test.
+        val reArm = allThreads.filterNotNull().firstOrNull { it.name.startsWith("Thread-") && it != invoker && it != outerThread && it.isAlive }
         if (reArm != null) {
             reArm.interrupt()
             reArm.join(2_000L)
