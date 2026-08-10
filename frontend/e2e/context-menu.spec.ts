@@ -69,7 +69,13 @@ test('context menu opens on right-click and closes on Escape', async ({ page }) 
 
     const menu = page.locator('.run-context-menu')
     await expect(menu).toBeVisible()
-    await expect(menu.getByRole('menuitem', { name: 'Live-Details anzeigen' })).toBeVisible()
+    // The historical `Live-Details anzeigen` (focus) entry
+    // was removed: left-clicking the badge is the supported
+    // way to switch the inspector to a different in-flight
+    // run, and the right-click menu is reserved for the k6
+    // control surface (stop / force-abort) plus the share
+    // items. See the KDoc on `buildRunMenuItems` for the
+    // rationale.
     await expect(menu.getByRole('menuitem', { name: 'Stop (graceful)' })).toBeVisible()
     await expect(menu.getByRole('menuitem', { name: 'Force abort' })).toBeVisible()
     // The "open k6 web report" item is present in both in-flight

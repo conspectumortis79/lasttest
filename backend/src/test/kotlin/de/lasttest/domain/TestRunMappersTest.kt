@@ -6,6 +6,7 @@ import de.lasttest.api.CreateTestRunRequest
 import de.lasttest.api.LoadProfile
 import de.lasttest.api.LoadProfileType
 import de.lasttest.api.OperationConfiguration
+import de.lasttest.api.OperationPayload
 import de.lasttest.api.ParameterValue
 import de.lasttest.api.TestRun
 import de.lasttest.api.TestRunConfiguration
@@ -15,6 +16,7 @@ import java.time.Instant
 import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -82,10 +84,14 @@ class TestRunMappersTest {
         // The read path is [toTestRun], which deserialises the
         // two JSON columns. If the write path produces invalid
         // JSON the read path silently returns null — which then
-        // 409s the rerun endpoint. The round trip has to come
-        // back byte-for-byte equal at the data class level so
-        // the dashboard does not see a different run shape
-        // across a server restart.
+        // 409s the rerun endpoint. The structural round trip
+        // (method/path/load-profile/base-url/operation-ids) must
+        // come back identical so the dashboard does not see a
+        // different run shape across a server restart.
+        //
+        // Payload data (request body, parameter values, auth
+        // tokens) is intentionally stripped before persistence
+        // — see the dedicated payload-stripping tests below.
         val configuration =
             TestRunConfiguration(
                 apiTitle = "Pet API",
@@ -125,8 +131,43 @@ class TestRunMappersTest {
         val entity = run.toTestRunEntity(mapper)
         val roundTripped = entity.toTestRun(mapper)
 
-        assertEquals(configuration, roundTripped.configuration)
-        assertEquals(originalRequest, roundTripped.originalRequest)
+        // Endpoint metadata, load profile, base URL and
+        // operation ids survive intact. Payload data (the
+        // user-supplied `id=42` parameter value) does NOT —
+        // the round-tripped operation has empty payload
+        // fields, which is the whole point of the timeline
+        // payload stripping.
+        assertEquals(
+            configuration.copy(
+                operations =
+                    configuration.operations.map { operation ->
+                        operation.copy(parameterValues = emptyList())
+                    },
+            ),
+            roundTripped.configuration,
+        )
+        // The `OperationConfiguration` envelope is preserved
+        // (operationId still points at the right endpoint)
+        // but every payload-shaped field on it is stripped.
+        assertEquals(
+            originalRequest.copy(
+                operationConfigurations =
+                    originalRequest.operationConfigurations.map { configuration ->
+                        configuration.copy(
+                            payloads = emptyList(),
+                            parameterValues = emptyList(),
+                            requestBodyJson = null,
+                            bearerToken = null,
+                            basicAuthUsername = null,
+                            basicAuthPassword = null,
+                            apiKey = null,
+                            oauth2Token = null,
+                            oidcIdToken = null,
+                        )
+                    },
+            ),
+            roundTripped.originalRequest,
+        )
     }
 
     @Test
@@ -258,8 +299,11 @@ class TestRunMappersTest {
     fun `full round trip preserves every field used by the dashboard and the rerun endpoint`() {
         // Belt-and-braces: combine every field that has a
         // dedicated getter on the read path and assert the
-        // round-tripped DTO equals the original. The check is
-        // a deliberate superset of the per-field tests above —
+        // round-tripped DTO equals the original — with the
+        // explicit exception of the payload data the write
+        // path strips (see [toTestRunEntity]'s KDoc and the
+        // dedicated payload-stripping tests). The check is a
+        // deliberate superset of the per-field tests above —
         // it catches a regression where one column is written
         // but read under a different name, or where the JSON
         // serialisation loses a field that the dashboard
@@ -311,7 +355,42 @@ class TestRunMappersTest {
 
         val roundTripped = run.toTestRunEntity(mapper).toTestRun(mapper)
 
-        assertEquals(run, roundTripped)
+        // The round-tripped DTO is equal to the input MINUS
+        // the payload data the write path strips. Build the
+        // expected payload-free shape directly so the
+        // assertion documents exactly which fields are
+        // dropped (and which `*Configured` flags survive).
+        val expectedConfiguration =
+            configuration.copy(
+                operations =
+                    configuration.operations.map { operation ->
+                        operation.copy(parameterValues = emptyList())
+                    },
+            )
+        val expectedOriginalRequest =
+            originalRequest.copy(
+                operationConfigurations =
+                    originalRequest.operationConfigurations.map { configuration ->
+                        configuration.copy(
+                            payloads = emptyList(),
+                            parameterValues = emptyList(),
+                            requestBodyJson = null,
+                            bearerToken = null,
+                            basicAuthUsername = null,
+                            basicAuthPassword = null,
+                            apiKey = null,
+                            oauth2Token = null,
+                            oidcIdToken = null,
+                        )
+                    },
+            )
+        assertEquals(
+            run.copy(
+                configuration = expectedConfiguration,
+                originalRequest = expectedOriginalRequest,
+            ),
+            roundTripped,
+        )
     }
 
     @Test
@@ -539,6 +618,289 @@ class TestRunMappersTest {
         val roundTripped = entity.toTestRun(mapper, encryptor)
 
         assertEquals(configuration, roundTripped.configuration)
+    }
+
+    // ---- timeline payload stripping -----------------------------------
+    //
+    // The timeline is intentionally payload-free: the write
+    // path drops every request dataset (request body,
+    // parameter values, auth tokens, …) from the
+    // [TestRunConfiguration] snapshot AND from the preserved
+    // [CreateTestRunRequest] before serialisation. The tests
+    // below pin the contract end-to-end (round-trip) and
+    // field-by-field so a future regression that re-adds the
+    // payload data to the persisted columns fails the build.
+    //
+    // What survives is documented inline below: endpoint
+    // metadata, load profile, the `*Configured` boolean flags
+    // (metadata, not credentials) and the structural fields
+    // of the [CreateTestRunRequest] envelope (spec, base URL,
+    // operation ids).
+
+    @Test
+    fun `toTestRunEntity strips every payload field from the persisted configuration operations`() {
+        // Build a configuration with a fully populated
+        // payload pool so the assertion can check every
+        // payload-shaped field by name. Endpoint metadata,
+        // load profile and `*Configured` flags survive.
+        val configuration =
+            TestRunConfiguration(
+                apiTitle = "Demo",
+                apiVersion = "1",
+                baseUrl = "https://target.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                operations =
+                    listOf(
+                        TestRunOperationConfiguration(
+                            operationId = "createOrder",
+                            method = "POST",
+                            path = "/orders",
+                            summary = "Create order",
+                            payloads =
+                                listOf(
+                                    OperationPayload(
+                                        parameterValues = listOf(ParameterValue("client", "header", "secret-client")),
+                                        requestBodyJson = """{"customer":"C-1","items":["a","b"]}""",
+                                        bearerToken = "secret-bearer",
+                                        basicAuthUsername = "secret-user",
+                                        basicAuthPassword = "secret-pass",
+                                        apiKey = "secret-key",
+                                        oauth2Token = "secret-oauth",
+                                        oidcIdToken = "secret-oidc",
+                                    ),
+                                ),
+                            parameterValues = listOf(ParameterValue("client", "header", "secret-client")),
+                            requestBodyJson = """{"customer":"C-1","items":["a","b"]}""",
+                            bearerTokenConfigured = true,
+                            basicAuthConfigured = true,
+                            apiKeyConfigured = true,
+                            oauth2TokenConfigured = true,
+                            oidcIdTokenConfigured = true,
+                        ),
+                    ),
+            )
+        val run =
+            TestRun(
+                id = "run-strip",
+                status = TestRunStatus.QUEUED,
+                createdAt = "2026-01-01T00:00:00Z",
+                configuration = configuration,
+            )
+
+        val entity = run.toTestRunEntity(mapper)
+        val roundTripped = entity.toTestRun(mapper)
+        val roundTrippedOperation = assertNotNull(roundTripped.configuration).operations.single()
+
+        // Every payload-shaped field is gone.
+        assertEquals(emptyList<OperationPayload>(), roundTrippedOperation.payloads)
+        assertEquals(emptyList<ParameterValue>(), roundTrippedOperation.parameterValues)
+        assertNull(roundTrippedOperation.requestBodyJson)
+        // The `*Configured` flags are metadata, not
+        // credentials, so they survive.
+        assertEquals(true, roundTrippedOperation.bearerTokenConfigured)
+        assertEquals(true, roundTrippedOperation.basicAuthConfigured)
+        assertEquals(true, roundTrippedOperation.apiKeyConfigured)
+        assertEquals(true, roundTrippedOperation.oauth2TokenConfigured)
+        assertEquals(true, roundTrippedOperation.oidcIdTokenConfigured)
+        // Endpoint metadata and the load profile are
+        // untouched.
+        assertEquals("createOrder", roundTrippedOperation.operationId)
+        assertEquals("POST", roundTrippedOperation.method)
+        assertEquals("/orders", roundTrippedOperation.path)
+        assertEquals(1, roundTripped.configuration?.loadProfile?.virtualUsers)
+        assertEquals(1, roundTripped.configuration?.loadProfile?.durationSeconds)
+    }
+
+    @Test
+    fun `toTestRunEntity strips every payload field from the persisted originalRequest`() {
+        // Same contract on the request envelope: every
+        // payload field on every [OperationConfiguration] is
+        // dropped, every structural field is preserved.
+        val originalRequest =
+            CreateTestRunRequest(
+                specification = "openapi document",
+                baseUrl = "https://target.test",
+                operationIds = setOf("createOrder"),
+                operationConfigurations =
+                    listOf(
+                        OperationConfiguration(
+                            operationId = "createOrder",
+                            payloads =
+                                listOf(
+                                    OperationPayload(
+                                        parameterValues = listOf(ParameterValue("client", "header", "secret-client")),
+                                        requestBodyJson = """{"customer":"C-1"}""",
+                                        bearerToken = "secret-bearer",
+                                        basicAuthUsername = "secret-user",
+                                        basicAuthPassword = "secret-pass",
+                                        apiKey = "secret-key",
+                                        oauth2Token = "secret-oauth",
+                                        oidcIdToken = "secret-oidc",
+                                    ),
+                                ),
+                            parameterValues = listOf(ParameterValue("client", "header", "secret-client")),
+                            requestBodyJson = """{"customer":"C-1"}""",
+                            bearerToken = "secret-bearer",
+                            basicAuthUsername = "secret-user",
+                            basicAuthPassword = "secret-pass",
+                            apiKey = "secret-key",
+                            oauth2Token = "secret-oauth",
+                            oidcIdToken = "secret-oidc",
+                        ),
+                    ),
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 2, durationSeconds = 4),
+            )
+        val run =
+            TestRun(
+                id = "run-strip-req",
+                status = TestRunStatus.QUEUED,
+                createdAt = "2026-01-01T00:00:00Z",
+                originalRequest = originalRequest,
+            )
+
+        val entity = run.toTestRunEntity(mapper)
+        val roundTripped = entity.toTestRun(mapper)
+        val roundTrippedRequest = assertNotNull(roundTripped.originalRequest)
+        val roundTrippedConfiguration = assertNotNull(roundTrippedRequest.operationConfigurations.singleOrNull())
+
+        // Every payload-shaped field is gone on both the
+        // pool AND the legacy flat fields.
+        assertEquals(emptyList<OperationPayload>(), roundTrippedConfiguration.payloads)
+        assertEquals(emptyList<ParameterValue>(), roundTrippedConfiguration.parameterValues)
+        assertNull(roundTrippedConfiguration.requestBodyJson)
+        assertNull(roundTrippedConfiguration.bearerToken)
+        assertNull(roundTrippedConfiguration.basicAuthUsername)
+        assertNull(roundTrippedConfiguration.basicAuthPassword)
+        assertNull(roundTrippedConfiguration.apiKey)
+        assertNull(roundTrippedConfiguration.oauth2Token)
+        assertNull(roundTrippedConfiguration.oidcIdToken)
+        // Structural fields survive so the dashboard's
+        // `Erneut starten` action still reproduces a run.
+        assertEquals("openapi document", roundTrippedRequest.specification)
+        assertEquals("https://target.test", roundTrippedRequest.baseUrl)
+        assertEquals(setOf("createOrder"), roundTrippedRequest.operationIds)
+        assertEquals(2, roundTrippedRequest.loadProfile?.virtualUsers)
+        assertEquals(4, roundTrippedRequest.loadProfile?.durationSeconds)
+    }
+
+    @Test
+    fun `persisted configurationJson never contains the literal request body even without an encryptor`() {
+        // Defence in depth: the strip must happen BEFORE the
+        // encryptor (and the encryptor's absence) sees the
+        // data. A regression that moved the strip after the
+        // serialise call would still leak the body into the
+        // column for deployments without an encryption key
+        // configured (the no-op encryptor passes the bytes
+        // through verbatim). We deserialise the column back
+        // to the data class — a substring search on the raw
+        // bytes would miss the body because Jackson escapes
+        // the embedded quotes, masking the regression.
+        val requestBody = """{"customer":"C-1","items":["a","b"]}"""
+        val configuration =
+            TestRunConfiguration(
+                apiTitle = "Demo",
+                apiVersion = "1",
+                baseUrl = "https://target.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                operations =
+                    listOf(
+                        TestRunOperationConfiguration(
+                            operationId = "createOrder",
+                            method = "POST",
+                            path = "/orders",
+                            summary = "Create order",
+                            payloads = listOf(OperationPayload(requestBodyJson = requestBody)),
+                            parameterValues = emptyList(),
+                            requestBodyJson = requestBody,
+                        ),
+                    ),
+            )
+        val run =
+            TestRun(
+                id = "run-no-encrypt",
+                status = TestRunStatus.QUEUED,
+                createdAt = "2026-01-01T00:00:00Z",
+                configuration = configuration,
+            )
+
+        val entity = run.toTestRunEntity(mapper)
+        val column = assertNotNull(entity.configurationJson)
+
+        // The persisted column must NOT equal the
+        // unstripped JSON. If the strip is removed entirely
+        // this assertion fires — the persisted bytes are
+        // byte-for-byte the original configuration.
+        val unstrippedJson = mapper.writeValueAsString(configuration)
+        assertFalse(
+            column == unstrippedJson,
+            "the persisted column is identical to the unstripped JSON — the strip never ran",
+        )
+        // Round-trip back to the data class and assert the
+        // payload field is empty. Substring checks against
+        // the raw bytes are unreliable because Jackson
+        // escapes the embedded quotes, so a regression
+        // would still pass such a check.
+        val roundTripped =
+            mapper.readValue(column, TestRunConfiguration::class.java)
+        val roundTrippedOperation = roundTripped.operations.single()
+        assertEquals(emptyList<OperationPayload>(), roundTrippedOperation.payloads)
+        assertNull(roundTrippedOperation.requestBodyJson)
+        // The persisted column must NOT contain the raw
+        // request body bytes. Even with the escaping caveat
+        // above, a sufficiently large body cannot be fully
+        // hidden by quote escaping alone — the body length
+        // is preserved. The substring here is the body
+        // WITHOUT the JSON quotes so the comparison is
+        // stable across Jackson's encoder choice.
+        val bodyWithoutQuotes = requestBody.replace("\"", "")
+        assertFalse(
+            column.contains(bodyWithoutQuotes),
+            "request body content (without JSON quotes) leaked into the persisted configuration column",
+        )
+    }
+
+    @Test
+    fun `persisted configurationJson never contains the literal bearer token even without an encryptor`() {
+        // Same defence-in-depth check, but for an auth
+        // credential rather than a request body. The literal
+        // token MUST NOT appear in the column under any
+        // configuration.
+        val bearer = "eyJhbGciOiJIUzI1NiJ9.dummy.signature"
+        val configuration =
+            TestRunConfiguration(
+                apiTitle = "Demo",
+                apiVersion = "1",
+                baseUrl = "https://target.test",
+                loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                operations =
+                    listOf(
+                        TestRunOperationConfiguration(
+                            operationId = "getMe",
+                            method = "GET",
+                            path = "/me",
+                            summary = "Who am I?",
+                            payloads = listOf(OperationPayload(bearerToken = bearer)),
+                            parameterValues = emptyList(),
+                            requestBodyJson = null,
+                            bearerTokenConfigured = true,
+                        ),
+                    ),
+            )
+        val run =
+            TestRun(
+                id = "run-no-encrypt-bearer",
+                status = TestRunStatus.QUEUED,
+                createdAt = "2026-01-01T00:00:00Z",
+                configuration = configuration,
+            )
+
+        val entity = run.toTestRunEntity(mapper)
+
+        val column = assertNotNull(entity.configurationJson)
+        assertFalse(
+            column.contains(bearer),
+            "bearer token leaked into the persisted configuration column",
+        )
     }
 
     private companion object {

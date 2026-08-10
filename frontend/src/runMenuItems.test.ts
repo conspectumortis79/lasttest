@@ -46,13 +46,46 @@ test('in-flight menu has two groups with a stop and a force-abort item', () => {
   const groups = buildRunMenuItems(runWith('RUNNING'))
 
   equal(groups.length, 2)
+  // The historical focus entry (`Show live details` /
+  // `Live-Details anzeigen`) was dropped: clicking the
+  // badge in the overview grid is the supported way to
+  // switch the inspector to a different in-flight run, and
+  // the right-click menu is reserved for the k6 control
+  // surface (stop / force-abort) plus the share items.
   const top = groups[0].map(item => item.id)
-  deepEqual(top, ['focus', 'copy-id', 'open-report'])
+  deepEqual(top, ['copy-id', 'open-report'])
   const control = groups[1].map(item => item.id)
   deepEqual(control, ['stop', 'force-abort'])
   // Force abort is visually marked as destructive.
   ok(groups[1].find(item => item.id === 'force-abort')?.danger === true)
   ok(groups[1].find(item => item.id === 'stop')?.danger !== true)
+})
+
+test('in-flight menu does NOT expose a focus item', () => {
+  // Defence-in-depth pin on the removal of the focus
+  // entry: a regression that re-adds the item would
+  // silently restore the redundant toggle and re-introduce
+  // the duplicate UX (click badge vs. right-click
+  // `Live-Details anzeigen`). The KDoc on
+  // [buildRunMenuItems] documents why the entry is gone.
+  for (const status of ['QUEUED', 'RUNNING', 'STOPPING']) {
+    const actions = buildRunMenuItems(runWith(status)).flat().map(item => item.action)
+    ok(!actions.includes('focus'), `focus action must not appear in in-flight menu for ${status}`)
+  }
+})
+
+test('terminal menu omits the focus item entirely', () => {
+  // The previous focus entry (`Show summary` /
+  // `Zusammenfassung anzeigen`, and `Show aborted details`
+  // / `Aborted-Details anzeigen` for ABORTED) was a
+  // duplicate of "left-click the badge" — the inspector
+  // already shows the run summary. Removing it shrinks the
+  // menu and stops confusing users who expected the entry
+  // to open a real summary view.
+  for (const status of ['COMPLETED', 'FAILED', 'STOPPED', 'ABORTED']) {
+    const actions = buildRunMenuItems(runWith(status)).flat().map(item => item.action)
+    ok(!actions.includes('focus'), `focus action must not appear in terminal menu for ${status}`)
+  }
 })
 
 test('terminal menu offers rerun and disables export when no summary is present', () => {
@@ -63,7 +96,6 @@ test('terminal menu offers rerun and disables export when no summary is present'
   // `terminal menu offers a cleanup group ...` below).
   equal(groups.length, 3)
   const viewGroup = groups[0]
-  equal(viewGroup.find(item => item.id === 'focus')?.action, 'focus')
   equal(viewGroup.find(item => item.id === 'copy-report-link')?.action, 'copy-report-link')
   equal(viewGroup.find(item => item.id === 'open-report')?.action, 'open-report')
   equal(viewGroup.find(item => item.id === 'download-script')?.action, 'download-script')
@@ -84,31 +116,70 @@ test('terminal menu enables export when a summary is present', () => {
   equal(exportItem.disabledReason, null)
 })
 
-test('ABORTED menu labels the focus item as Aborted-Details and disables export', () => {
+test('ABORTED menu still disables export even when a summary is present', () => {
+  // The previous ABORTED test also asserted the focus
+  // item's label (`Show aborted details`); that focus
+  // entry is now gone, so the assertion moved here and
+  // covers only the export side of the ABORTED contract:
+  // partial counters are not a complete summary, so the
+  // export stays disabled even when `summary.raw` is
+  // populated.
   const groups = buildRunMenuItems(runWith('ABORTED', { summary: { raw: '{}' } }))
-  // ABORTED explicitly disables export even when a summary is
-  // present — partial counters are not a complete summary.
   const exportItem = groups[0].find(item => item.id === 'export-metrics')!
-  ok(!isMenuItemEnabled(exportItem))
-  // Default language is English; the explicit German label is
-  // covered by the i18n dictionary tests.
-  equal(
-    groups[0].find(item => item.id === 'focus')?.label,
-    'Show aborted details',
-  )
+  ok(!isMenuItemEnabled(exportItem), 'ABORTED export must stay disabled even when summary is present')
+})
+
+test('terminal menu omits the export-metrics item when showExportMetrics is false', () => {
+  // The per-endpoint timeline tab sets `showExportMetrics =
+  // false` because exporting from a timeline row would
+  // either trigger an extra round trip or hand back a
+  // stale blob — see the KDoc on
+  // [buildRunMenuItems.showExportMetrics]. Pin the contract
+  // across every terminal status.
+  for (const status of ['COMPLETED', 'FAILED', 'STOPPED', 'ABORTED']) {
+    const actions = buildRunMenuItems(runWith(status), 'en', undefined, true, false)
+      .flat()
+      .map(item => item.action)
+    ok(!actions.includes('export-metrics'), `export-metrics must not appear for ${status} when showExportMetrics is false`)
+  }
+})
+
+test('terminal menu keeps the export-metrics item when showExportMetrics defaults to true', () => {
+  // Backwards-compatible default: callers that do not
+  // pass the flag (the overview dashboard, the existing
+  // menuItemCount helper) still get the export entry.
+  const groups = buildRunMenuItems(runWith('COMPLETED', { summary: { raw: '{}' } }))
+  ok(groups[0].some(item => item.id === 'export-metrics'), 'export-metrics must appear when showExportMetrics defaults to true')
+})
+
+test('showExportMetrics flag does not affect the in-flight menu', () => {
+  // The in-flight menu never exposed export-metrics
+  // (k6 has not produced a summary yet) — the flag must
+  // be a no-op there. Pin explicitly so a future refactor
+  // that conditionally adds export to the in-flight menu
+  // does not silently flip the behaviour.
+  for (const status of ['QUEUED', 'RUNNING', 'STOPPING']) {
+    const withFlag = buildRunMenuItems(runWith(status), 'en', undefined, true, false)
+    const withoutFlag = buildRunMenuItems(runWith(status), 'en', undefined, true, true)
+    deepEqual(withFlag, withoutFlag)
+    const actions = withFlag.flat().map(item => item.action)
+    ok(!actions.includes('export-metrics'), `export-metrics must not appear for ${status}`)
+  }
 })
 
 test('menuItemCount counts every item across every group', () => {
   // Terminal runs carry the cleanup group (remove-from-view,
   // remove-all-other-failed) and the download-script item on
-  // top of the standard two groups, so they have 8 items
-  // instead of 5. In-flight runs stay at 5 — the download is
-  // only meaningful once the test is finished.
-  equal(menuItemCount(runWith('RUNNING')), 5)
-  equal(menuItemCount(runWith('COMPLETED')), 8)
-  equal(menuItemCount(runWith('FAILED')), 8)
-  equal(menuItemCount(runWith('STOPPED')), 8)
-  equal(menuItemCount(runWith('ABORTED')), 8)
+  // top of the standard two groups, so they have 7 items
+  // instead of 4 — one less than before the focus entry was
+  // removed. In-flight runs stay at 4 — the download is
+  // only meaningful once the test is finished, and the
+  // historical focus entry was already gone there.
+  equal(menuItemCount(runWith('RUNNING')), 4)
+  equal(menuItemCount(runWith('COMPLETED')), 7)
+  equal(menuItemCount(runWith('FAILED')), 7)
+  equal(menuItemCount(runWith('STOPPED')), 7)
+  equal(menuItemCount(runWith('ABORTED')), 7)
 })
 
 test('download-script is offered for every terminal status and never for in-flight runs', () => {
@@ -248,4 +319,68 @@ test('German labels for the cleanup group match the i18n dictionary', () => {
     disabledGroups[2][1]?.disabledReason,
     'Keine weiteren fehlgeschlagenen Läufe zum Entfernen.',
   )
+})
+
+// ---- showRerun flag -------------------------------------------------
+//
+// The per-endpoint timeline tab opts out of the `rerun` action
+// (timeline rows are a passive history view and the payload
+// data the rerun would replay was intentionally stripped
+// from the timeline persist path). The overview dashboard
+// keeps the historical `Erneut starten` entry point. The
+// flag is the single toggle between the two surfaces — the
+// tests below pin both halves of that contract.
+
+test('terminal menu omits the rerun action when showRerun is false', () => {
+  // The timeline's right-click menu must not advertise a
+  // rerun at all — neither the action nor the dedicated
+  // group, otherwise a user clicking it would trigger a
+  // half-replayed run (payload data stripped, no preview).
+  const groups = buildRunMenuItems(runWith('COMPLETED'), 'en', undefined, false)
+  const allActions = groups.flat().map(item => item.action)
+  ok(!allActions.includes('rerun'), 'rerun action must not appear when showRerun is false')
+  // The rerun group itself is gone, so the cleanup group
+  // shifts to index 1 instead of the default index 2.
+  equal(groups.length, 2)
+  equal(groups[1][0]?.action, 'remove-from-view')
+})
+
+test('terminal menu keeps the rerun action when showRerun defaults to true', () => {
+  // Backwards-compatible default: callers that do not pass
+  // the flag (the overview dashboard, the existing
+  // menuItemCount helper) still get the rerun action.
+  const groups = buildRunMenuItems(runWith('COMPLETED'))
+  const allActions = groups.flat().map(item => item.action)
+  ok(allActions.includes('rerun'), 'rerun action must appear when showRerun defaults to true')
+})
+
+test('showRerun flag is honoured for every terminal status', () => {
+  // The contract is per-status, not per-COMPLETED-only: a
+  // right-click on a FAILED, STOPPED or ABORTED timeline
+  // row also must not offer rerun, because the timeline
+  // strip applies to every persisted row regardless of
+  // status.
+  for (const status of ['COMPLETED', 'FAILED', 'STOPPED', 'ABORTED']) {
+    const allActions = buildRunMenuItems(runWith(status), 'en', undefined, false)
+      .flat()
+      .map(item => item.action)
+    ok(!allActions.includes('rerun'), `rerun must not appear for ${status} when showRerun is false`)
+  }
+})
+
+test('showRerun flag does not affect the in-flight menu', () => {
+  // Rerun is a terminal-only concept (you cannot rerun a
+  // QUEUED/RUNNING/STOPPING row). The flag therefore has no
+  // effect on the in-flight menu — there is no rerun group
+  // there either way. Pin that explicitly so a future
+  // refactor that conditionally adds rerun to the in-flight
+  // menu fails the build rather than silently expanding the
+  // surface.
+  for (const status of ['QUEUED', 'RUNNING', 'STOPPING']) {
+    const withFlag = buildRunMenuItems(runWith(status), 'en', undefined, false)
+    const withoutFlag = buildRunMenuItems(runWith(status), 'en', undefined, true)
+    deepEqual(withFlag, withoutFlag)
+    const allActions = withFlag.flat().map(item => item.action)
+    ok(!allActions.includes('rerun'), `rerun must not appear for ${status}`)
+  }
 })

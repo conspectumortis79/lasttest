@@ -686,25 +686,6 @@ button:disabled { opacity: .5; cursor: wait; }
   min-height: calc(14px * 1.55 * 3);
 }
 
-/* "Important additional information" callout that the
-   walkthrough renders right under the intro for steps that
-   set `securityNoteKey` (currently only step 4 — the
-   timeline encryption-at-rest note). The block stands out
-   from the plain intro via a left accent border and a warm
-   background tint so the user reads it as a warning rather
-   than as part of the regular copy. */
-.walkthrough-security-note {
-  margin: 0 0 22px;
-  padding: 10px 14px;
-  border-left: 3px solid #fb923c;
-  background: rgba(251, 146, 60, 0.08);
-  border-radius: 4px;
-  color: #f3d6c1;
-  font-size: 13.5px;
-  line-height: 1.55;
-  max-width: 78ch;
-}
-
 .walkthrough-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
@@ -2918,6 +2899,23 @@ pre { overflow: auto; padding: 1rem; background: #080d14; border-radius: 8px; co
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   margin-bottom: 8px;
+  /* The list renders up to [MAX_TIMELINE_BADGES] (40) entries
+     per endpoint — the backend retention cap. With the heatmap
+     and stats grid sitting above the list, a full 40 entries
+     would push the rest of the page off-screen. The viewport-
+     relative max-height keeps the list contained on every
+     desktop size, and `overflow-y: auto` shows a scrollbar
+     exactly when the content height exceeds the cap. The list
+     is the only section that scrolls inside the timeline tab;
+     the heatmap, stats and toolbar stay pinned at the top. */
+  max-height: 60vh;
+  overflow-y: auto;
+  /* Reserve a sliver of right padding so the scrollbar does
+     not overlap the last column of badges on browsers that
+     overlay the scrollbar on top of the content (Chrome on
+     macOS, Edge). The 10px matches the grid `gap` so the
+     visual rhythm stays consistent. */
+  padding-right: 4px;
 }
 .timeline-tab-list-item {
   background: #0f1722;

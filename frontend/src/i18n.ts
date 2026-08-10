@@ -58,8 +58,8 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     // default is OFF so a fresh install does not silently
     // grow the timeline just because the user clicked the
     // "Start test" button.
-    'drawer.persistence.saveExecutions': 'Save executed test configurations',
-    'drawer.persistence.saveExecutions.hint': 'When enabled, every executed load test is stored with its configuration and shown in the timeline. The timeline keeps at most 40 runs per endpoint; older runs are dropped automatically. When disabled, the run is still executed and the live view works, but it is not saved and disappears when the container restarts.',
+    'drawer.persistence.saveExecutions': 'Archive executed load tests',
+    'drawer.persistence.saveExecutions.hint': 'When enabled, the detailed k6 report for every executed load test is saved and shown in the timeline. The timeline keeps at most 40 runs per endpoint; older runs are dropped automatically. When disabled, the run is still executed and the live view works, but it is not saved and disappears when the container restarts.',
     'notification.completed.title': 'k6 run completed',
     'notification.completed.body': 'Run {id} finished successfully.',
     'notification.failed.title': 'k6 run finished with a failure',
@@ -102,7 +102,6 @@ export const dict: Record<SupportedLanguage, StringDict> = {
 
     'walk.step4.title': 'Test runs',
     'walk.step4.intro': 'Step 4 is the dashboard of every test run you started in the current session. The Letzte Läufe row list at the top shows the run state; the run-detail card below the list opens a tab strip with Overview, Timeline, Actions, k6 console, Thresholds, Configuration, Failure diagnosis, k6 script and an external link to the printable k6 report.',
-    'walk.step4.securityNote': '⚠ Important: timeline storage is **opt-in** and disabled by default — a fresh install does not save any runs. Open **Settings** (gear icon in the toolbar) and flip the **Save executed test configurations** toggle to enable it. Once enabled, every row stores its full load-test configuration (endpoints, payloads, auth, load profile, base URL) encrypted at rest on the H2 volume (AES-GCM, per-installation key). The plaintext is only reconstructed in memory at the moment you right-click a terminal row and pick Rerun — every other read of the row (dashboard polling, k6 report, /api/test-runs, /api/operations/runs) goes straight through the encrypted blob. See annotation 9 below.',
     // Annotations 1–4 belong to the primary SVG (the Letzte Läufe row list).
     'walk.step4.ann.1.title': 'Run row',
     'walk.step4.ann.1.body': 'One row per run, sorted newest first. The colour of the left stripe encodes the status: orange = RUNNING/QUEUED/STOPPING, green = COMPLETED, red = FAILED, dark red = ABORTED, purple = STOPPED. The status badge mirrors the same colour. Left-click = focus this run, right-click = open the action menu.',
@@ -121,13 +120,6 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step4.ann.7.body': 'Actions bundles every right-click action (Stop, Rerun, Copy report link, Export → k6 JSON, Remove from view, etc.) plus the deep link to the printable k6 report. k6 console shows the full k6 stdout/stderr. Thresholds lists every threshold with the measured value and a pass/fail pill.',
     'walk.step4.ann.8.title': 'Configuration / failure diagnosis / k6 script',
     'walk.step4.ann.8.body': 'Configuration echoes the full run configuration (API, base URL, profile, every operation with auth flags and payload count). Failure diagnosis only renders for FAILED/ABORTED runs and gives a typed diagnosis. k6 script shows the exact k6 script that was executed, with a download button, a copyable manual run command, and a link to the k6 docs.',
-    // Annotation 9 is a free-floating callout attached to the
-    // secondary SVG; it documents the timeline encryption-at-rest
-    // policy (see [walk.step4.securityNote]) which is the
-    // important additional information that prompted the
-    // annotation.
-    'walk.step4.ann.9.title': 'Encrypted timeline — opt-in via Settings, Rerun is the only decrypt path',
-    'walk.step4.ann.9.body': 'Timeline storage is **opt-in** and disabled by default — a fresh install does not save any runs and the timeline tab stays empty. Open the **Settings** drawer (gear icon in the toolbar) and flip the **Save executed test configurations** toggle to enable it; the choice is remembered in localStorage so every subsequent visit lands in the same mode. Once enabled, every run you start is persisted in encrypted form on the H2 volume: the configuration JSON and the original create request are AES-GCM encrypted with a per-installation 256-bit key (auto-generated on first start, persisted next to the H2 file, or supplied via LASTTEST_ENCRYPTION_KEY / lasttest.encryption.key). The plaintext is materialised in memory only when you right-click a terminal row and pick Rerun — that is the single path that decrypts and replays the CreateTestRunRequest. Polling /api/test-runs, the dashboard re-render, the printable k6 report, and the per-endpoint /api/operations/runs endpoint all read the encrypted blob straight from disk and never touch the plaintext. When the toggle is off, every subsequent POST /api/test-runs sends persist: false so the backend skips the timeline write and the live view is the only surface that shows the run (it disappears at the next container restart). The 40-row per-endpoint retention cap only applies to runs created with persistence enabled. Setting lasttest.encryption.enabled=false switches to a no-op encryptor for forensics or for environments that already provide volume-level encryption.',
 
     'walk.step5.title': 'Detailed k6 report',
     'walk.step5.intro': 'The detailed k6 report opens in a new tab and contains every metric k6 collected, broken down by endpoint and status code. Use it to investigate failures, compare runs, or archive results as PDF.',
@@ -905,7 +897,6 @@ export const dict: Record<SupportedLanguage, StringDict> = {
 
     'walk.step4.title': 'Testläufe',
     'walk.step4.intro': 'Schritt 4 ist das Dashboard für jeden Testlauf, den du in dieser Session gestartet hast. Oben siehst du die Letzte-Läufe-Zeile mit dem Status jedes Laufs; darunter öffnet die Run-Detail-Karte einen Tab-Streifen mit Übersicht, Timeline, Aktionen, k6-Konsole, Schwellen, Konfiguration, Fehler-Diagnose, k6-Skript und einem externen Link auf den druckbaren k6-Bericht.',
-    'walk.step4.securityNote': '⚠ Wichtig: das Speichern in der Timeline ist **opt-in** und standardmäßig deaktiviert — eine frische Installation speichert keine Läufe. Öffne die **Einstellungen** (Zahnrad-Symbol in der Toolbar) und lege den Schalter **Ausgeführte Lasttestkonfigurationen speichern** um, um die Historie zu aktivieren. Sobald aktiviert, speichert jede Zeile ihre komplette Lasttest-Konfiguration (Endpunkte, Payloads, Auth, Lastprofil, Base-URL) verschlüsselt auf dem H2-Volume (AES-GCM, Schlüssel pro Installation). Der Klartext wird nur in dem Moment im Speicher materialisiert, in dem du per Rechtsklick auf einer Terminal-Zeile Erneut ausführen wählst — alle anderen Lese-Zugriffe (Dashboard-Polling, k6-Bericht, /api/test-runs, /api/operations/runs) lesen den verschlüsselten Blob direkt von der Platte. Siehe Annotation 9 weiter unten.',
     // Annotations 1–4 gehören zur primären Grafik (Letzte Läufe Zeilenliste).
     'walk.step4.ann.1.title': 'Lauf-Zeile',
     'walk.step4.ann.1.body': 'Eine Zeile pro Lauf, sortiert nach Neueste zuerst. Die Farbe des linken Streifens kodiert den Status: orange = RUNNING/QUEUED/STOPPING, grün = COMPLETED, rot = FAILED, dunkelrot = ABORTED, lila = STOPPED. Das Status-Badge spiegelt die gleiche Farbe. Linksklick = diesen Lauf fokussieren, Rechtsklick = Aktions-Menü öffnen.',
@@ -924,13 +915,6 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'walk.step4.ann.7.body': 'Aktionen bündelt jede Rechtsklick-Aktion (Stop, Erneut ausführen, Report-Link kopieren, Export → k6-JSON, Aus Ansicht entfernen …) plus den Deep-Link auf den druckbaren k6-Bericht. k6-Konsole zeigt die volle k6-stdout/stderr. Schwellen listet jeden Threshold mit Messwert und bestanden/fehlgeschlagen-Pille.',
     'walk.step4.ann.8.title': 'Konfiguration / Fehler-Diagnose / k6-Skript',
     'walk.step4.ann.8.body': 'Konfiguration gibt die gesamte Lauf-Konfiguration wieder (API, Base-URL, Profil, jeder Endpunkt mit Auth-Flags und Payload-Anzahl). Fehler-Diagnose rendert nur für FAILED/ABORTED und liefert eine typisierte Diagnose. k6-Skript zeigt das exakte k6-Skript, das ausgeführt wurde, mit Download-Button, kopierbarem manuellem Start-Befehl und Link auf die k6-Doku.',
-    // Annotation 9 is a free-floating callout attached to the
-    // secondary SVG; it documents the timeline encryption-at-rest
-    // policy (see [walk.step4.securityNote]) which is the
-    // important additional information that prompted the
-    // annotation.
-    'walk.step4.ann.9.title': 'Verschlüsselte Timeline — opt-in über Einstellungen, Erneut ausführen ist der einzige Entschlüsselungs-Pfad',
-    'walk.step4.ann.9.body': 'Das Speichern in der Timeline ist **opt-in** und standardmäßig deaktiviert — eine frische Installation speichert keine Läufe und der Timeline-Tab bleibt leer. Öffne die **Einstellungen** (Zahnrad-Symbol in der Toolbar) und lege den Schalter **Ausgeführte Lasttestkonfigurationen speichern** um, um die Historie zu aktivieren; die Wahl wird in localStorage gespeichert, damit jeder weitere Besuch im selben Modus landet. Sobald aktiviert, wird jeder gestartete Lauf verschlüsselt auf dem H2-Volume persistiert: die Konfigurations-JSON und der ursprüngliche Create-Request sind mit AES-GCM und einem 256-Bit-Schlüssel pro Installation verschlüsselt (beim ersten Start automatisch erzeugt und neben der H2-Datei abgelegt, alternativ via LASTTEST_ENCRYPTION_KEY bzw. lasttest.encryption.key gesetzt). Der Klartext wird ausschließlich dann im Speicher rekonstruiert, wenn du per Rechtsklick auf einer Terminal-Zeile Erneut ausführen wählst — das ist der einzige Pfad, der den CreateTestRunRequest entschlüsselt und erneut einspeist. Das Polling von /api/test-runs, das Re-Render des Dashboards, der druckbare k6-Bericht und der Pro-Endpunkt-Endpoint /api/operations/runs lesen den verschlüsselten Blob direkt von der Platte und kommen nie mit dem Klartext in Berührung. Bei deaktiviertem Schalter sendet jeder POST /api/test-runs persist: false, sodass das Backend den Timeline-Write überspringt — die Live-Ansicht funktioniert weiterhin, der Lauf verschwindet aber beim nächsten Container-Neustart. Die 40-Läufe-pro-Endpunkt-Retention greift nur bei aktivierter Persistierung. Über lasttest.encryption.enabled=false schaltest du für Forensik oder für Umgebungen mit Volume-Level-Verschlüsselung auf einen No-Op-Encryptor um.',
 
     'walk.step5.title': 'Ausführlicher k6-Testbericht',
     'walk.step5.intro': 'Der ausführliche k6-Testbericht öffnet sich in einem neuen Tab und enthält jede Metrik, die k6 erfasst hat, aufgeschlüsselt nach Endpunkt und Status-Code. Nutze ihn, um Fehler zu untersuchen, Läufe zu vergleichen oder Ergebnisse als PDF zu archivieren.',
@@ -986,8 +970,8 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     // ist AUS, damit eine frische Installation nicht
     // still die Timeline füllt, nur weil der Nutzer
     // "Test starten" geklickt hat.
-    'drawer.persistence.saveExecutions': 'Ausgeführte Lasttestkonfigurationen speichern',
-    'drawer.persistence.saveExecutions.hint': 'Wenn aktiv, wird jeder ausgeführte Lasttest samt Konfiguration gespeichert und in der Timeline angezeigt. Die Timeline behält maximal 40 Läufe pro Endpunkt — ältere werden automatisch entfernt. Wenn deaktiviert, wird der Run trotzdem ausgeführt und die Live-Ansicht funktioniert, aber er wird nicht gespeichert und verschwindet beim Container-Neustart.',
+    'drawer.persistence.saveExecutions': 'Ausgeführte Lasttest historisieren',
+    'drawer.persistence.saveExecutions.hint': 'Wenn aktiv, wird der ausführliche k6-Bericht jedes ausgeführten Lasttests gespeichert und in der Timeline angezeigt. Die Timeline behält maximal 40 Läufe pro Endpunkt — ältere werden automatisch entfernt. Wenn deaktiviert, wird der Run trotzdem ausgeführt und die Live-Ansicht funktioniert, aber er wird nicht gespeichert und verschwindet beim Container-Neustart.',
     'drawer.demo.enabled.hint': 'Startet die im Prozess laufenden /demo-api/*-Endpunkte, damit du eine echte, vollständige REST-API mit Last treiben kannst — ohne separates Backend. Keine Auto-Erkennung: die Demo bleibt aus, bis du diesen Schalter umlegst. Deine Auswahl wird über Neustarts hinweg gemerkt.',
     'notification.completed.title': 'k6-Lauf abgeschlossen',
     'notification.completed.body': 'Lauf {id} wurde erfolgreich beendet.',

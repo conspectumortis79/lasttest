@@ -61,13 +61,61 @@ export function buildRunMenuItems(
   run: TestRun,
   lang: SupportedLanguage = 'en',
   siblingRuns?: Record<string, TestRun>,
+  /**
+   * Whether the `rerun` action is offered in the menu.
+   *
+   * Defaults to `true` so the overview dashboard — which
+   * uses the same component for its badge right-click —
+   * keeps the historical "Erneut starten" entry point.
+   *
+   * The per-endpoint timeline tab sets this to `false`:
+   * timeline rows are a passive history view and the
+   * payload data the rerun would replay was intentionally
+   * stripped from the timeline persist path, so offering a
+   * rerun from a timeline row would only produce a
+   * half-replayed run that the user has no way to
+   * preview. Hiding the action is more honest than letting
+   * the user click it and wondering why k6 sent an empty
+   * body.
+   */
+  showRerun: boolean = true,
+  /**
+   * Whether the `export-metrics` action is offered in the
+   * menu.
+   *
+   * Defaults to `true` so the overview dashboard keeps
+   * the `k6-JSON exportieren` entry point — the k6
+   * summary is part of the dashboard's live view and the
+   * user expects to be able to grab it from the badge
+   * they can already see.
+   *
+   * The per-endpoint timeline tab sets this to `false`:
+   * timeline rows are a passive history view, and the k6
+   * summary that drives the export is fetched separately
+   * from the run the badge is about. Offering the export
+   * from the timeline row would either trigger an extra
+   * round trip per click or silently hand the user a
+   * stale blob — both worse than just hiding the item.
+   */
+  showExportMetrics: boolean = true,
 ): MenuItem[][] {
   const groups: MenuItem[][] = []
   const isInFlight = IN_FLIGHT_STATUSES.has(run.status)
-  const isTerminalAborted = run.status === 'ABORTED'
   if (isInFlight) {
+    // The in-flight menu deliberately omits the historical
+    // focus entry (`Show live details` in English /
+    // `Live-Details anzeigen` in German). The previous
+    // behaviour offered an explicit "focus this run" item
+    // here so the user could switch the inspector to a
+    // different QUEUED/RUNNING/STOPPING row; the toggle
+    // was redundant because clicking the badge in the
+    // overview grid already does the same thing. Removing
+    // the entry keeps the in-flight menu small (the k6
+    // control surface is what the user wants when they
+    // right-click a live run) and matches the terminal
+    // menu, which dropped its analogous `Show summary` /
+    // `Zusammenfassung anzeigen` item for the same reason.
     groups.push([
-      { id: 'focus', label: translate(lang, 'menu.focus'), action: 'focus' },
       { id: 'copy-id', label: translate(lang, 'menu.copyRunId'), action: 'copy-run-id' },
       { id: 'open-report', label: translate(lang, 'menu.openReport'), action: 'open-report' },
     ])
@@ -77,12 +125,18 @@ export function buildRunMenuItems(
     ])
     return groups
   }
-  groups.push([
-    {
-      id: 'focus',
-      label: isTerminalAborted ? translate(lang, 'menu.focus.aborted') : translate(lang, 'menu.focus.summary'),
-      action: 'focus',
-    },
+  // Terminal menu: the `Show summary` /
+  // `Zusammenfassung anzeigen` (and `Show aborted
+  // details` / `Aborted-Details anzeigen`) item used to
+  // live at the head of this group. Removing it: the
+  // action was a duplicate of "left-click the badge",
+  // the German label confused users who expected a true
+  // summary view (the inspector already shows the
+  // summary), and the toggle is not available from the
+  // timeline context anyway. The export-metrics item is
+  // gated on [showExportMetrics] — see that parameter's
+  // KDoc for the per-surface rationale.
+  const terminalViewGroup: MenuItem[] = [
     { id: 'copy-report-link', label: translate(lang, 'menu.copyReportLink'), action: 'copy-report-link' },
     { id: 'open-report', label: translate(lang, 'menu.openReport'), action: 'open-report' },
     {
@@ -90,7 +144,9 @@ export function buildRunMenuItems(
       label: translate(lang, 'menu.downloadScript'),
       action: 'download-script',
     },
-    {
+  ]
+  if (showExportMetrics) {
+    terminalViewGroup.push({
       id: 'export-metrics',
       label: translate(lang, 'menu.exportMetrics'),
       action: 'export-metrics',
@@ -99,11 +155,14 @@ export function buildRunMenuItems(
         : run.summary?.raw
           ? null
           : translate(lang, 'menu.export.disabled.noSummary'),
-    },
-  ])
-  groups.push([
-    { id: 'rerun', label: translate(lang, 'menu.rerun'), action: 'rerun' },
-  ])
+    })
+  }
+  groups.push(terminalViewGroup)
+  if (showRerun) {
+    groups.push([
+      { id: 'rerun', label: translate(lang, 'menu.rerun'), action: 'rerun' },
+    ])
+  }
   // Third group on terminal runs: lets the user clean up the
   // dashboard without leaving the page. "Remove from view"
   // drops the clicked badge from the in-memory map; "Remove all

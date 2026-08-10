@@ -84,6 +84,27 @@ fun TestRunEntity.toTestRun(
  * and the rest of the entity is still saved. Losing the
  * originalRequest is recoverable (the run is still listed);
  * losing the whole save is not.
+ *
+ * Timeline payload stripping
+ * ---------------------------
+ * The timeline is intentionally payload-free: the write path
+ * drops every request dataset (request body, parameter values,
+ * auth tokens, …) from the [configuration] snapshot AND from
+ * the preserved [originalRequest] before serialisation. The
+ * endpoint metadata (method, path, load profile, …) and the
+ * `*Configured` boolean flags survive, so the dashboard can
+ * still render "what endpoint ran, with what load profile, with
+ * auth configured" — but the actual bytes k6 sent never land
+ * in the H2 volume. The `originalRequest` is still preserved
+ * structurally (operation ids, base URL, load profile) so a
+ * historical rerun from the dashboard's right-click still
+ * works, just without the custom payload data.
+ *
+ * A regression that let payload data leak into the columns
+ * would surface as "the encrypted column now contains the
+ * literal request body" — the existing encryption tests pin
+ * the encrypted-blob shape and the dedicated unit tests pin
+ * the payload-free shape.
  */
 fun TestRun.toTestRunEntity(
     mapper: ObjectMapper = ObjectMapper(),
@@ -97,8 +118,26 @@ fun TestRun.toTestRunEntity(
     entity.finishedAt = finishedAt?.let { Instant.parse(it) }
     entity.exitCode = exitCode
     entity.configurationJson =
-        configuration?.let {
-            val serialised = runCatching { mapper.writeValueAsString(it) }.getOrNull()
+        configuration?.let { source ->
+            // Strip every per-operation payload field before
+            // serialising so the column never carries the
+            // request body, parameter values or auth tokens.
+            // The endpoint metadata (method, path, summary),
+            // the load profile and the `*Configured` flags
+            // survive so the timeline can still render
+            // "endpoint X with auth Y ran with profile Z".
+            val sanitised =
+                source.copy(
+                    operations =
+                        source.operations.map { operation ->
+                            operation.copy(
+                                payloads = emptyList(),
+                                parameterValues = emptyList(),
+                                requestBodyJson = null,
+                            )
+                        },
+                )
+            val serialised = runCatching { mapper.writeValueAsString(sanitised) }.getOrNull()
             serialised?.let { encryptor.encrypt(it) }
         }
     // `summary` is a free-form `Map<String, Any?>` with a single
@@ -111,13 +150,40 @@ fun TestRun.toTestRunEntity(
     entity.cancelledAt = cancelledAt?.let { Instant.parse(it) }
     entity.cancelledByForce = cancelledByForce
     entity.originalRequestJson =
-        originalRequest?.let {
-            val serialised = runCatching { mapper.writeValueAsString(it) }.getOrNull()
+        originalRequest?.let { source ->
+            // Same strip on the request envelope: payload data
+            // (pool + legacy flat fields + auth tokens) must
+            // NOT survive a container restart. The structural
+            // fields (spec, base URL, operation ids, load
+            // profile) are preserved so the dashboard's
+            // `Erneut starten` action can still reproduce a
+            // run — just without the custom payload data.
+            val sanitised =
+                source.copy(
+                    operationConfigurations =
+                        source.operationConfigurations.map { configuration ->
+                            configuration.copy(
+                                payloads = emptyList(),
+                                parameterValues = emptyList(),
+                                requestBodyJson = null,
+                                bearerToken = null,
+                                basicAuthUsername = null,
+                                basicAuthPassword = null,
+                                apiKey = null,
+                                oauth2Token = null,
+                                oidcIdToken = null,
+                            )
+                        },
+                )
+            val serialised = runCatching { mapper.writeValueAsString(sanitised) }.getOrNull()
             serialised?.let { encryptor.encrypt(it) }
         }
     // Flat columns for the per-endpoint × N badge GROUP BY.
     // The configuration is the source of truth, these are a
-    // denormalised cache populated at write time.
+    // denormalised cache populated at write time. Uses the
+    // original (unstripped) configuration so the badge keeps
+    // counting the endpoint the run actually targeted — the
+    // payload stripping above does not touch the endpoint.
     val firstOp = configuration?.operations?.firstOrNull()
     entity.operationMethod = firstOp?.method
     entity.operationPath = firstOp?.path
