@@ -1645,6 +1645,20 @@ Du hast zwei Wege, dasselbe Szenario erneut auszuführen:
   Lauf hat keine genealogische Verbindung zum alten; die alte Zeile
   bleibt unverändert im Dashboard.
 
+> ⚠ **Wichtig — Timeline-Speicherung ist opt-in und standardmäßig
+> deaktiviert.** Eine frische Installation speichert keine Läufe;
+> der Timeline-Tab bleibt leer, bis du die **Einstellungen**
+> (Zahnrad-Symbol in der Toolbar) öffnest und den Schalter
+> **Ausgeführte Lasttestkonfigurationen speichern** umlegst. Die
+> Wahl wird in `localStorage` gespeichert (unter
+> `lasttest.persistRuns`) und bei jedem weiteren Besuch übernommen.
+> Bei deaktiviertem Schalter sendet jeder `POST /api/test-runs`
+> `persist: false`, sodass das Backend den Timeline-Write
+> überspringt — die Live-Ansicht funktioniert weiterhin, der Lauf
+> verschwindet aber beim nächsten Container-Neustart. Die
+> 40-Läufe-pro-Endpunkt-Retention greift nur bei aktivierter
+> Persistierung.
+
 > ⚠ **Wichtig — Timeline-Zeilen sind verschlüsselt gespeichert.**
 > Jede Zeile, die du im `Letzte Läufe`-Panel siehst, liegt
 > verschlüsselt auf dem H2-Volume: der `CreateTestRunRequest` und

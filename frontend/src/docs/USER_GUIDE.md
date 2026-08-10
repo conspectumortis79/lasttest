@@ -1529,6 +1529,19 @@ You have two ways to re-run the same scenario:
   genealogical link to the old one; the old row stays in the
   dashboard unchanged.
 
+> ⚠ **Important — timeline storage is opt-in and disabled by
+> default.** A fresh install does not save any runs; the
+> timeline tab stays empty until you open **Settings** (gear icon
+> in the toolbar) and flip the **Save executed test
+> configurations** toggle to enabled. The choice is remembered in
+> `localStorage` (under `lasttest.persistRuns`) and re-applied on
+> every visit. When the toggle is off, every subsequent
+> `POST /api/test-runs` sends `persist: false` so the backend
+> skips the timeline write and the live view is the only surface
+> that shows the run — it disappears at the next container
+> restart. The 40-row per-endpoint retention cap only applies to
+> runs created with persistence enabled.
+
 > ⚠ **Important — timeline rows are stored encrypted.** Every
 > row you see in the `Letzte Läufe` panel is persisted encrypted
 > on the H2 volume: the `CreateTestRunRequest` and the run's

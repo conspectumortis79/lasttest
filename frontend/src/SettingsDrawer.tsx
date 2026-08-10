@@ -154,10 +154,14 @@ export function SettingsDrawer({
             : null}
         </div>
 
+        <h3 className="drawer-section">{translate(language, 'drawer.section.timeline')}</h3>
+        <div className="drawer-checkbox-group" role="group" aria-label={translate(language, 'drawer.section.timeline')}>
+          <SaveExecutionsSwitch language={language} />
+        </div>
+
         <h3 className="drawer-section">{translate(language, 'drawer.section.demo')}</h3>
         <div className="drawer-checkbox-group" role="group" aria-label={translate(language, 'drawer.section.demo')}>
           <DemoApiSwitch language={language} />
-          <SaveExecutionsSwitch language={language} />
         </div>
       </div>
     </aside>
@@ -190,14 +194,16 @@ function DemoApiSwitch({ language }: { language: SupportedLanguage }): React.Rea
 
 /**
  * The "Ausgeführte Lasttestkonfigurationen speichern" /
- * "Save executed test configurations" toggle. Sits next to
- * the demo-API switch in the Settings drawer; both share the
- * same `drawer-checkbox` styling. When the user disables
- * this toggle, every subsequent `POST /api/test-runs` call
- * sends `persist: false` so the backend skips the timeline
- * write and the live view is the only surface that shows the
- * run. The 40-row per-endpoint retention cap is therefore
- * only enforced for runs created with persistence enabled.
+ * "Save executed test configurations" toggle. Sits in its
+ * own Timeline section in the Settings drawer (above the
+ * Demo-API section) because the setting controls the
+ * timeline persistence, not anything demo-related. When the
+ * user disables this toggle, every subsequent
+ * `POST /api/test-runs` call sends `persist: false` so the
+ * backend skips the timeline write and the live view is the
+ * only surface that shows the run. The 40-row per-endpoint
+ * retention cap is therefore only enforced for runs created
+ * with persistence enabled.
  */
 function SaveExecutionsSwitch({ language }: { language: SupportedLanguage }): React.ReactElement {
   const { persistRuns, setPersistRuns } = usePersistence()
