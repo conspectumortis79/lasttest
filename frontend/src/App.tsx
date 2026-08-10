@@ -44,6 +44,7 @@ import { LanguageProvider } from './useLanguage.tsx'
 import { useLanguage } from './languageStorage.ts'
 import { translate, formatters, type SupportedLanguage } from './i18n.ts'
 import { RunStatusView, LiveBanner, AktionenTab, LiveRampChart } from './runStatusView.tsx'
+import { StatusCodeDistributionCard } from './StatusCodeDistributionCard.tsx'
 import { vuSamplesToEpochSeconds } from './timeSeries.ts'
 import { computeRampChartParams } from './liveRampChartLayout.ts'
 import { ConsoleTab, ThresholdsTab, ConfigTab, FailureTab, K6ScriptTab } from './runDetailTabs.tsx'
@@ -1617,6 +1618,17 @@ function RunDetail({ run, runNow, handlers, timelineRefreshTick, runs }: { run: 
             while the run is in flight, so a finished run does
             not keep firing requests in the background. */}
         <OverviewLiveRamp run={run} now={runNow} />
+        {/* HTTP-Status-Code-Verteilung (Mini-Balken-Grid) für
+            den gesamten Lauf. Die Karte rendert nichts, solange
+            kein k6-Summary vorliegt — ein leeres Grid mit
+            "Gesamt: 0 Requests" wäre verwirrender als die
+            komplette Auslassung. Liegt ein Summary vor, summiert
+            die Karte die Counts über alle Endpunkte und
+            präsentiert sie nach Status-Code-Familie eingefärbt
+            (2xx grün, 4xx gelb, 5xx rot, err braun). Der
+            detaillierte Bericht (Aktionen → "K6 Bericht öffnen")
+            bleibt die Quelle für die Per-Endpunkt-Aufschlüsselung. */}
+        <StatusCodeDistributionCard run={run} />
         {/* The k6 console output and the JSON summary live in
             their own tabs (and in the Aktionen → Roh-Zusammenfassung
             exportieren action). Keeping them out of the Übersicht

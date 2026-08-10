@@ -440,6 +440,22 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'report.payload.auth.heading': 'Authentication',
     'report.statusCode.intro': 'Exact HTTP response codes per endpoint. "err" stands for network or connection errors (status 0, e.g. connection drop, DNS failure, or TLS handshake failure). "other" collects responses with status codes not in the predefined list.',
 
+    // Status-code distribution card on the Übersicht tab.
+    // Renders the same wire as the detailed report but
+    // aggregated across every endpoint so the user gets a
+    // run-wide view at a glance.
+    'overview.statusCode.aria': 'HTTP status code distribution for this test run',
+    'overview.statusCode.title': 'HTTP status code distribution',
+    'overview.statusCode.total': 'Total: {count} requests',
+    'overview.statusCode.requests': 'requests',
+    'overview.statusCode.legendAria': 'Status code family legend',
+    'overview.statusCode.legend.2xx': '2xx — success',
+    'overview.statusCode.legend.3xx': '3xx — redirect',
+    'overview.statusCode.legend.4xx': '4xx — client error',
+    'overview.statusCode.legend.5xx': '5xx — server error',
+    'overview.statusCode.legend.err': 'err — network / TLS failure',
+    'overview.statusCode.cellTitle': '{code} · {count} requests ({pct})',
+    'overview.statusCode.empty': 'No status code data available for this run yet.',
     // Detail report
     'report.title': 'Detailed k6 Test Report',
     'report.open': 'Open detailed k6 report',
@@ -1242,6 +1258,21 @@ export const dict: Record<SupportedLanguage, StringDict> = {
     'report.payload.auth.heading': 'Authentifizierung',
     'report.statusCode.intro': 'Exakte HTTP-Antwortcodes pro Endpunkt. „err" steht für Netzwerk- oder Verbindungsfehler (Status 0, z. B. Verbindungsabbruch, DNS-Fehler oder TLS-Handshake fehlgeschlagen). „other" sammelt Antworten mit Statuscodes, die nicht in der vordefinierten Liste enthalten sind.',
 
+    // Status-Code-Verteilung auf der Übersicht-Tab. Zeigt die
+    // gleichen Daten wie der ausführliche Bericht, aber über
+    // alle Endpunkte aggregiert.
+    'overview.statusCode.aria': 'HTTP-Status-Code-Verteilung dieses Testlaufs',
+    'overview.statusCode.title': 'HTTP-Status-Code-Verteilung',
+    'overview.statusCode.total': 'Gesamt: {count} Requests',
+    'overview.statusCode.requests': 'Requests',
+    'overview.statusCode.legendAria': 'Legende der Status-Code-Familien',
+    'overview.statusCode.legend.2xx': '2xx — Erfolg',
+    'overview.statusCode.legend.3xx': '3xx — Redirect',
+    'overview.statusCode.legend.4xx': '4xx — Client-Fehler',
+    'overview.statusCode.legend.5xx': '5xx — Server-Fehler',
+    'overview.statusCode.legend.err': 'err — Netzwerk- / TLS-Fehler',
+    'overview.statusCode.cellTitle': '{code} · {count} Requests ({pct})',
+    'overview.statusCode.empty': 'Für diesen Lauf liegen noch keine Status-Code-Daten vor.',
     // Detail report
     'report.title': 'Ausführlicher k6 Testbericht',
     'report.open': 'Ausführlicher K6-Testbericht',
