@@ -16,14 +16,6 @@ import org.springframework.stereotype.Service
 import java.net.URLEncoder
 
 interface K6ScriptGenerator {
-    /**
-     * Renders a k6 script for the given run. The [runId] is
-     * injected as the `X-Lasttest-Run-Id` request header on every
-     * call so the demo-API request log can correlate incoming
-     * requests with the run that drove them. An empty [runId] skips
-     * the header — that is the path taken by the unit tests that
-     * do not care about the demo correlation.
-     */
     fun generateForRun(
         specification: ImportedSpecification,
         baseUrl: String,
@@ -55,10 +47,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         require(configurations.keys.all(selectedOperationIds::contains)) { "Die Konfiguration enthält einen nicht ausgewählten oder unbekannten Endpunkt." }
 
         val strategy = loadProfile.payloadStrategy ?: PayloadStrategy.SEQUENTIAL
-        // Map of operationId → effective pool size, used both by
-        // [collectPoolSelectors] (to know when to emit a counter) and
-        // by the per-operation counter declarations above. Computed
-        // once here so the two consumers see the same numbers.
         val configurationPoolSizes: Map<String, Int> =
             configurations.mapValues { (_, configuration) -> effectivePayloads(configuration).size }
         val calls =
@@ -66,23 +54,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                 requestCode(operation, configurations[operation.operationId], strategy, runId)
             }
         val poolSelectors = collectPoolSelectors(selected, configurations, strategy)
-        // Per-operation status-code Counters. k6's --summary-export does
-        // NOT expose tagged sub-metrics, so we declare one Counter per
-        // (operation, status-code) tuple. The report then reads the
-        // aggregate `count` for each metric from summary.metrics.
-        //
-        // We pre-declare the most common HTTP status codes. Anything we
-        // did not anticipate lands in `lt_status_other_<opId>` so the
-        // user still sees the unexpected bucket instead of silently
-        // dropping responses. `err` is separate so network errors
-        // (status === 0) cannot be confused with a real HTTP 0.
-        //
-        // Multi-payload operations additionally get one counter per
-        // payload index (`lt_payload_<i>_<opId>`) so the report can
-        // show how many times each payload was actually picked
-        // during the run. Single-payload operations skip the per-
-        // payload counter because the count is identical to the
-        // per-operation request count and would only add noise.
         val counterDeclarations =
             selected
                 .joinToString("\n") { operation ->
@@ -106,14 +77,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                         } ?: ""
                     listOf(tracked, fallback, payloadCounters).filter { it.isNotEmpty() }.joinToString("\n")
                 }
-        // k6 v1+ removed the top-level `gracefulStop` option; graceful stop
-        // is now a scenario-level setting. The `vus` and `duration`/`iterations`
-        // top-level shortcuts still work for backward compatibility, but
-        // putting everything in a scenario is the canonical k6 v2 layout.
-        //
-        // We render one of four executor shapes here, all behind the same
-        // scenario name `default` so the per-operation Counter declarations
-        // above and the default function below stay untouched.
         val scenarioConfig = renderScenario(loadProfile)
         return """
             import http from 'k6/http';
@@ -146,16 +109,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
             """.trimIndent()
     }
 
-    /**
-     * Renders the scenario-level block of the `default` scenario. The
-     * returned string is the comma-separated body of the scenario object
-     * (executor first, then its settings), with a trailing comma so the
-     * surrounding template literal can append `gracefulStop: '0s',`
-     * without having to special-case the last field.
-     *
-     * Validation lives in [validateLoadProfile] so we never emit a
-     * syntactically valid script for a semantically broken profile.
-     */
     internal fun renderScenario(profile: LoadProfile): String =
         when (profile.type) {
             LoadProfileType.CONSTANT_VUS -> {
@@ -183,22 +136,10 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                 val duration = profile.durationSeconds ?: error("validateLoadProfile garantiert durationSeconds")
                 val preAllocated = profile.preAllocatedVUs ?: error("validateLoadProfile garantiert preAllocatedVUs")
                 val maxVUs = profile.maxVUs ?: error("validateLoadProfile garantiert maxVUs")
-                // k6's arrival-rate executor decouples RPS from response time
-                // — the test holds a steady request rate even as latency
-                // grows, which is the only way to find the real throughput
-                // ceiling. preAllocatedVUs must be > 0; maxVUs bounds the
-                // pool k6 may grow when latency spikes.
                 "executor: 'constant-arrival-rate', rate: $rate, timeUnit: '${timeUnit}s', duration: '${duration}s', preAllocatedVUs: $preAllocated, maxVUs: $maxVUs,"
             }
         }
 
-    /**
-     * Validates a load profile before it reaches the script template.
-     * The frontend already validates, but we re-validate here because the
-     * backend is the last line of defence — a misconfigured profile would
-     * otherwise produce a k6 run that fails mid-flight with a cryptic
-     * error.
-     */
     internal fun validateLoadProfile(profile: LoadProfile) {
         when (profile.type) {
             LoadProfileType.CONSTANT_VUS -> {
@@ -225,12 +166,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                     require(stage.durationSeconds in 1..MAX_DURATION_SECONDS) {
                         "Stage ${index + 1}: Dauer muss zwischen 1 und $MAX_DURATION_SECONDS Sekunden liegen."
                     }
-                    // Consecutive stages with the same target are allowed:
-                    // they model a plateau (e.g. hold 50 VUs for 5 min),
-                    // which is a classic load-test pattern. Only stages
-                    // with target == 0 AND duration == 0 would be
-                    // redundant — but duration is already validated against
-                    // [1, MAX_DURATION_SECONDS] above.
                 }
             }
             LoadProfileType.CONSTANT_ARRIVAL_RATE -> {
@@ -261,37 +196,10 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         runId: String,
     ): String {
         val payloads = effectivePayloads(configuration)
-        // [effectivePayloads] is total: it returns at least one
-        // payload for every input shape (null configuration →
-        // empty [OperationPayload]; non-null configuration →
-        // either the explicit pool or a synthetic one derived
-        // from the legacy flat fields). The `require` that used
-        // to live here was dead defensive code that JaCoCo could
-        // never cover, so it has been removed. The contract is
-        // now documented at the source: callers go through
-        // [generate] which never invokes [requestCode] with a
-        // shape that would yield an empty list.
         val safe = safeIdentifier(operation.operationId)
-        // Single-payload path: emit exactly the same static request
-        // block as before (no pool selector, no dispatch). The
-        // behaviour for the legacy single-dataset layout is preserved
-        // bit-for-bit so the existing test suite keeps matching.
         if (payloads.size == 1) {
             return singlePayloadRequestBlock(operation, payloads.single(), safe, runId)
         }
-        // Multi-payload path: inline if/else chain inside the
-        // `default function()` body. The pool selector (counter
-        // + next() function) is emitted at module top-level by
-        // [collectPoolSelectors] so the per-iteration dispatch
-        // here can simply call the next() function. Keeping the
-        // counter at module level is what makes the round-robin
-        // sequence stable across iterations of the same VU.
-        //
-        // Each if/else branch starts with `lt_payload_<i>_<safe>.add(1)`
-        // so the summary export records how many times each payload
-        // was actually picked during the run. The report reads these
-        // counters and shows a per-payload call count next to the
-        // configured payloads.
         val firstBlock = singlePayloadRequestBlock(operation, payloads[0], safe, runId).trim()
         val firstBranch =
             "  if (__lt_idx_$safe === 0) { lt_payload_0_$safe.add(1); $firstBlock }"
@@ -303,13 +211,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         return "  const __lt_idx_$safe = __lt_next_$safe();\n$firstBranch\n" + subsequentBranches.joinToString("\n")
     }
 
-    /**
-     * Collects the top-level pool selectors (counter + next()
-     * function) for every operation whose configuration carries more
-     * than one payload. Returned as a single string that is rendered
-     * above the `default function()` declaration so the per-VU
-     * counter survives across iterations.
-     */
     private fun collectPoolSelectors(
         selected: List<ApiOperation>,
         configurations: Map<String, OperationConfiguration>,
@@ -323,13 +224,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                 renderPoolSelector(safeIdentifier(operation.operationId), payloads.size, strategy)
             }.joinToString("\n\n")
 
-    /**
-     * The k6 JavaScript that picks the next payload index for a given
-     * operation, either round-robin (`sequential`) or uniformly at
-     * random (`random`). Declared at the top of the generated script
-     * so the per-iteration dispatch inside `default function()` is a
-     * cheap function call instead of a duplicated expression.
-     */
     private fun renderPoolSelector(
         safe: String,
         size: Int,
@@ -353,24 +247,11 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
                 """.trimIndent()
         }
 
-    /**
-     * Resolves the list of payloads the generator should consider for
-     * an operation. The new `payloads` list takes priority; if it is
-     * empty the legacy flat fields are migrated to a single synthetic
-     * payload via [OperationConfiguration.primaryPayload]. Returns at
-     * least one payload — callers rely on this to never run an empty
-     * request.
-     */
     private fun effectivePayloads(configuration: OperationConfiguration?): List<OperationPayload> {
         if (configuration == null) return listOf(OperationPayload())
         return configuration.payloads.ifEmpty { listOf(configuration.primaryPayload()) }
     }
 
-    /**
-     * Renders a single static request block for a single payload. The
-     * URL, headers and body are all baked in at generation time so the
-     * k6 runtime does not need a per-iteration template engine.
-     */
     private fun singlePayloadRequestBlock(
         operation: ApiOperation,
         payload: OperationPayload,
@@ -466,22 +347,10 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         if (cookies.isNotEmpty()) {
             headers["Cookie"] = cookies
         }
-        // The run id is the correlation key for the demo-API
-        // request log: every k6 request carries it in the
-        // X-Lasttest-Run-Id header so the dashboard can show "this
-        // request was driven by run X". The header is only added
-        // when the caller actually knows the id — the unit tests
-        // for the script generator pass "" to keep the output
-        // free of the new header. Skipping it on "" is what keeps
-        // every pre-existing assertion in [DefaultK6ScriptGeneratorTest]
-        // (which does not know about the demo correlation) valid.
+
         if (runId.isNotEmpty()) {
             headers[DemoRequestLogInterceptor.RUN_ID_HEADER] = runId
         }
-        // All auth schemes live in one place — [AuthHeaderEncoder].
-        // It picks the first requirement that has usable credentials
-        // and emits the right `Authorization` value (Bearer prefix,
-        // Base64, …). Unsupported requirements are skipped silently.
         val authValue =
             AuthHeaderEncoder.encode(
                 operation.authRequirements,
@@ -496,11 +365,7 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
         if (authValue != null) {
             headers["Authorization"] = authValue
         }
-        // API key auth lives in a *custom* header (X-API-Key,
-        // X-Custom-Token, …) and is set alongside — or instead of —
-        // the Authorization header. The header name is carried on
-        // the requirement, not hardcoded, so the same code path
-        // works for Stripe, GitHub, Twilio, and any other vendor.
+
         val apiKeyHeader = AuthHeaderEncoder.encodeApiKeyHeaderName(operation.authRequirements)
         val apiKeyValue = AuthHeaderEncoder.encodeApiKey(payload.apiKey)
         if (apiKeyHeader != null && apiKeyValue != null) {
@@ -513,10 +378,6 @@ class DefaultK6ScriptGenerator : K6ScriptGenerator {
     }
 
     private fun safeIdentifier(name: String): String {
-        // Make sure the operationId is a valid JavaScript identifier
-        // before we splice it into counter / variable names. k6 metric
-        // names share the same restriction, so the sanitisation also
-        // keeps the report-side parser happy.
         val sanitized = name.replace(Regex("[^A-Za-z0-9_$]"), "_")
         return if (sanitized.isEmpty() || sanitized[0].isDigit()) "_$sanitized" else sanitized
     }

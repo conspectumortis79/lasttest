@@ -8,9 +8,6 @@ import kotlin.test.assertTrue
 class DefaultDemoControllerToggleTest {
     @Test
     fun `the bundled toggle defaults to disabled`() {
-        // The Settings drawer is the only path that flips the
-        // toggle. A fresh instance must therefore start in the
-        // "demo is off" state so the demo is opt-in.
         val toggle = DefaultDemoControllerToggle()
 
         assertEquals(false, toggle.isEnabled())
@@ -41,10 +38,6 @@ class DefaultDemoControllerToggleTest {
 
     @Test
     fun `concurrent enable and disable calls converge on a single state`() {
-        // 200 threads each fire `enable`/`disable` in alternation.
-        // The exact final state is non-deterministic, but every
-        // call must be safe and the state must end up either on
-        // or off — never throw, never corrupt the field.
         val toggle = DefaultDemoControllerToggle()
         val threads =
             (0 until 200).map { index ->
@@ -61,9 +54,6 @@ class DefaultDemoControllerToggleTest {
 
     @Test
     fun `DEMO_PATH is the canonical constant every caller agrees on`() {
-        // The OpenAPI spec, the user guide and the run-id
-        // detector all hard-code `/demo-api`; a single constant
-        // keeps them in sync.
         assertEquals("/demo-api", DemoControllerToggle.DEMO_PATH)
     }
 }

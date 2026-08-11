@@ -17,17 +17,12 @@ class ModelsTest {
         assertFalse(withoutBody.hasRequestBody)
     }
 
-    // ---- OperationPayload / OperationConfiguration.primaryPayload ---------
-
     @Test
     fun `primaryPayload returns the first pool entry when payloads is non-empty`() {
         val first = OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "42")))
         val second = OperationPayload(parameterValues = listOf(ParameterValue("id", "path", "99")))
         val configuration = OperationConfiguration("getPet", payloads = listOf(first, second))
 
-        // The same instance must be returned (no copy / no clone), so any
-        // future cached derivations in the generator stay referentially
-        // identical to the source.
         assertSame(configuration.primaryPayload(), first)
     }
 
@@ -57,11 +52,6 @@ class ModelsTest {
 
     @Test
     fun `primaryPayload prefers the pool over the legacy fields when both are present`() {
-        // Defensive: if a malformed request carries both the new pool
-        // and the old flat fields, the new shape wins. The old fields
-        // are kept for the report builder's reference but must not
-        // silently override what the user explicitly configured in
-        // the pool.
         val poolEntry =
             OperationPayload(
                 parameterValues = listOf(ParameterValue("id", "path", "from-pool")),
@@ -83,8 +73,6 @@ class ModelsTest {
         )
     }
 
-    // ---- PayloadStrategy -------------------------------------------------
-
     @Test
     fun `PayloadStrategy fromJson accepts both lower-case strategy names`() {
         assertEquals(PayloadStrategy.SEQUENTIAL, PayloadStrategy.fromJson("sequential"))
@@ -104,8 +92,6 @@ class ModelsTest {
         assertEquals("sequential", PayloadStrategy.SEQUENTIAL.jsonName())
         assertEquals("random", PayloadStrategy.RANDOM.jsonName())
     }
-
-    // ---- LoadProfile.payloadStrategy -------------------------------------
 
     @Test
     fun `LoadProfile payloadStrategy defaults to null for backward compatibility`() {

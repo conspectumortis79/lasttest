@@ -15,14 +15,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-/**
- * Tests that exclusively cover branches in `LocalK6TestRunService`
- * which are not covered in `LocalK6TestRunServiceTest`:
- *
- *  - `buildK6Process` with/without InfluxDB output
- *  - `truncateForError` for empty and long outputs
- *  - `resolveLoadProfile` for all legacy fallback paths
- */
 class LocalK6TestRunServiceBranchesTest {
     private val specification =
         ImportedSpecification(
@@ -69,8 +61,6 @@ class LocalK6TestRunServiceBranchesTest {
             timeSeriesWriter = InMemoryTimeSeriesWriter(),
         )
 
-    // --- resolveLoadProfile: legacy fallback branches ---
-
     @Test
     fun `legacy fallback builds constant-vus when useIterations is false`() {
         val run =
@@ -111,9 +101,6 @@ class LocalK6TestRunServiceBranchesTest {
 
     @Test
     fun `legacy fallback defaults useIterations to false when null`() {
-        // When useIterations is null, the Elvis operator falls back to
-        // false → constant-vus is built. This test covers the Elvis
-        // branch in resolveLoadProfile.
         val run =
             service().create(
                 CreateTestRunRequest(
@@ -150,8 +137,6 @@ class LocalK6TestRunServiceBranchesTest {
 
     @Test
     fun `legacy fallback rejects request with virtualUsers but no durationSeconds`() {
-        // Test that triggers the second requireNotNull(duration) —
-        // the first (vus) is set here, the second (duration) is not.
         val ex =
             assertFailsWith<IllegalArgumentException> {
                 service().create(
@@ -179,7 +164,7 @@ class LocalK6TestRunServiceBranchesTest {
                     baseUrl = "https://target.test",
                     operationIds = setOf("getPet"),
                     loadProfile = explicit,
-                    virtualUsers = 999, // wird ignoriert weil loadProfile gesetzt ist
+                    virtualUsers = 999,
                     durationSeconds = 999,
                     useIterations = true,
                 ),
@@ -187,8 +172,6 @@ class LocalK6TestRunServiceBranchesTest {
         assertEquals(LoadProfileType.RAMPING_VUS, run.configuration?.loadProfile?.type)
         assertEquals(0, run.configuration?.loadProfile?.startVUs)
     }
-
-    // --- buildK6Process: InfluxDB enabled/disabled ---
 
     @Test
     fun `create with influxdb enabled creates a queued run regardless of script execution`() {
@@ -221,20 +204,9 @@ class LocalK6TestRunServiceBranchesTest {
         assertEquals(TestRunStatus.QUEUED, run.status)
     }
 
-    // --- buildK6Process: Reflektion via k6-Aufruf ---
-
     @Test
     fun `buildK6Process with influxdb enabled sets K6_INFLUXDB_USER and K6_INFLUXDB_PWD env vars`() {
-        // Indirect test: we verify that the backend starts a run without
-        // errors (execute() is invoked inside Executor.run() but is a
-        // no-op here). More importantly, validation and service
-        // construction must work, which covers the code paths in
-        // buildK6Process.
         val svc = service(influxDbEnabled = true)
-        // buildK6Process is private; the construction and create()
-        // cover the code paths. The actual k6 invocation would fail
-        // without k6 installed, but that happens in the executor and
-        // is caught by execute().
         val run =
             svc.create(
                 CreateTestRunRequest(
@@ -246,8 +218,6 @@ class LocalK6TestRunServiceBranchesTest {
             )
         assertNotNull(run.id)
     }
-
-    // --- truncateForError: branches ---
 
     @Test
     fun `truncateForError returns null for empty output`() {
@@ -282,15 +252,10 @@ class LocalK6TestRunServiceBranchesTest {
         method.isAccessible = true
         val long = "x".repeat(5000)
         val result = method.invoke(svc, long) as String
-        // Result must be shorter than the original and contain the
-        // marker that signals truncation.
         assertTrue(result.length < long.length)
         assertTrue(result.contains("Zeichen übersprungen"))
-        // The tail of the original is preserved.
         assertTrue(result.endsWith("x".repeat(100)))
     }
-
-    // --- buildK6Process: direct test of the InfluxDB branch ---
 
     @Test
     fun `buildK6Process skips the influxdb output when disabled`() {
@@ -313,10 +278,8 @@ class LocalK6TestRunServiceBranchesTest {
         try {
             @Suppress("UNCHECKED_CAST")
             val builder = method.invoke(svc, "run-1", scriptFile, summaryFile, "https://target.test") as ProcessBuilder
-            // The command should NOT contain --out
             val command = builder.command().joinToString(" ")
             assertTrue(!command.contains("--out"), "expected no --out, got: $command")
-            // No env vars for influxdb should be set
             assertTrue(builder.environment()["K6_INFLUXDB_USER"] == null)
             assertTrue(builder.environment()["K6_INFLUXDB_PWD"] == null)
         } finally {
@@ -353,8 +316,6 @@ class LocalK6TestRunServiceBranchesTest {
             assertTrue(command.contains("influxdb="), "expected influxdb= URL, got: $command")
             assertTrue(builder.environment()["K6_INFLUXDB_USER"] == "k6-writer")
             assertTrue(builder.environment()["K6_INFLUXDB_PWD"] == "lasttest-writer-password")
-            // The run_id tag must be present so the time-series data can
-            // be filtered by the backend when reading back.
             assertTrue(command.contains("run_id=run-1"), "expected run_id tag, got: $command")
         } finally {
             java.nio.file.Files

@@ -7,7 +7,6 @@ import de.lasttest.domain.InvalidSpecificationException
 import de.lasttest.domain.OperationStatisticsRepository
 import de.lasttest.domain.RemoteSpecificationFetcher
 import de.lasttest.domain.SpecificationImporter
-import de.lasttest.domain.TestRunEntity
 import de.lasttest.domain.TestRunRepository
 import de.lasttest.domain.TestRunService
 import de.lasttest.domain.TimeSeriesReader
@@ -40,26 +39,7 @@ class LastTestController(
     private val timeSeriesReader: TimeSeriesReader,
     private val statisticsRepository: OperationStatisticsRepository,
     private val runRepository: TestRunRepository,
-    // Shared mapper for deserialising `originalRequestJson` from
-    // a persisted [TestRunEntity] on rerun. The Kotlin module is
-    // required because [CreateTestRunRequest] is a Kotlin data
-    // class — without it Jackson cannot find a constructor and
-    // silently returns `null` for the whole object, which would
-    // turn every historical rerun into a 409 instead of a 202.
-    // [TestRun.toTestRunEntity] is the write side; it does not
-    // need the module because Jackson can serialise Kotlin data
-    // classes via reflection without it.
     private val objectMapper: ObjectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build()),
-    /**
-     * Decrypts the timeline's sensitive columns when the
-     * controller reads them straight from the database (the
-     * per-endpoint `runsForOperation` endpoint, the rerun
-     * lookup). Defaults to a no-op so unit tests that
-     * construct the controller without the Spring container
-     * keep working — production wires the real
-     * [de.lasttest.domain.AesGcmTestRunPayloadEncryptor]
-     * via [de.lasttest.config.TestRunEncryptionConfiguration].
-     */
     private val payloadEncryptor: de.lasttest.domain.TestRunPayloadEncryptor = de.lasttest.domain.NoOpTestRunPayloadEncryptor,
 ) {
     @GetMapping("/demo-specification", produces = [DEMO_SPECIFICATION_MEDIA_TYPE])
@@ -80,20 +60,6 @@ class LastTestController(
         @Valid @RequestBody request: CreateTestRunRequest,
     ): ResponseEntity<TestRun> = ResponseEntity.status(HttpStatus.ACCEPTED).body(testRuns.create(request))
 
-    /**
-     * Wipes the entire timeline: force-cancels every in-flight
-     * run and then deletes every [TestRunEntity] row from H2.
-     * Returns the two counts so the frontend can confirm the
-     * operation without a follow-up round trip.
-     *
-     * The endpoint is `DELETE /api/test-runs` rather than
-     * `DELETE /api/test-runs/all` because the entire timeline
-     * IS the resource at that path — there is no per-id
-     * counterpart to keep. A 405 on `DELETE /api/test-runs/{id}`
-     * (the more REST-y shape) would be misleading: a single
-     * run cannot be deleted today, only the full timeline can
-     * be cleared.
-     */
     @DeleteMapping("/test-runs")
     fun deleteAll(): ResponseEntity<de.lasttest.domain.TimelineDeleteResult> = ResponseEntity.ok(testRuns.deleteAll())
 
@@ -118,53 +84,14 @@ class LastTestController(
             .body(script)
     }
 
-    /**
-     * Returns time-series data (VUs + RPS) for the ramp chart in the
-     * report. Reads from InfluxDB; on errors, empty arrays are returned
-     * so the report can still render the target line.
-     *
-     * The endpoint is `200 OK` whenever the run id is known, even
-     * before k6 has started (`startedAt == null`) and even after
-     * it has finished (`finishedAt` falls back to "now" so the
-     * polling client keeps getting a useful response). The previous
-     * version returned 404 when `startedAt` was null, which
-     * manifests as a visible `XHR 404` in the browser console
-     * every time the user starts a new test: the dashboard
-     * immediately sets the freshly-created run as active and
-     * `OverviewLiveRamp` polls the endpoint at a 1 s cadence, but
-     * the backend's `execute()` task is still inside the executor
-     * pool and has not yet flipped the run to RUNNING with a
-     * `startedAt` timestamp. `testRuns.find()` already returns the
-     * row (in-memory or H2), so the client is asking about a real
-     * resource — the only thing missing is the time-series data
-     * itself, which we model as an empty array. The frontend
-     * already collapses empty arrays to the target-only line via
-     * [EMPTY_TIME_SERIES], so the user sees the planned ramp
-     * chart with no false 404 in the console.
-     *
-     * The only remaining 404 is when the id is unknown to both
-     * the in-memory map and the H2 table — i.e. the run does
-     * not exist on the server.
-     */
     @GetMapping("/test-runs/{id}/time-series")
     fun timeSeries(
         @PathVariable id: String,
     ): ResponseEntity<TimeSeriesResponse> {
         val run = testRuns.find(id) ?: return ResponseEntity.notFound().build()
-        // `startedAt` is null in the brief window between
-        // [LocalK6TestRunService.create] and the [execute] task
-        // flipping the run to RUNNING. The dashboard polls the
-        // endpoint as soon as the run is created, so without
-        // this fallback the user would see a 404 on every
-        // single start. Empty arrays are the correct response:
-        // the ramp chart renders the planned line from the
-        // load profile and the measured line shows up as soon
-        // as the first sample lands in InfluxDB.
+
         val started = run.startedAt
-        // Symmetric fallback for [finishedAt]: keep the polling
-        // window open for in-flight runs so the client gets a
-        // live tail instead of a 404 right when it is most
-        // useful.
+
         val finished =
             run.finishedAt ?: java.time.Instant
                 .now()
@@ -191,24 +118,11 @@ class LastTestController(
         )
     }
 
-    /**
-     * Requests cancellation of an in-flight test run. Returns 200
-     * with the refreshed [TestRun] snapshot so the UI does not need
-     * an additional `/api/test-runs/{id}` round-trip. 404 when the
-     * id is unknown, 409 when the run is already in a terminal
-     * state (completed / failed / aborted / stopped).
-     *
-     * `?force=true` escalates immediately to SIGKILL (status
-     * ABORTED); `?force=false` (the default) sends SIGTERM and the
-     * service marks the run as STOPPING.
-     */
     @PostMapping("/test-runs/{id}/cancel")
     fun cancel(
         @PathVariable id: String,
         @RequestParam(name = "force", defaultValue = "false") force: Boolean,
     ): ResponseEntity<TestRun> {
-        // Cheap existence check first so callers get a clean 404
-        // instead of a 409 for runs they have never heard of.
         if (testRuns.find(id) == null) return ResponseEntity.notFound().build()
         return if (testRuns.cancel(id, force)) {
             ResponseEntity.ok(testRuns.find(id)!!)
@@ -217,67 +131,26 @@ class LastTestController(
         }
     }
 
-    /**
-     * Re-runs an existing test from the [CreateTestRunRequest] that
-     * was preserved when the original run was started. The new run
-     * gets a fresh id and is queued like any other. Returns 404
-     * when the id is unknown, 409 when the run cannot be rerun
-     * (e.g. it was a synthetic run without a preserved request).
-     */
     @PostMapping("/test-runs/{id}/rerun")
     fun rerun(
         @PathVariable id: String,
     ): ResponseEntity<TestRun> =
         when (val lookup = lookupRerunRequest(id)) {
-            // In-memory and DB both miss — the user is asking for
-            // a run we have never heard of. 404 is the right code
-            // regardless of which store we tried last.
             RerunLookup.NotFound -> ResponseEntity.notFound().build()
-            // The run exists but has no preserved
-            // [CreateTestRunRequest]. This happens for synthetic
-            // rows (e.g. fixtures) and for rows persisted before
-            // the [TestRunEntity.originalRequestJson] column was
-            // added. 409 signals "this resource cannot do what
-            // you asked" without leaking the missing payload.
             RerunLookup.NoPreservedRequest -> ResponseEntity.status(HttpStatus.CONFLICT).build()
             is RerunLookup.Ready ->
-                // 202 Accepted so the caller knows the k6 process
-                // has not finished spawning yet.
                 ResponseEntity
                     .status(HttpStatus.ACCEPTED)
                     .body(testRuns.create(lookup.request))
         }
 
-    /**
-     * Resolves a rerun target by id, checking the in-memory
-     * service first and falling back to the persisted
-     * [TestRunEntity] table. Returns a [RerunLookup] that the
-     * controller turns into the right HTTP status; the actual
-     * work (queueing a new k6 run) only happens for [Ready].
-     *
-     * Why a sealed type instead of `requestOrNull`? "Not found"
-     * (404) and "found but no preserved request" (409) are two
-     * different failure modes; the controller must distinguish
-     * them to return the right status. A nullable return value
-     * would have to be paired with a second probe of the stores,
-     * which is wasteful and racy.
-     */
     private fun lookupRerunRequest(id: String): RerunLookup {
-        // 1. In-memory service first — the common case for runs
-        // the user just started or has been watching. This
-        // preserves the original behaviour (and the
-        // `TestRunService.rerun` contract) for the in-memory path.
         testRuns.find(id)?.let { live ->
             return live.originalRequest
                 ?.let(RerunLookup::Ready)
                 ?: RerunLookup.NoPreservedRequest
         }
-        // 2. Persisted entity — historical runs from previous
-        // server sessions live only in the database. The
-        // originalRequest column is JSON-serialised
-        // CreateTestRunRequest; we deserialise lazily so a
-        // malformed blob is treated the same as a missing blob
-        // (the user gets a clean 409 instead of a 500).
+
         val persisted =
             runRepository.findById(id).orElse(null)
                 ?: return RerunLookup.NotFound
@@ -292,31 +165,16 @@ class LastTestController(
         return RerunLookup.Ready(request)
     }
 
-    /**
-     * Result of [lookupRerunRequest]. The three cases map 1:1 to
-     * the three HTTP responses the rerun endpoint can return.
-     */
     private sealed class RerunLookup {
-        /** The run exists and the preserved request is usable. */
         data class Ready(
             val request: CreateTestRunRequest,
         ) : RerunLookup()
 
-        /** The run exists but has no preserved [CreateTestRunRequest]. */
         data object NoPreservedRequest : RerunLookup()
 
-        /** The id is unknown to both the service and the database. */
         data object NotFound : RerunLookup()
     }
 
-    /**
-     * Returns the denormalised "× N" counter for every endpoint the
-     * server has seen. The dashboard polls this endpoint on the same
-     * cadence as `/api/test-runs` and renders the result next to
-     * each operation card in the left list. The list is ordered by
-     * total test count descending so the most-tested endpoints are
-     * at the top.
-     */
     @GetMapping("/operations/stats")
     fun operationStats(): ResponseEntity<List<OperationStatsResponse>> =
         ResponseEntity.ok(
@@ -332,22 +190,6 @@ class LastTestController(
             },
         )
 
-    /**
-     * Returns the most recent runs of a single endpoint, ordered by
-     * `createdAt` descending. The per-endpoint timeline tab on the
-     * right panel calls this when the user clicks a different
-     * endpoint so it can re-render its Gantt chart against the
-     * freshest data.
-     *
-     * The endpoint is keyed by query parameters rather than path
-     * variables because Spring's path-variable matcher refuses to
-     * decode `%2F` sequences in `{path:.*}` placeholders (a
-     * 400 Bad Request from Tomcat) — endpoints like
-     * `/api/products/{id}` would otherwise need to be URL-encoded
-     * in a way that the dashboard cannot do reliably. Query
-     * parameters side-step the issue without changing the
-     * `TestRunRepository` signature.
-     */
     @GetMapping("/operations/runs")
     fun runsForOperation(
         @RequestParam(name = "method", required = true) method: String,
@@ -359,14 +201,6 @@ class LastTestController(
                 .map { it.toTestRun(objectMapper, payloadEncryptor) },
         )
 
-    /**
-     * Returns a deep-link to the full k6 report for a given run.
-     * The dashboard renders a button next to "Im neuen Tab öffnen"
-     * that points at this URL; the button is hidden on the
-     * dashboard itself (the report link duplicates the same tab
-     * the user is already on) and shown on the multi-run list view
-     * where the user has to switch contexts to see the details.
-     */
     @GetMapping("/test-runs/{id}/report-link")
     fun reportLink(
         @PathVariable id: String,

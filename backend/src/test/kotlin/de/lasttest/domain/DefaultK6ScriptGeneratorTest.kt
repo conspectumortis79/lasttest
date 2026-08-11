@@ -85,10 +85,6 @@ class DefaultK6ScriptGeneratorTest {
         val durationScript = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), constantVUs)
         val iterationsScript = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), sharedIterations)
 
-        // k6 v1+ requires scenarios; the top-level vus/duration shortcuts
-        // were removed in v2 alongside gracefulStop. Make sure we emit the
-        // canonical scenario-based form so k6 does not warn about unknown
-        // top-level fields.
         for (script in listOf(durationScript, iterationsScript)) {
             assertTrue(script.contains("scenarios:"))
             assertTrue(script.contains("default:"))
@@ -185,7 +181,6 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(basicSpec, "https://example.test", "", setOf("getAdminStats"), listOf(configuration), profile)
 
-        // base64("alice:s3cret") = "YWxpY2U6czNjcmV0"
         assertContains(script, "\"Authorization\":\"Basic YWxpY2U6czNjcmV0\"")
     }
 
@@ -252,11 +247,6 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `omits Authorization header entirely when operation declares no auth`() {
-        // Regression: the legacy behaviour was to always honour a
-        // configured bearerToken. With the new contract, the
-        // operation's `authRequirements` is the source of truth; a
-        // user-provided token on a public operation is silently
-        // ignored so the wire format matches what the spec describes.
         val publicOperation =
             ApiOperation(
                 operationId = "publicEndpoint",
@@ -311,10 +301,6 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `apiKey is not emitted when the user has not configured a value`() {
-        // Without a configured key the request would otherwise
-        // arrive at the server without the expected header, which
-        // would 401 even though the user thought "I don't need
-        // credentials here". The omission is the safer behaviour.
         val apiKeyOperation =
             ApiOperation(
                 operationId = "lookupProduct",
@@ -337,10 +323,6 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `emits the Bearer Authorization header when the operation declares an OAuth2 requirement`() {
-        // OAuth 2.0 access tokens ride the same Bearer wire format
-        // (RFC 6750). The generator must not care that the spec
-        // calls the scheme `oauth2` — the user-supplied token ends
-        // up in `Authorization: Bearer <token>` either way.
         val oauth2Operation =
             ApiOperation(
                 operationId = "getMe",
@@ -380,11 +362,6 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `OAuth2 token is not emitted when the user has not configured a value`() {
-        // Same hygiene as Basic / Bearer / apiKey: a missing value
-        // means the k6 script would arrive without the expected
-        // header. Omitting the header lets the server produce a
-        // clean 401 instead of confusing the user with a request
-        // that silently lacks the auth it claims to send.
         val oauth2Operation =
             ApiOperation(
                 operationId = "getMe",
@@ -468,8 +445,6 @@ class DefaultK6ScriptGeneratorTest {
         assertFailsWith<IllegalArgumentException> { generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), tooLongDuration) }
     }
 
-    // --- New load profile tests (ramping-vus, constant-arrival-rate) ---
-
     @Test
     fun `renders ramping-vus with stages and startVUs`() {
         val profile =
@@ -492,9 +467,6 @@ class DefaultK6ScriptGeneratorTest {
         assertTrue(script.contains("{ target: 0, duration: '30s' }"))
         assertTrue(script.contains("{ target: 200, duration: '120s' }"))
         assertTrue(script.contains("{ target: 200, duration: '300s' }"))
-        // The last stage shares its target with the plateau, so we allow it.
-        // But the second-to-last with the same target as its predecessor is
-        // what the *body* of the stages list should still emit.
         assertTrue(!script.contains("vus: "))
         assertTrue(!script.contains("duration: '480s'"))
     }
@@ -609,11 +581,6 @@ class DefaultK6ScriptGeneratorTest {
     fun `rejects duplicate unknown and empty required parameters`() {
         val id = ParameterValue("id", "path", "7")
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
-        // The generator still reads from the legacy `parameterValues` field
-        // in commit 1; commit 2 will switch the read site to
-        // `OperationConfiguration.primaryPayload()`. We keep the test
-        // pointed at the legacy constructor so the validation logic it
-        // exercises remains the same shape.
         assertFailsWith<IllegalArgumentException> {
             generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(OperationConfiguration("getPet", parameterValues = listOf(id, id))), profile)
         }
@@ -759,7 +726,6 @@ class DefaultK6ScriptGeneratorTest {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet", "createPet"), emptyList(), profile)
 
-        // 19 tracked codes + err + other = 21 Counter declarations per operation.
         val trackedCodes =
             listOf(
                 200,
@@ -796,9 +762,6 @@ class DefaultK6ScriptGeneratorTest {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
 
-        // The status dispatch must be a switch so the generated code
-        // stays linear in the number of codes and so the k6 engine can
-        // fast-path consecutive identical status values.
         assertContains(script, "switch (response.status) {")
         assertContains(script, "  case 0: lt_status_err_getPet.add(1); break;")
         assertContains(script, "  case 200: lt_status_200_getPet.add(1); break;")
@@ -817,8 +780,6 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(weirdSpecification, "https://example.test", "", setOf("get-pet:v2"), emptyList(), profile)
 
-        // Hyphens and colons must be replaced with underscores so the
-        // metric name stays a valid JavaScript identifier.
         assertContains(script, "new Counter('lt_status_200_get_pet_v2')")
         assertContains(script, "new Counter('lt_status_429_get_pet_v2')")
         assertContains(script, "lt_status_err_get_pet_v2.add(1)")
@@ -827,10 +788,6 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `prefixes sanitised operation ids that start with a digit so they stay valid identifiers`() {
-        // JavaScript identifiers may not start with a digit; the script
-        // generator prefixes the sanitised name with an underscore in
-        // that case so the generated Counter declarations and
-        // switch-case statements remain syntactically valid k6 code.
         val leadingDigitOperation =
             ApiOperation("1Pet", "GET", "/pets", "", false, emptyList(), null)
         val leadingDigitSpecification = specification.copy(operations = listOf(leadingDigitOperation))
@@ -848,10 +805,6 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `handles an empty operation id by emitting a single-underscore identifier`() {
-        // The first conjunct of the safeIdentifier guard (`sanitized.isEmpty()`)
-        // is exercised by an explicitly empty operationId; the resulting
-        // metric names are still valid because the underscore prefix keeps
-        // them legal JavaScript identifiers.
         val emptyIdOperation =
             ApiOperation("", "GET", "/pets", "", false, emptyList(), null)
         val emptyIdSpecification = specification.copy(operations = listOf(emptyIdOperation))
@@ -869,26 +822,12 @@ class DefaultK6ScriptGeneratorTest {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
 
-        // `createPet` and `deletePet` are not in the selected set, so
-        // their counters must not be generated.
         assertTrue(!script.contains("lt_status_200_createPet"))
         assertTrue(!script.contains("lt_status_500_deletePet"))
         assertTrue(!script.contains("lt_status_err_createPet"))
         assertTrue(script.contains("lt_status_200_getPet"))
         assertTrue(script.contains("lt_status_err_getPet"))
     }
-
-    // ---- Branch coverage for renderScenario and validateLoadProfile ----
-    //
-    // The Elvis operators `?: error("...")` and the `require` /
-    // `requireNotNull` calls throw when invoked with incomplete data.
-    // `validateLoadProfile` is the upstream check; if we bypass it and
-    // call `renderScenario` directly, we hit exactly the otherwise
-    // unreachable default branches.
-    //
-    // `validateLoadProfile` itself has no default case; each
-    // `require` branch is covered by testing with values outside
-    // the valid range.
 
     @Test
     fun `renderScenario throws when constant-vus is missing virtualUsers`() {
@@ -1082,7 +1021,6 @@ class DefaultK6ScriptGeneratorTest {
                 virtualUsers = 1,
                 durationSeconds = 1,
             )
-        // No throw: valid boundary values must be accepted.
         generator.validateLoadProfile(profile)
     }
 
@@ -1204,8 +1142,6 @@ class DefaultK6ScriptGeneratorTest {
         assertFailsWith<IllegalArgumentException> { generator.validateLoadProfile(profile) }
     }
 
-    // ---- Payload pool + strategy (commit 2) -----------------------------
-
     @Test
     fun `emits a top-level pool selector and an if-else dispatch for multiple payloads in sequential mode`() {
         val configuration =
@@ -1227,18 +1163,13 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
-        // Pool selector lives at the top of the script.
         assertContains(script, "let __lt_idx_getPet = 0;")
         assertContains(script, "function __lt_next_getPet()")
         assertContains(script, "__lt_idx_getPet++")
 
-        // Dispatch lives in default function and includes an if-else chain.
         assertContains(script, "const __lt_idx_getPet = __lt_next_getPet();")
         assertContains(script, "if (__lt_idx_getPet === 0)")
         assertContains(script, "else if (__lt_idx_getPet === 1)")
-
-        // Each payload's URL appears literally in the script so the
-        // k6 runtime does not need a per-iteration template engine.
         assertContains(script, "/pets/42")
         assertContains(script, "/pets/17")
     }
@@ -1264,8 +1195,6 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
-        // No increment in random mode — the function returns a fresh
-        // index on every call.
         assertContains(script, "Math.floor(Math.random() * 2)")
         assertTrue(!script.contains("__lt_idx_getPet++"))
     }
@@ -1285,7 +1214,6 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
-        // Default strategy is sequential.
         assertContains(script, "__lt_idx_getPet++")
     }
 
@@ -1306,19 +1234,13 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
-        // Pool selector only exists when there is more than one payload.
         assertTrue(!script.contains("__lt_next_getPet"))
         assertTrue(!script.contains("__lt_idx_getPet"))
-        // The legacy path still bakes the URL in directly.
         assertContains(script, "/pets/42")
     }
 
     @Test
     fun `migrates legacy flat fields into a single-pool payload when the pool is empty`() {
-        // The generator must accept the legacy `parameterValues` shape
-        // even when the frontend hasn't migrated yet: it falls back to
-        // OperationConfiguration.primaryPayload() and emits the
-        // single-payload path.
         val configuration = OperationConfiguration(operationId = "getPet", parameterValues = listOf(ParameterValue("id", "path", "99")))
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
@@ -1357,24 +1279,16 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("createPet"), listOf(configuration), profile)
 
-        // Both bodies appear in the dispatch chain.
         assertContains(script, """JSON.stringify({"name":"Luna"})""")
         assertContains(script, """JSON.stringify({"name":"Rocky"})""")
-        // Both bearer tokens are baked into the static blocks.
         assertContains(script, """Bearer t1""")
         assertContains(script, """Bearer t2""")
-        // The dispatch dispatches on the index.
         assertContains(script, "if (__lt_idx_createPet === 0)")
         assertContains(script, "else if (__lt_idx_createPet === 1)")
     }
 
     @Test
     fun `pool selector is declared exactly once at module top-level so the per-iteration dispatch does not double-declare the counter`() {
-        // Regression: the first pool-aware version inlined the
-        // counter declaration INSIDE the `default function()` body,
-        // which clashed with the dispatch line that declared the
-        // same identifier again and made the script un-parseable for
-        // k6 ("Identifier '__lt_idx_<op>' has already been declared").
         val configuration =
             OperationConfiguration(
                 operationId = "getPet",
@@ -1394,21 +1308,12 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
-        // Extract the body of `default function () { ... }` and check
-        // that the per-iteration dispatch does NOT redeclare the
-        // counter. The top-level `let` is fine — it has to live at
-        // module scope so the counter survives across iterations of
-        // the same VU.
         val functionStart = script.indexOf("export default function ()")
         require(functionStart >= 0) { "default function not found in generated script" }
         val functionBody = script.substring(functionStart)
         assertTrue(!functionBody.contains("let __lt_idx_getPet"), "let must not appear inside the function body")
         assertTrue(!functionBody.contains("var __lt_idx_getPet"), "var must not appear either")
-        // Exactly one `let __lt_idx_getPet = 0;` declaration in the
-        // entire script (it sits at module top-level).
         assertEquals(1, Regex("let __lt_idx_getPet = 0;").findAll(script).count())
-        // The dispatch inside `default function()` reads the counter
-        // via __lt_next_getPet() without redeclaring it.
         assertContains(script, "const __lt_idx_getPet = __lt_next_getPet();")
     }
 
@@ -1433,21 +1338,13 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
-        // Random mode emits a single function declaration above the
-        // default function — no `let` at all because there is no
-        // state to carry across iterations.
         assertContains(script, "function __lt_next_getPet()")
         assertTrue(script.contains("Math.floor(Math.random() * 2)"))
-        // The dispatch inside `default function()` still calls the
-        // top-level function without redeclaring anything.
         assertContains(script, "const __lt_idx_getPet = __lt_next_getPet();")
     }
 
     @Test
     fun `emits a per-payload counter declaration and increments it inside the dispatch branch`() {
-        // Each multi-payload branch must increment its own counter so
-        // the report can show the real call distribution, not a guess
-        // derived from executor duration and VU count.
         val configuration =
             OperationConfiguration(
                 operationId = "getPet",
@@ -1468,28 +1365,19 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), listOf(configuration), profile)
 
-        // One Counter declaration per payload index at the top of the
-        // generated script. The same Counter names are referenced from
-        // the dispatch branches below.
         assertContains(script, "new Counter('lt_payload_0_getPet')")
         assertContains(script, "new Counter('lt_payload_1_getPet')")
         assertContains(script, "new Counter('lt_payload_2_getPet')")
 
-        // Each branch starts with the increment of its own counter so
-        // the summary export records the exact count per payload.
         assertContains(script, "lt_payload_0_getPet.add(1)")
         assertContains(script, "lt_payload_1_getPet.add(1)")
         assertContains(script, "lt_payload_2_getPet.add(1)")
 
-        // No `lt_payload_*` counter for a single-payload operation:
-        // the request count is identical and would only add noise.
         val singleProfile =
             LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
         val singleScript = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), singleProfile)
         assertTrue(!singleScript.contains("lt_payload_0_getPet"))
     }
-
-    // ---- Demo-API request log correlation (X-Lasttest-Run-Id) ----
 
     @Test
     fun `emits the X-Lasttest-Run-Id header when generateForRun is called with a non-empty runId`() {
@@ -1497,17 +1385,11 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(specification, "https://example.test", "run-42", setOf("getPet"), emptyList(), profile)
 
-        // The header value is the runId verbatim so the interceptor
-        // can recover it without any encoding tricks.
         assertContains(script, "\"X-Lasttest-Run-Id\":\"run-42\"")
     }
 
     @Test
     fun `omits the X-Lasttest-Run-Id header when runId is empty`() {
-        // The default code path (tests that do not care about the
-        // demo correlation, and any synthetic caller) sends an
-        // empty runId. The header must not appear so the existing
-        // assertions on the legacy script shape keep holding.
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
         val script = generator.generateForRun(specification, "https://example.test", "", setOf("getPet"), emptyList(), profile)
@@ -1519,9 +1401,6 @@ class DefaultK6ScriptGeneratorTest {
     fun `emits the X-Lasttest-Run-Id header for every selected operation`() {
         val profile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 10)
 
-        // Two operations are selected — every single request block
-        // must carry the header so the demo log can group every
-        // request under the same runId.
         val script = generator.generateForRun(specification, "https://example.test", "abc-123", setOf("getPet", "createPet"), emptyList(), profile)
 
         val matches = Regex("\"X-Lasttest-Run-Id\":\"abc-123\"").findAll(script).count()
@@ -1530,10 +1409,6 @@ class DefaultK6ScriptGeneratorTest {
 
     @Test
     fun `emits the X-Lasttest-Run-Id header for every branch of a multi-payload pool`() {
-        // The multi-payload dispatch emits one HTTP request per
-        // payload. The header must be on every branch so a run
-        // with a random strategy still produces a uniform
-        // correlation in the log.
         val configuration =
             OperationConfiguration(
                 operationId = "getPet",
@@ -1553,7 +1428,6 @@ class DefaultK6ScriptGeneratorTest {
 
         val script = generator.generateForRun(specification, "https://example.test", "run-x", setOf("getPet"), listOf(configuration), profile)
 
-        // Two payloads → two request blocks → two header occurrences.
         val matches = Regex("\"X-Lasttest-Run-Id\":\"run-x\"").findAll(script).count()
         assertEquals(2, matches, "every payload branch must carry the run id")
     }

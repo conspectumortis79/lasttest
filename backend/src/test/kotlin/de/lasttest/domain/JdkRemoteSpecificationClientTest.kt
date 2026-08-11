@@ -96,9 +96,6 @@ class JdkRemoteSpecificationClientTest {
 
     @Test
     fun `secondary constructor with a custom SSL context uses that context for the request`() {
-        // We don't connect to an HTTPS server in this test (the loopback server is plain HTTP);
-        // we just need the secondary constructor to wire the SSL context through to the HttpClient
-        // and still successfully issue a request to the local server.
         val customContext =
             javax.net.ssl.SSLContext
                 .getDefault()
@@ -117,8 +114,6 @@ class JdkRemoteSpecificationClientTest {
     }
 
     private companion object {
-        // The production cap is 5 MiB; we send one byte more to trigger the overflow branch.
-        // Declared as Int so the literal arithmetic stays in Int range and the call sites are unambiguous.
         const val OVERSIZE_BYTES: Int = 5 * 1024 * 1024 + 1
     }
 }

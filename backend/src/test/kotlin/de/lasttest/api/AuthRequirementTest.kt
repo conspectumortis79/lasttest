@@ -141,13 +141,6 @@ class AuthRequirementTest {
 
     @Test
     fun `ApiOperation bearerAuth is true when authRequirements contains an OpenIdConnect because the wire format is identical`() {
-        // OIDC ID tokens ride the same `Authorization: Bearer
-        // <id_token>` wire format (RFC 6750) as OAuth 2.0 and
-        // plain Bearer. The legacy `bearerAuth` derived flag
-        // therefore flips on so the UI still shows the credential
-        // input via the existing Bearer UI path; the OpenIdConnect
-        // subtype adds extra metadata (discovery URL, scopes) for
-        // the banner only.
         val operation =
             ApiOperation(
                 operationId = "oidcOnly",
@@ -171,10 +164,6 @@ class AuthRequirementTest {
 
     @Test
     fun `authRequirements serialise with a kind discriminator that the frontend can switch on`() {
-        // The frontend TypeScript types are the consumer of this
-        // shape. Pinning it here means any future change to the
-        // Jackson configuration forces a test failure so the UI
-        // gets updated in lockstep.
         val mapper = ObjectMapper()
         val requirements =
             listOf(
@@ -207,8 +196,6 @@ class AuthRequirementTest {
         assertTrue(json.contains("\"kind\":\"oauth2\""))
         assertTrue(json.contains("\"kind\":\"openIdConnect\""))
         assertTrue(json.contains("\"kind\":\"unsupported\""))
-        // The Kotlin class name must never leak into the wire —
-        // a JVM-specific FQCN would break the TS decoder.
         assertFalse(json.contains("AuthRequirement\$Basic"))
     }
 }

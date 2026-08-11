@@ -13,12 +13,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class RingBufferDemoRequestLogTest {
-    /**
-     * No-op repository used so the tests do not need an H2 data
-     * source. Every `save()` call is a pure in-memory operation;
-     * the contract under test is the ring buffer itself, not the
-     * persistence layer.
-     */
     private val noopRepository = de.lasttest.domain.InMemoryDemoRequestLogRepository()
 
     private fun newLog(): RingBufferDemoRequestLog = RingBufferDemoRequestLog(noopRepository)
@@ -40,8 +34,6 @@ class RingBufferDemoRequestLogTest {
 
         val snapshot = log.snapshot(runId = null, limit = 10)
 
-        // The buffer is append-only, so the snapshot is reversed:
-        // the most recent entry ("3") sits at index 0.
         assertEquals(listOf("3", "2", "1"), snapshot.map(DemoRequestLogEntry::method))
     }
 
@@ -54,7 +46,6 @@ class RingBufferDemoRequestLogTest {
 
         val filtered = log.snapshot(runId = "a", limit = 10)
 
-        // Only the two "a" entries come back, newest first.
         assertEquals(listOf("3", "1"), filtered.map(DemoRequestLogEntry::method))
     }
 
@@ -65,9 +56,6 @@ class RingBufferDemoRequestLogTest {
 
         val snapshot = log.snapshot(runId = null, limit = 999_999)
 
-        // 10 < MAX_ENTRIES, so the clamp is invisible but the call
-        // still returns every entry. The clamp is exercised in the
-        // 1000-entries test below.
         assertEquals(10, snapshot.size)
     }
 
@@ -85,17 +73,12 @@ class RingBufferDemoRequestLogTest {
     @Test
     fun `ring buffer drops the oldest entry when full`() {
         val log = newLog()
-        // Fill the buffer past its capacity so the oldest entry has
-        // to be evicted.
         repeat(RingBufferDemoRequestLog.MAX_ENTRIES + 50) { index ->
             log.record(entry("e$index", runId = "r"))
         }
 
         val snapshot = log.snapshot(runId = null, limit = RingBufferDemoRequestLog.MAX_ENTRIES)
 
-        // The buffer holds exactly MAX_ENTRIES entries; the oldest
-        // 50 ("e0" through "e49") were evicted, the newest
-        // MAX_ENTRIES are still in there.
         assertEquals(RingBufferDemoRequestLog.MAX_ENTRIES, snapshot.size)
         val firstMethod = snapshot.last().method
         assertEquals("e50", firstMethod, "oldest surviving entry should be the 51st inserted")
@@ -108,12 +91,6 @@ class RingBufferDemoRequestLogTest {
         val log = newLog()
         log.record(entry("1", runId = "r"))
 
-        // Defensive contract: a malformed query string on the wire
-        // would produce limit=0 or a negative number; the
-        // controller catches those and falls back to the default,
-        // but the storage contract itself still has to reject them
-        // so any other caller cannot accidentally break the
-        // invariant.
         assertFailsWith<IllegalArgumentException> { log.snapshot(runId = null, limit = 0) }
         assertFailsWith<IllegalArgumentException> { log.snapshot(runId = null, limit = -3) }
     }
@@ -131,29 +108,17 @@ class RingBufferDemoRequestLogTest {
 
     @Test
     fun `clear also drops the persistent copy so a restart does not resurrect the entries`() {
-        // The dashboard's "reset" button promises a pristine state.
-        // The in-memory buffer alone would honour that for the
-        // current session, but the H2 side-write would silently
-        // surface the old entries on a container restart and undo
-        // the reset. The contract is therefore "clear wipes both".
         val log = newLog()
         log.record(entry("1", runId = "r"))
         log.record(entry("2", runId = "r"))
 
         log.clear()
 
-        // The repository is the in-memory no-op; "all rows gone"
-        // is observable through its `count()`.
         assertEquals(0, noopRepository.count(), "persistent copy must be wiped on clear()")
     }
 
     @Test
     fun `record swallows the exception when the repository save call fails`() {
-        // The H2 side-write is best-effort: a transient DB error
-        // (e.g. connection pool exhaustion) must not propagate to
-        // the caller (the interceptor, on the hot path of every
-        // demo request) and must not stop the in-memory ring
-        // buffer from accepting the entry.
         val failingRepository =
             object : DemoRequestLogRepository {
                 override fun <S : DemoRequestLogEntity> save(entity: S): S = throw IllegalStateException("boom")
@@ -193,9 +158,6 @@ class RingBufferDemoRequestLogTest {
             }
         val log = RingBufferDemoRequestLog(failingRepository)
 
-        // record() must not throw despite the repository failure,
-        // and the entry must still be visible in the in-memory
-        // snapshot.
         log.record(entry("1", runId = "r"))
 
         val snapshot = log.snapshot(runId = null, limit = 10)
@@ -204,10 +166,6 @@ class RingBufferDemoRequestLogTest {
 
     @Test
     fun `clear swallows the exception when the repository deleteAll call fails`() {
-        // Symmetric to the record() case: a transient DB error on
-        // the delete side must not prevent the in-memory buffer
-        // from being cleared, which is what the live dashboard
-        // actually reads.
         val failingRepository =
             object : DemoRequestLogRepository {
                 override fun <S : DemoRequestLogEntity> save(entity: S): S = entity
@@ -248,8 +206,6 @@ class RingBufferDemoRequestLogTest {
         val log = RingBufferDemoRequestLog(failingRepository)
         log.record(entry("1", runId = "r"))
 
-        // clear() must not throw despite the repository failure,
-        // and the in-memory buffer must still be emptied.
         log.clear()
 
         assertTrue(log.snapshot(runId = null, limit = 10).isEmpty())
@@ -257,10 +213,6 @@ class RingBufferDemoRequestLogTest {
 
     @Test
     fun `concurrent recorders all see their entries in the snapshot`() {
-        // The interceptor is called by any Spring MVC worker
-        // thread, so writes must be safe under concurrent load.
-        // 200 threads each insert one entry; every entry must be
-        // recoverable.
         val log = newLog()
         val threads =
             (0 until 200).map { index ->

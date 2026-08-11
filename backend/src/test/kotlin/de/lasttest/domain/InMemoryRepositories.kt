@@ -4,19 +4,6 @@ import org.springframework.data.domain.Pageable
 import java.util.Optional
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Test-only in-memory implementations of the Spring Data
- * repositories the service now depends on. They live next to the
- * service tests (rather than in `main`) because the production
- * code path is the H2-backed one — these exist purely so the unit
- * tests can run without spinning up an embedded database.
- *
- * Only the methods the service or the controller actually calls
- * are implemented with real behaviour; everything else throws
- * [UnsupportedOperationException] so a future test that hits an
- * unmocked path fails loudly instead of silently returning an
- * empty list.
- */
 class InMemoryTestRunRepository : TestRunRepository {
     private val store = ConcurrentHashMap<String, TestRunEntity>()
 
@@ -66,11 +53,11 @@ class InMemoryTestRunRepository : TestRunRepository {
     override fun findAllByOrderByCreatedAtDesc(): List<TestRunEntity> = store.values.sortedByDescending { it.createdAt }
 
     override fun findByOperationMethodAndOperationPathOrderByCreatedAtDesc(
-        method: String,
-        path: String,
+        operationMethod: String,
+        operationPath: String,
     ): List<TestRunEntity> =
         store.values
-            .filter { it.operationMethod == method && it.operationPath == path }
+            .filter { it.operationMethod == operationMethod && it.operationPath == operationPath }
             .sortedByDescending { it.createdAt }
 
     override fun countByEndpoint(
@@ -250,12 +237,6 @@ class InMemoryDemoRequestLogRepository : DemoRequestLogRepository {
             }
 }
 
-/**
- * No-op `TimeSeriesWriter` for tests that do not exercise the
- * ramp-chart data path. Backed by an in-memory repository so a
- * test that wants to inspect the seeded samples can read them back
- * via the same instance.
- */
 class InMemoryTimeSeriesWriter(
     private val repository: TimeSeriesRepository = InMemoryTimeSeriesRepository(),
 ) : TimeSeriesWriter(repository)

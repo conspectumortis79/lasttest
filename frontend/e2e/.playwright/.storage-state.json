@@ -5,6 +5,10 @@
       "origin": "http://localhost:5173",
       "localStorage": [
         {
+          "name": "lasttest.language",
+          "value": "en"
+        },
+        {
           "name": "lasttest.demo.enabled",
           "value": "true"
         }

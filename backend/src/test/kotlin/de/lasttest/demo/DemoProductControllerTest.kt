@@ -22,13 +22,6 @@ class DemoProductControllerTest(
 ) {
     @BeforeEach
     fun enableDemo() {
-        // The bundled toggle defaults to "off" so the demo is
-        // opt-in. The product-controller tests exercise the
-        // happy path of every endpoint, so the toggle has to be
-        // flipped on before each test. We could also reach for a
-        // @TestConfiguration that pre-enables the toggle, but
-        // the explicit `@BeforeEach` is easier to read in the
-        // diff and the cost is one line per test.
         demoControllerToggle.enable()
     }
 
@@ -77,11 +70,6 @@ class DemoProductControllerTest(
     @Test
     fun `searches products with JSON body and bearer token`() {
         val headers = HttpHeaders()
-        // The demo backend now requires the exact demo token. See
-        // [DemoProductController.DEMO_BEARER_TOKEN] for the source of
-        // truth; the same value is surfaced in
-        // `frontend/src/demoCredentials.ts` and in
-        // `demo/openapi-demo.yaml`.
         headers.setBearerAuth("demo-bearer-token")
         val response =
             client.exchange(
@@ -119,10 +107,6 @@ class DemoProductControllerTest(
 
     @Test
     fun `search rejects any non-empty bearer token that is not the demo token`() {
-        // The legacy behaviour was "any non-empty bearer token is
-        // accepted". For the demo to be a useful smoke test for
-        // bearer-protected endpoints the backend now requires the
-        // exact demo token; every other value produces 401.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfSearch(ProductSearchRequest(), "Bearer some-other-token"))
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfSearch(ProductSearchRequest(), "Bearer x"))
     }
@@ -210,15 +194,9 @@ class DemoProductControllerTest(
 
     @Test
     fun `admin stats returns 401 with empty username or password`() {
-        // base64(":nopass") = "Om5vcGFzcw==" — empty username side of the `||` short-circuit
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfAdminStats(authorization = "Basic Om5vcGFzcw=="))
-        // base64("nouser:") = "bm91c2VyOg==" — empty password side of the `||` short-circuit
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfAdminStats(authorization = "Basic bm91c2VyOg=="))
-        // base64(":") = "Og==" — both empty (the `||` resolves to true on either side)
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfAdminStats(authorization = "Basic Og=="))
-        // base64("alice:") = "YWxpY2U6" — non-empty username but empty password;
-        // this hits the right side of the `||` short-circuit (the
-        // left side is false, so the right must be evaluated).
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfAdminStats(authorization = "Basic YWxpY2U6"))
     }
 
@@ -229,18 +207,14 @@ class DemoProductControllerTest(
 
     @Test
     fun `admin stats returns 401 when the decoded value is missing the colon separator`() {
-        // base64("no-colon-here") = "bm8tY29sb24taGVyZQ=="
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfAdminStats(authorization = "Basic bm8tY29sb24taGVyZQ=="))
     }
 
     @Test
     fun `admin stats returns 200 with a valid Basic credential`() {
-        // base64("alice:s3cret") = "YWxpY2U6czNjcmV0"
         val response = adminStats(authorization = "Basic YWxpY2U6czNjcmV0")
         assertEquals(HttpStatus.OK, response.statusCode)
         assertNotNull(response.body)
-        // The shape of the body is documented in demo/openapi-demo.yaml;
-        // these are the keys the k6 script can rely on.
         assertNotNull(response.body!!["productCount"])
         assertNotNull(response.body!!["categories"])
         assertNotNull(response.body!!["timestamp"])
@@ -248,55 +222,31 @@ class DemoProductControllerTest(
 
     @Test
     fun `admin stats returns 401 with the wrong username`() {
-        // base64("bob:s3cret") = "Ym9iOnMzY3JldA=="
-        // The demo backend only accepts the literal "alice"; every
-        // other non-empty username must produce 401, otherwise the
-        // user could brute-force the credentials via the test report.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfAdminStats(authorization = "Basic Ym9iOnMzY3JldA=="))
     }
 
     @Test
     fun `admin stats returns 401 with the right username but wrong password`() {
-        // base64("alice:wrong") = "YWxpY2U6d3Jvbmc="
-        // Same shape as the positive test, swapped password: the
-        // demo backend must reject it so a typo is immediately
-        // visible in the k6 run.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfAdminStats(authorization = "Basic YWxpY2U6d3Jvbmc="))
     }
 
     @Test
     fun `admin stats returns 401 with a non-empty but otherwise arbitrary Basic credential`() {
-        // base64("anyone:anyhow") = "YW55b25lOmFueWhvdw=="
-        // The legacy behaviour was "any non-empty credentials are
-        // accepted", which made the demo useless as a smoke test for
-        // auth-protected endpoints. The strict mode below rejects
-        // every credential that is not the literal demo pair.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfAdminStats(authorization = "Basic YW55b25lOmFueWhvdw=="))
     }
 
     @Test
     fun `admin stats returns 401 when the Basic header is the demo credentials with a different case`() {
-        // base64("ALICE:s3cret") = "QUxJQ0U6czNjcmV0"
-        // Case sensitivity is a real-world Basic-Auth concern (RFC
-        // 7617 says usernames MAY be case-sensitive). We pick
-        // case-sensitive for the demo to make the auth check
-        // observable in the report.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfAdminStats(authorization = "Basic QUxJQ0U6czNjcmV0"))
     }
 
     @Test
     fun `product lookup returns 401 without an X-API-Key header`() {
-        // The lookup endpoint requires the X-API-Key header on every
-        // call. Without it, the server is intentionally chatty
-        // and returns 401, never 200.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfLookup(id = 1, apiKey = null))
     }
 
     @Test
     fun `product lookup returns 401 with any X-API-Key value that is not the demo key`() {
-        // Strict mode: only the pinned demo key is accepted. The
-        // same hygiene as Basic / Bearer so a typo is immediately
-        // visible in the k6 report.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfLookup(id = 1, apiKey = ""))
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfLookup(id = 1, apiKey = "   "))
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfLookup(id = 1, apiKey = "wrong"))
@@ -308,8 +258,6 @@ class DemoProductControllerTest(
         val response = lookupProduct(apiKey = "demo-api-key-12345", id = 1)
         assertEquals(HttpStatus.OK, response.statusCode)
         val body = assertNotNull(response.body)
-        // Jackson decodes small JSON numbers as Integer; compare via
-        // toString so the test does not depend on the runtime type.
         assertEquals("1", body["id"].toString())
         assertEquals("Clean Code", body["name"])
     }
@@ -327,46 +275,27 @@ class DemoProductControllerTest(
 
     @Test
     fun `me returns 401 with a Bearer header that carries the wrong token`() {
-        // OAuth 2.0 access tokens ride the same Bearer wire format
-        // (RFC 6750) so the same `Bearer <token>` shape is checked
-        // here. The backend only accepts the exact demo token.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfMe(authorization = "Bearer some-other-token"))
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfMe(authorization = "Bearer "))
     }
 
     @Test
     fun `me returns 401 with a non-empty bearer token that has a different content`() {
-        // Coverage for the `||` short-circuit in the bearer
-        // helper: a non-empty but wrong token must hit the
-        // `startsWith` true branch, the empty check is false, and
-        // the equality check returns false. (We do not test the
-        // purely-empty token path here because the [Bearer] case
-        // in the basic helper already exercises that branch.)
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfMe(authorization = "Bearer some-other-token"))
     }
 
     @Test
     fun `admin stats returns 401 with a Basic header that has only the scheme and no credentials`() {
-        // The empty-encoded branch of [hasBasicCredentials]: the
-        // header is `Basic ` (with only whitespace after the
-        // prefix), so the base64-decoded portion is empty. The
-        // helper must reject the request without trying to
-        // decode an empty string.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfAdminStats(authorization = "Basic "))
     }
 
     @Test
     fun `me returns 401 with a Bearer header that has only the scheme and no token`() {
-        // Same empty-encoded branch in the OAuth2 helper: a
-        // `Bearer ` header (no token at all) must be rejected
-        // without falling into the equality check.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfMe(authorization = "Bearer "))
     }
 
     @Test
     fun `me returns 401 when the scheme is not Bearer`() {
-        // Even with a syntactically correct token, a Basic auth
-        // header on a Bearer-only endpoint must be rejected.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfMe(authorization = "Basic dXNlcjpwYXNz"))
     }
 
@@ -375,11 +304,6 @@ class DemoProductControllerTest(
         val response = me(authorization = "Bearer demo-oauth2-token-12345")
         assertEquals(HttpStatus.OK, response.statusCode)
         val body = assertNotNull(response.body)
-        // The shape of the body mirrors what a real /userinfo
-        // endpoint would return: user id, scopes, client id, token
-        // issuance time. The values are hardcoded in the demo
-        // controller; a real impl would decode them out of the
-        // access token.
         assertEquals("demo-user", body["userId"])
         assertEquals("lasttest-demo-client", body["clientId"])
         assertNotNull(body["scopes"])
@@ -391,12 +315,6 @@ class DemoProductControllerTest(
         val response = myProfile(authorization = "Bearer demo-oidc-id-token-12345")
         assertEquals(HttpStatus.OK, response.statusCode)
         val body = assertNotNull(response.body)
-        // The shape mirrors the /userinfo endpoint a real OIDC
-        // resource server would return: user id, scopes, client id,
-        // discovery URL (so the user can verify the issuer
-        // matches the spec's `openIdConnectUrl`), token issuance
-        // time. A real impl would call the userinfo endpoint or
-        // decode the ID token's claims.
         assertEquals("demo-oidc-user", body["userId"])
         assertEquals("lasttest-demo-oidc-client", body["clientId"])
         assertEquals(
@@ -414,13 +332,6 @@ class DemoProductControllerTest(
 
     @Test
     fun `my-profile returns 401 with the OAuth2 demo token because the OIDC endpoint requires a different ID token`() {
-        // The OAuth 2.0 and OIDC demo tokens are different on
-        // purpose so a smoke test can tell the two endpoints
-        // apart on the wire. Using the wrong token (even though
-        // it carries the same `Bearer ` prefix) must produce a
-        // 401 — otherwise the demo would silently accept any
-        // token-shaped string and a typo in the OIDC input would
-        // not be visible in the k6 report.
         assertEquals(
             HttpStatus.UNAUTHORIZED,
             statusOfMyProfile(authorization = "Bearer demo-oauth2-token-12345"),
@@ -429,10 +340,6 @@ class DemoProductControllerTest(
 
     @Test
     fun `my-profile returns 401 with a blank OIDC ID token`() {
-        // A token that is only whitespace must be treated as "not
-        // set" so an accidental space + backspace in the UI input
-        // does not silently leak a malformed Authorization header
-        // into the k6 script.
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfMyProfile(authorization = "Bearer  "))
         assertEquals(HttpStatus.UNAUTHORIZED, statusOfMyProfile(authorization = "Bearer"))
     }

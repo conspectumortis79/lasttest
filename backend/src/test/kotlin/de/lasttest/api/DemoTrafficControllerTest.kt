@@ -48,18 +48,11 @@ class DemoTrafficControllerTest {
 
         val response = controller.requests(runId = null, limit = 9_999)
 
-        // The default limit is the same as MAX_ENTRIES, so the
-        // clamp is invisible for the default. The response carries
-        // the clamped value either way.
         assertEquals(RingBufferDemoRequestLog.MAX_ENTRIES, response.limit)
     }
 
     @Test
     fun `falls back to the default limit when the request sends a non-positive value`() {
-        // The wire format lets the dashboard send any integer; a
-        // malformed or hostile value would otherwise propagate into
-        // the storage layer and crash the request. The controller
-        // takes the hit and returns the default.
         val controller = DemoTrafficController(RecordingDemoRequestLog(), DefaultDemoControllerToggle())
 
         val responseZero = controller.requests(runId = null, limit = 0)
@@ -83,8 +76,6 @@ class DemoTrafficControllerTest {
         val response = controller.requests(runId = "r", limit = 10)
 
         assertEquals(2, response.count)
-        // The snapshot is newest-first: the POST (added second) comes
-        // before the GET (added first).
         assertEquals("POST", response.entries[0].method)
         assertEquals(401, response.entries[0].status)
         assertEquals("GET", response.entries[1].method)
@@ -94,11 +85,6 @@ class DemoTrafficControllerTest {
 
     @Test
     fun `forwards the trimmed runId to the storage so the lookup never sees stray whitespace`() {
-        // The interceptor already trims its header, but the
-        // controller receives the raw query parameter and has to
-        // make the same guarantee. An empty / whitespace runId is
-        // normalised to null so the storage layer sees "all
-        // entries" rather than "no entries will match".
         val log = RecordingDemoRequestLog()
         val controller = DemoTrafficController(log, DefaultDemoControllerToggle())
 
@@ -151,10 +137,7 @@ class DemoTrafficControllerTest {
 
         val response = controller.clearRequests()
 
-        // The log must have been cleared.
         assertTrue(log.entries.isEmpty(), "clear() must drop every entry the log held")
-        // The response mirrors the empty envelope so the client can
-        // adopt it as the new local state without a follow-up GET.
         assertEquals(null, response.runId)
         assertEquals(0, response.count)
         assertEquals(emptyList(), response.entries)
@@ -162,9 +145,6 @@ class DemoTrafficControllerTest {
 
     @Test
     fun `clearRequests is idempotent on an already-empty log`() {
-        // The dashboard's "reset" button may be clicked twice in
-        // a row; the second call must not error and must still
-        // return the empty envelope.
         val controller = DemoTrafficController(RecordingDemoRequestLog(), DefaultDemoControllerToggle())
 
         val response = controller.clearRequests()
@@ -219,13 +199,6 @@ class DemoTrafficControllerTest {
         }
     }
 }
-
-// ---- /status and POST /enabled --------------------------------------------
-//
-// The status endpoint mirrors the toggle state; the POST /enabled
-// endpoint flips it. The two are tested together because the
-// endpoint pair is the wire contract the Settings drawer speaks
-// to.
 
 class DemoTrafficStatusControllerTest {
     @Test

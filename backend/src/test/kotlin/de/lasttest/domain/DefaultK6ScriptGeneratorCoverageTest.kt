@@ -10,14 +10,6 @@ import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-/**
- * Tests that exclusively cover the branches of the `validateLoadProfile`
- * and `renderScenario` methods. These methods have many validation
- * paths (4 executor flavours × several mandatory fields × range checks),
- * and the normal smoke tests in `DefaultK6ScriptGeneratorTest` do not
- * cover all branches. We test them in isolation here so that coverage
- * gaps in `validateLoadProfile` and `renderScenario` are closed.
- */
 class DefaultK6ScriptGeneratorCoverageTest {
     private val generator = DefaultK6ScriptGenerator()
     private val specification =
@@ -27,8 +19,6 @@ class DefaultK6ScriptGeneratorCoverageTest {
             baseUrl = "",
             operations = listOf(ApiOperation("getPet", "GET", "/pets", "", false, listOf(ApiParameter("id", "path", true, 1)), null)),
         )
-
-    // --- validateLoadProfile: CONSTANT_VUS branches ---
 
     @Test
     fun `rejects constant-vus with null virtualUsers`() {
@@ -80,8 +70,6 @@ class DefaultK6ScriptGeneratorCoverageTest {
         assertTrue(ex.message!!.contains("Dauer"))
     }
 
-    // --- validateLoadProfile: SHARED_ITERATIONS branches ---
-
     @Test
     fun `rejects shared-iterations with null virtualUsers`() {
         val profile = LoadProfile(type = LoadProfileType.SHARED_ITERATIONS, virtualUsers = null, iterations = 100)
@@ -111,8 +99,6 @@ class DefaultK6ScriptGeneratorCoverageTest {
             }
         assertTrue(ex.message!!.contains("Iterationen"))
     }
-
-    // --- validateLoadProfile: RAMPING_VUS branches ---
 
     @Test
     fun `rejects ramping-vus with null stages`() {
@@ -203,8 +189,6 @@ class DefaultK6ScriptGeneratorCoverageTest {
             }
         assertTrue(ex.message!!.contains("Dauer"))
     }
-
-    // --- validateLoadProfile: CONSTANT_ARRIVAL_RATE branches ---
 
     @Test
     fun `rejects constant-arrival-rate with null rate`() {

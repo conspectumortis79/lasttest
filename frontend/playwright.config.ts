@@ -34,7 +34,13 @@ export default defineConfig({
   // any time) while cutting wall-clock time roughly to a
   // quarter versus the previous single-worker setup.
   fullyParallel: false,
-  workers: 4,
+  // The backend caps concurrent k6 runs at 2 (see
+  // `MAX_PARALLEL_RUNS` in `AsyncConfiguration.kt`); the
+  // remaining `workers` headroom above 2 buys nothing but
+  // queueing-induced tail latency. A single worker keeps
+  // the suite deterministic and well within the k6
+  // executor's budget.
+  workers: 1,
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {

@@ -6,26 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/**
- * Direct, in-process tests for the private credential helpers in
- * [DemoProductController]. The HTTP-level tests in
- * [DemoProductControllerTest] exercise the same paths indirectly
- * through the Spring controllers, but JaCoCo's branch tracking is
- * precise enough that a few bytecode-level edges on the
- * `?.isNullOrBlank()` checks (e.g. the second jump inside a single
- * `if (x.isEmpty())` expression, or the elvis short-circuit on a
- * blank token) remain uncovered.
- *
- * These tests call the helpers via reflection and exercise every
- * branch with a precisely-shaped input so the coverage gap closes
- * without spinning up the full Spring context for each case.
- */
 class DemoProductControllerAuthTest {
-    // The bundled toggle defaults to "off"; the auth tests call
-    // the controller's credential helpers directly, so the toggle
-    // has to be on for the auth branches to be reachable. The
-    // `apply { enable() }` mirrors the same shape used by the
-    // other controller tests in this package.
     private val controller = DemoProductController(DefaultDemoControllerToggle().apply { enable() })
 
     private fun hasBasicCredentials(authorization: String?): Boolean = invoke("hasBasicCredentials", authorization) as Boolean
@@ -48,8 +29,6 @@ class DemoProductControllerAuthTest {
         return method.invoke(controller, arg)
     }
 
-    // ----- hasBasicCredentials -----
-
     @Test
     fun `hasBasicCredentials rejects a null header`() {
         assertFalse(hasBasicCredentials(null))
@@ -62,47 +41,35 @@ class DemoProductControllerAuthTest {
 
     @Test
     fun `hasBasicCredentials rejects an empty encoded payload`() {
-        // The `if (encoded.isEmpty()) return false` branch —
-        // exercises both the inner length check and the outer
-        // `!isEmpty` check on the empty path.
         assertFalse(hasBasicCredentials("Basic "))
         assertFalse(hasBasicCredentials("Basic\t"))
     }
 
     @Test
     fun `hasBasicCredentials rejects a non-base64 encoded payload`() {
-        // runCatching { Base64.decode(encoded) } throws; the
-        // exception path returns false via the `?:` elvis.
         assertFalse(hasBasicCredentials("Basic !!!not-base64!!!"))
     }
 
     @Test
     fun `hasBasicCredentials rejects an encoded payload without a colon separator`() {
-        // base64("no-colon-here") = "bm8tY29sb24taGVyZQ=="
         assertFalse(hasBasicCredentials("Basic bm8tY29sb24taGVyZQ=="))
     }
 
     @Test
     fun `hasBasicCredentials rejects an encoded payload with an empty username or password`() {
-        // base64("") covers the "both empty" `||` short-circuit;
-        // base64("alice:") covers the "right operand true" path.
         assertFalse(hasBasicCredentials("Basic Og==")) // base64(":")
         assertFalse(hasBasicCredentials("Basic YWxpY2U6")) // base64("alice:")
     }
 
     @Test
     fun `hasBasicCredentials accepts the exact demo credentials`() {
-        // base64("alice:s3cret") = "YWxpY2U6czNjcmV0"
         assertTrue(hasBasicCredentials("Basic YWxpY2U6czNjcmV0"))
     }
 
     @Test
     fun `hasBasicCredentials is case-sensitive on the username`() {
-        // base64("ALICE:s3cret") = "QUxJQ0U6czNjcmV0"
         assertFalse(hasBasicCredentials("Basic QUxJQ0U6czNjcmV0"))
     }
-
-    // ----- hasOAuth2Token -----
 
     @Test
     fun `hasOAuth2Token rejects a null header`() {
@@ -116,9 +83,6 @@ class DemoProductControllerAuthTest {
 
     @Test
     fun `hasOAuth2Token rejects an empty token`() {
-        // The `if (token.isEmpty()) return false` branch —
-        // exercises both the inner length check and the outer
-        // `!isEmpty` check on the empty path.
         assertFalse(hasOAuth2Token("Bearer "))
     }
 
@@ -131,8 +95,6 @@ class DemoProductControllerAuthTest {
     fun `hasOAuth2Token accepts the exact demo token`() {
         assertTrue(hasOAuth2Token("Bearer demo-oauth2-token-12345"))
     }
-
-    // ----- hasApiKey -----
 
     @Test
     fun `hasApiKey rejects a null or empty or blank key`() {
@@ -151,9 +113,6 @@ class DemoProductControllerAuthTest {
         assertTrue(hasApiKey("demo-api-key-12345"))
     }
 
-    // ----- hasBearerToken (kept for symmetry so the helper's
-    // branches are also covered) -----
-
     @Test
     fun `hasBearerToken rejects every non-exact token shape`() {
         assertFalse(hasBearerToken(null))
@@ -168,16 +127,6 @@ class DemoProductControllerAuthTest {
         assertTrue(hasBearerToken("Bearer demo-bearer-token"))
     }
 
-    // ----- hasOidcIdToken -----
-    //
-    // The HTTP-level test in DemoProductControllerTest covers the
-    // happy path and the obvious 401 cases, but the JaCoCo branch
-    // counter on `if (token.isEmpty()) return false` is precise
-    // enough that the inner length check + the outer
-    // `!isEmpty` fall-through remain uncovered unless we hit the
-    // helper directly with a payload that only the in-process
-    // call can see. Same approach as hasOAuth2Token above.
-
     @Test
     fun `hasOidcIdToken rejects a null header`() {
         assertFalse(hasOidcIdToken(null))
@@ -185,24 +134,17 @@ class DemoProductControllerAuthTest {
 
     @Test
     fun `hasOidcIdToken rejects a header with the wrong scheme`() {
-        // "Basic …" never starts with "Bearer " — exercises the
-        // false branch of `startsWith(BEARER_PREFIX, true)`.
         assertFalse(hasOidcIdToken("Basic token"))
     }
 
     @Test
     fun `hasOidcIdToken rejects an empty token`() {
-        // "Bearer " has the prefix but `substring(7).trim()` is
-        // empty — exercises the `token.isEmpty()` true branch.
         assertFalse(hasOidcIdToken("Bearer "))
         assertFalse(hasOidcIdToken("Bearer  "))
     }
 
     @Test
     fun `hasOidcIdToken rejects a non-empty but wrong token`() {
-        // Bearer prefix matches, token is not empty, but it is
-        // not the demo OIDC token — exercises the equality
-        // check's false branch.
         assertFalse(hasOidcIdToken("Bearer some-other-token"))
     }
 

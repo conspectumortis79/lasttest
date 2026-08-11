@@ -72,9 +72,6 @@ class SwaggerSpecificationImporterTest {
         val operation = imported.operations.single { it.operationId == "createProduct" }
         assertTrue(operation.hasRequestBody)
         assertTrue(operation.requestBodyRequired)
-        // Without $ref dereferencing, the Swagger parser hands back a Schema
-        // object with only `$ref` set — no `type`, no properties. The
-        // frontend then has nothing to validate against.
         val schema = operation.requestBodySchema
         assertEquals("object", schema?.type)
         assertEquals(listOf("price"), schema?.required)
@@ -86,8 +83,6 @@ class SwaggerSpecificationImporterTest {
             de.lasttest.api.ApiParameterSchema(type = "number", format = "double", minimum = 0.01),
             schema?.properties?.get("price"),
         )
-        // The example for a $ref-backed body must be dereferenced too,
-        // otherwise the UI shows no example at all.
         assertEquals(
             mapOf("name" to "Clean Code", "price" to 34.95),
             operation.requestBodyExample,
@@ -96,9 +91,6 @@ class SwaggerSpecificationImporterTest {
 
     @Test
     fun `dereferences $ref in parameter schemas so validation works against components`() {
-        // A request body schema referenced via $ref must resolve to its
-        // concrete definition, otherwise the frontend receives `null`
-        // and has nothing to validate against.
         val imported = importer.import(SPECIFICATION_WITH_REQUEST_BODY_REF)
 
         val operation = imported.operations.single { it.operationId == "createProduct" }
@@ -115,25 +107,14 @@ class SwaggerSpecificationImporterTest {
         val imported = importer.import(SPECIFICATION_WITH_BROKEN_REQUEST_BODY_REF)
 
         val operation = imported.operations.single { it.operationId == "createProduct" }
-        // We can't recover a concrete schema, but the importer must not
-        // crash and the body must still be reported as present so the
-        // UI can render the (empty) textarea for free-form JSON input.
         assertTrue(operation.hasRequestBody)
         assertTrue(operation.requestBodyRequired)
         assertEquals(null, operation.requestBodySchema)
-        // The example path (L71) must also terminate gracefully when
-        // dereference returns the unresolved schema: dereference returns
-        // a non-null schema (the original ref), but `exampleFor` finds no
-        // `type`, no `example`, no `default`, no `enum` — so it returns
-        // null. The Elvis `?:` then yields null overall.
         assertEquals(null, operation.requestBodyExample)
     }
 
     @Test
     fun `falls back gracefully for body schemas that are not $ref-based and have no usable type`() {
-        // A schema with only `example` (no `type`, no `$ref`) must not
-        // crash the importer — toRequestBodySchema returns null and the
-        // body just lacks structured validation.
         val imported = importer.import(SPECIFICATION_WITH_EXAMPLE_ONLY_BODY)
 
         val operation = imported.operations.single { it.operationId == "ping" }
@@ -143,45 +124,25 @@ class SwaggerSpecificationImporterTest {
 
     @Test
     fun `prefers media example over media schema when both are set on the request body`() {
-        // When `media.example` is non-null, the Elvis chain on the
-        // requestBodyExample side takes the LEFT operand and the
-        // `media.schema?.let` branch is never entered. With a valid
-        // `$ref`-backed schema, this is the path the user sees in the
-        // UI when an API provides both an inline example and a real
-        // schema.
         val imported = importer.import(SPECIFICATION_WITH_EXAMPLE_AND_SCHEMA)
 
         val operation = imported.operations.single { it.operationId == "createProduct" }
         assertTrue(operation.hasRequestBody)
-        // The example wins; the schema is ignored for the example path.
         assertEquals(mapOf("source" to "inline"), operation.requestBodyExample)
-        // The schema is still resolved correctly for the validation path.
         assertEquals("object", operation.requestBodySchema?.type)
     }
 
     @Test
     fun `request body example falls back to schema example when media example is null`() {
-        // media.example is null, media.examples is null, but media.schema
-        // has an inline `example` field. exampleFor() returns that
-        // example for an object schema. This exercises the
-        // `media.schema?.let { dereference(...).let(::exampleFor) }`
-        // path with `dereference` returning a schema that has example.
         val imported = importer.import(SPECIFICATION_WITH_SCHEMA_EXAMPLE)
 
         val operation = imported.operations.single { it.operationId == "createProduct" }
         assertTrue(operation.hasRequestBody)
-        // exampleFor traverses the object schema's properties and
-        // returns their inline examples as a map.
         assertEquals(mapOf("name" to "Widget", "category" to "books"), operation.requestBodyExample)
     }
 
     @Test
     fun `request body example falls through when dereference returns the unresolved ref`() {
-        // media.example + media.examples are null, media.schema has a
-        // `$ref` to a missing component. `dereference` returns the
-        // original (unresolved) schema; `exampleFor` finds no usable
-        // fields and returns null. The Elvis `?:` then yields null
-        // overall, exercising the `dereference(...).?.let` skip branch.
         val imported = importer.import(SPECIFICATION_WITH_BROKEN_REQUEST_BODY_REF)
 
         val operation = imported.operations.single { it.operationId == "createProduct" }
@@ -191,21 +152,15 @@ class SwaggerSpecificationImporterTest {
 
     @Test
     fun `cycles in $ref do not loop forever`() {
-        // A → B → A. The dereferencer must break the cycle and return
-        // the first ref it touched, not crash or recurse forever.
         val imported = importer.import(SPECIFICATION_WITH_CIRCULAR_REQUEST_BODY_REF)
 
         val operation = imported.operations.single { it.operationId == "createProduct" }
         assertTrue(operation.hasRequestBody)
-        // No concrete schema to validate against — null is acceptable.
         assertEquals(null, operation.requestBodySchema)
-        // The importer must complete in finite time and not stack-overflow.
     }
 
     @Test
     fun `$ref is left untouched when there are no components at all`() {
-        // A spec with a $ref body schema but no `components.schemas`
-        // section must not crash — we just fall back to the raw schema.
         val imported = importer.import(SPECIFICATION_WITH_REF_BUT_NO_COMPONENTS)
 
         val operation = imported.operations.single { it.operationId == "ping" }
@@ -224,28 +179,18 @@ class SwaggerSpecificationImporterTest {
 
     @Test
     fun `dereference handles every edge case directly`() {
-        // The function is small but has many branches. These cover each
-        // one explicitly so the 100% coverage rule stays green.
         val api = OpenAPI()
-        // 1. null schema -> null
         assertEquals(null, importer.dereference(null, api))
-        // 2. schema without $ref -> same schema returned untouched
         val inlineSchema = ObjectSchema()
         inlineSchema.type = "object"
         inlineSchema.addProperty("x", StringSchema())
         assertEquals("object", importer.dereference(inlineSchema, api)?.type)
-        // 3. schema with $ref but no components.schemas at all -> null
         val refNoComponents = Schema<Any>()
         refNoComponents.`$ref` = "#/components/schemas/Foo"
         assertEquals(null, importer.dereference(refNoComponents, api))
-        // 4. schema with $ref pointing to a missing component -> null (the
-        // caller can't derive a usable shape from an unresolvable ref,
-        // so dereference signals "nothing to validate against").
         val refMissing = Schema<Any>()
         refMissing.`$ref` = "#/components/schemas/Missing"
         assertEquals(null, importer.dereference(refMissing, api))
-        // 5. circular $ref (A -> B -> A) is broken — we return some
-        // schema in the cycle rather than hanging or stack-overflowing.
         val a = Schema<Any>()
         a.`$ref` = "#/components/schemas/B"
         val b = Schema<Any>()
@@ -256,9 +201,6 @@ class SwaggerSpecificationImporterTest {
         api.components = components
         val refA = Schema<Any>()
         refA.`$ref` = "#/components/schemas/A"
-        // Cycles return null so the caller can detect the loop without
-        // getting stuck with an unresolvable ref. The important thing
-        // is that we don't blow the stack.
         assertEquals(null, importer.dereference(refA, api))
     }
 
@@ -716,16 +658,11 @@ class SwaggerSpecificationImporterTest {
         assertTrue(requirement is AuthRequirement.OAuth2)
         val oauth2: AuthRequirement.OAuth2 = requirement
         assertEquals("oauth2", oauth2.schemeName)
-        // The flow data must travel through the importer so the
-        // banner can render the flow name + scopes.
         assertEquals(1, oauth2.flows.size)
         val flow = oauth2.flows.single()
         assertEquals("clientCredentials", flow.type)
         assertEquals("https://example.test/oauth/token", flow.tokenUrl)
         assertEquals(listOf("read:products", "write:products"), flow.scopes)
-        // OAuth 2.0 access tokens ride the Bearer wire format
-        // (RFC 6750) so the legacy `bearerAuth` flag flips on and
-        // the pool editor renders the dedicated OAuth2 input column.
         assertEquals(true, operation.bearerAuth)
     }
 
@@ -758,9 +695,6 @@ class SwaggerSpecificationImporterTest {
             ),
             operation.authRequirements,
         )
-        // bearerAuth is a derived "is there any Bearer" predicate, so
-        // the second requirement must be enough to flip it to true
-        // even though the first entry is Basic.
         assertTrue(operation.bearerAuth)
     }
 
@@ -787,7 +721,6 @@ class SwaggerSpecificationImporterTest {
 
     @Test
     fun `toParameter covers required explicit and the example-priority and schema-derived example paths`() {
-        // parameter.example takes priority over parameter.schema.exampleFor(...) — both branches matter.
         val withExample =
             Parameter().apply {
                 name = "id"
@@ -855,8 +788,6 @@ class SwaggerSpecificationImporterTest {
 
     @Test
     fun `toRequestBodySchema defaults to object when type is blank but a property is present`() {
-        // type="   " forces schema.type?.takeIf { it.isNotBlank() } to null on line 187,
-        // so the Elvis branch assigns "object" as the resulting type.
         val schema =
             Schema<Any>().apply {
                 type = "   "
@@ -893,8 +824,6 @@ class SwaggerSpecificationImporterTest {
 
     @Test
     fun `toParameterSchema tolerates null enum entries by filtering them out`() {
-        // The enum mapping turns null into "" via the Elvis branch on line 161
-        // and the filter discards empty strings. Only the surviving values stay.
         val schema =
             Schema<Any>().apply {
                 type = "string"
@@ -910,10 +839,6 @@ class SwaggerSpecificationImporterTest {
 
     @Test
     fun `toRequestBodySchema skips properties whose child schema has no usable type`() {
-        // mapNotNull calls toParameterSchema(child)?.let { name to it }: when the
-        // child schema has no type, toParameterSchema returns null and the entry
-        // is filtered out. We mix one valid and one invalid property to exercise
-        // both branches of the safe-call on line 183.
         val schema =
             Schema<Any>().apply {
                 type = "object"
@@ -935,7 +860,6 @@ class SwaggerSpecificationImporterTest {
 
     @Test
     fun `toParameterSchema returns null when type is set but enum is null and the rest is uninteresting`() {
-        // This guarantees the `schema.enum == null` short-circuit at line 160 is exercised.
         val schema =
             Schema<Any>().apply {
                 type = "integer"
@@ -952,9 +876,6 @@ class SwaggerSpecificationImporterTest {
 
     @Test
     fun `toParameter covers an explicit path-in required parameter with both example sources`() {
-        // parameter.`in` = "path" forces required = true via the second half of the
-        // || on line 149, while parameter.example is set so the first half of the ?:
-        // on line 150 is taken.
         val parameter =
             Parameter().apply {
                 name = "id"

@@ -1283,9 +1283,6 @@ class HttpRemoteSpecificationFetcherTest {
 
     @Test
     fun `extractSpecUrlFromHtml returns null when the springdoc swagger-config URL is not plausible`() {
-        // A protocol-relative URL is rejected by isPlausibleSpecUrl, so the
-        // springdoc-config branch must yield null instead of returning the
-        // unparseable value.
         val html =
             """
             <script src="swagger-ui-bundle.js">
@@ -1298,8 +1295,6 @@ class HttpRemoteSpecificationFetcherTest {
 
     @Test
     fun `throws when the swagger UI resolution exceeds the maximum number of hops`() {
-        // Each link in the chain points to another HTML page, so the resolver
-        // recurses until MAX_SWAGGER_UI_HOPS is exhausted.
         fun htmlLink(nextUrl: String): String =
             """
             <script>
@@ -1335,9 +1330,6 @@ class HttpRemoteSpecificationFetcherTest {
 
     @Test
     fun `candidateExists treats a missing content type as a valid candidate`() {
-        // candidateExists is private, so we drive it through guessCommonSpecificationEndpoint:
-        // a server that returns 200 + non-blank JSON body WITHOUT a Content-Type header
-        // must be accepted, even though the content-type-aware branch is exercised too.
         val client =
             FakeRemoteSpecificationClient(
                 mapOf(
@@ -1367,9 +1359,6 @@ class HttpRemoteSpecificationFetcherTest {
 
     @Test
     fun `candidateExists accepts a yaml content type from a probed endpoint`() {
-        // Drive the !isYamlContentType == false branch on line 261: when the candidate
-        // server reports application/yaml, the third conjunct of the && becomes false
-        // and the whole guard is short-circuited, so the candidate is accepted.
         val client =
             FakeRemoteSpecificationClient(
                 mapOf(
@@ -1406,9 +1395,6 @@ class HttpRemoteSpecificationFetcherTest {
 
     @Test
     fun `falls back to detectByContent when the resolved spec URL has an unknown content type`() {
-        // The resolved spec URL returns text/plain with a valid JSON body, so
-        // the spec fetcher must hand off to detectByContent instead of rejecting
-        // the response outright.
         val html =
             """
             <script>
@@ -1444,8 +1430,6 @@ class HttpRemoteSpecificationFetcherTest {
 
     @Test
     fun `candidateExists rejects responses whose content type is neither JSON nor YAML`() {
-        // An endpoint that returns 200 with a non-blank body but a non-JSON / non-YAML
-        // content type must NOT be picked up by guessCommonSpecificationEndpoint.
         val client =
             FakeRemoteSpecificationClient(
                 mapOf(
@@ -1584,8 +1568,6 @@ class HttpRemoteSpecificationFetcherTest {
 
     @Test
     fun `extractSpecUrlFromHtml returns null when the html has no swagger-ui bundle marker and no html-attribute url`() {
-        // parseSwaggerUiConfig should fall through to matchHtmlAttributeUrl, which
-        // also returns null when none of the HTML attribute patterns match.
         val html = "<html><body><div id='swagger-ui'></div></body></html>"
         val fetcher = HttpRemoteSpecificationFetcher(FakeRemoteSpecificationClient(emptyMap()))
         assertNull(fetcher.extractSpecUrlFromHtml(html, "https://api.example.com/swagger-ui"))
@@ -1593,8 +1575,6 @@ class HttpRemoteSpecificationFetcherTest {
 
     @Test
     fun `extractSpecUrlFromHtml returns null when the html-attribute url is not plausible`() {
-        // matchHtmlAttributeUrl finds a data-url attribute but the URL is protocol-relative,
-        // so isPlausibleSpecUrl rejects it. The pattern loop then exhausts without a winner.
         val html =
             """
             <html>
@@ -1610,9 +1590,6 @@ class HttpRemoteSpecificationFetcherTest {
 
     @Test
     fun `extractSpecUrlFromHtml returns null when the bundle has no url or urls entries at all`() {
-        // matchSingleUrl returns null because there is no `url: "..."` entry in the
-        // SwaggerUIBundle configuration. matchSpringdocConfigUrl also returns null.
-        // The fall-through to matchHtmlAttributeUrl must also return null.
         val html =
             """
             <script>
@@ -1625,8 +1602,6 @@ class HttpRemoteSpecificationFetcherTest {
 
     @Test
     fun `extractSpecUrlFromHtml returns the springdoc config url when it is the only entry`() {
-        // Only matchSpringdocConfigUrl finds a URL — the url: "" and urls: [] branches
-        // both come back empty, so the springdoc match is the only winner.
         val html =
             """
             <script src="swagger-ui-bundle.js">

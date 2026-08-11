@@ -120,18 +120,6 @@ class SwaggerSpecificationImporter : SpecificationImporter {
         operationParameters: List<Parameter>?,
     ): List<Parameter> = (pathParameters.orEmpty() + operationParameters.orEmpty()).distinctBy { "${it.`in`}:${it.name}" }
 
-    /**
-     * Resolve a schema that is only a `$ref` placeholder (Swagger does
-     * this for `application/json` bodies when the spec uses
-     * `$ref: '#/components/schemas/Foo'`) to its concrete definition
-     * under `components.schemas`. Without this step
-     * `toParameterSchema` / `toRequestBodySchema` see a schema with
-     * `type == null` and return null, and the frontend has nothing to
-     * validate the request body against.
-     *
-     * Circular references are broken at the first revisit; the original
-     * schema is returned unchanged in that case.
-     */
     internal fun dereference(
         schema: Schema<*>?,
         api: OpenAPI,
@@ -139,15 +127,8 @@ class SwaggerSpecificationImporter : SpecificationImporter {
     ): Schema<*>? {
         if (schema == null) return null
         val ref = schema.`$ref` ?: return schema
-        // Swagger uses local refs like "#/components/schemas/CreateProduct".
-        // We only handle those — external refs (e.g. other files or URLs)
-        // are out of scope for the demo / MVP.
         val localName = ref.substringAfterLast('/')
         if (localName in seen) return null
-        // If the ref points to a component that doesn't exist (or to
-        // a cycle we'd loop on), return null so the caller can detect
-        // the missing shape. Returning the unresolvable schema itself
-        // would force every downstream call to re-validate it.
         val resolved = api.components?.schemas?.get(localName) ?: return null
         return dereference(resolved, api, seen + localName)
     }
@@ -157,13 +138,6 @@ class SwaggerSpecificationImporter : SpecificationImporter {
         swaggerProblems: List<String>?,
     ): List<String> = (openApiProblems.orEmpty() + swaggerProblems.orEmpty()).distinct().ifEmpty { listOf("Ungültige Swagger-/OpenAPI-Dokumentation.") }
 
-    /**
-     * Collects every [AuthRequirement] declared on a single operation.
-     * The operation-local `security` list wins over the global
-     * `security` block; an explicit empty list (`security: []`) on the
-     * operation means "no auth for this operation" and yields an
-     * empty result here.
-     */
     private fun requirementsForOperation(
         operationSecurity: List<SecurityRequirement>?,
         globalSecurity: List<SecurityRequirement>?,
@@ -172,11 +146,6 @@ class SwaggerSpecificationImporter : SpecificationImporter {
         val requirements = operationSecurity ?: globalSecurity.orEmpty()
         return requirements
             .flatMap { requirement -> requirement.keys.mapNotNull(known::get) }
-            // The same scheme name may be referenced from multiple
-            // branches of a `security` OR; rendering two identical
-            // input rows for one operation is a UX bug, so we dedupe
-            // by (concrete class, schemeName) — the only fields that
-            // influence the UI / generator behaviour.
             .distinctBy { requirement ->
                 when (requirement) {
                     is AuthRequirement.Basic -> "Basic:${requirement.schemeName}"

@@ -144,9 +144,6 @@ class InfluxDbTimeSeriesReaderTest {
     fun `parseInstant returns the Instant for a valid ISO-8601 timestamp`() {
         val reader = reader()
         val instant = assertNotNull(reader.parseInstant("2026-08-04T16:50:00Z"))
-        // Reference point: 2026-08-04T16:50:00Z is 1785862200 epoch seconds.
-        // We assert the parsed instant is a deterministic future point in time
-        // to keep the test stable across clocks (e.g. CI containers).
         assertEquals(1785862200L, instant.epochSecond)
     }
 
