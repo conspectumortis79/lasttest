@@ -101,6 +101,7 @@ test('formats report timestamps and looks up optional metrics', () => {
   equal(formatTimestamp('2026-08-04T16:51:22Z'), '04.08.2026, 18:51:22')
   equal(formatTimestamp('invalid'), '–')
   equal(formatTimestamp(undefined), '–')
+  equal(formatTimestamp('2026-08-04T16:51:22Z', 'en').includes('2026'), true)
   equal(metric(parseK6Summary(run)!, 'missing').count, undefined)
 })
 
@@ -560,23 +561,23 @@ test('runRemainingSeconds clamps to zero once the run has exceeded the plan', ()
 // ---- summariseFailure ----
 
 test('summariseFailure returns undefined for empty, null, or whitespace-only errors', () => {
-  equal(summariseFailure(undefined), undefined)
-  equal(summariseFailure(null), undefined)
-  equal(summariseFailure(''), undefined)
-  equal(summariseFailure('   \n  \n'), undefined)
+  equal(summariseFailure('en', undefined), undefined)
+  equal(summariseFailure('en', null), undefined)
+  equal(summariseFailure('en', ''), undefined)
+  equal(summariseFailure('en', '   \n  \n'), undefined)
 })
 
 test('summariseFailure detects DNS resolution failures', () => {
-  const reason = summariseFailure('ERRO[0000] GoError: Get "https://api.example.com/": dial tcp: lookup api.example.com: no such host')
+  const reason = summariseFailure('en', 'ERRO[0000] GoError: Get "https://api.example.com/": dial tcp: lookup api.example.com: no such host')
   ok(reason)
   equal(reason!.kind, 'dns')
   ok(reason!.summary.includes('api.example.com'))
-  ok(reason!.summary.includes('DNS-Auflösung'))
+  ok(reason!.summary.includes('DNS resolution'))
   equal(reason!.hint != null, true)
 })
 
 test('summariseFailure detects DNS failures with a "Temporary failure in name resolution" message', () => {
-  const reason = summariseFailure('dial tcp: lookup broken.test: Temporary failure in name resolution')
+  const reason = summariseFailure('en', 'dial tcp: lookup broken.test: Temporary failure in name resolution')
   ok(reason)
   equal(reason!.kind, 'dns')
   ok(reason!.detail.includes('Temporary failure in name resolution'))
@@ -585,14 +586,14 @@ test('summariseFailure detects DNS failures with a "Temporary failure in name re
 test('summariseFailure detects DNS failures with a port-prefixed dial tcp string', () => {
   // The question-mark optional in `(?::\d+)?` of the DNS pattern is
   // used when k6 embeds a port into the lookup path.
-  const reason = summariseFailure('dial tcp:443: lookup api.example.com: no such host')
+  const reason = summariseFailure('en', 'dial tcp:443: lookup api.example.com: no such host')
   ok(reason)
   equal(reason!.kind, 'dns')
   ok(reason!.summary.includes('api.example.com'))
 })
 
 test('summariseFailure detects connection-refused errors with host and port', () => {
-  const reason = summariseFailure('dial tcp 127.0.0.1:1: connect: connection refused')
+  const reason = summariseFailure('en', 'dial tcp 127.0.0.1:1: connect: connection refused')
   ok(reason)
   equal(reason!.kind, 'connection-refused')
   ok(reason!.summary.includes('127.0.0.1'))
@@ -600,7 +601,7 @@ test('summariseFailure detects connection-refused errors with host and port', ()
 })
 
 test('summariseFailure detects connection-refused errors with IPv6 hosts', () => {
-  const reason = summariseFailure('dial tcp [::1]:8080: connect: connection refused')
+  const reason = summariseFailure('en', 'dial tcp [::1]:8080: connect: connection refused')
   ok(reason)
   equal(reason!.kind, 'connection-refused')
   ok(reason!.summary.includes('::1'))
@@ -608,7 +609,7 @@ test('summariseFailure detects connection-refused errors with IPv6 hosts', () =>
 })
 
 test('summariseFailure detects connection-timeout errors', () => {
-  const reason = summariseFailure('dial tcp 10.0.0.99:8080: i/o timeout')
+  const reason = summariseFailure('en', 'dial tcp 10.0.0.99:8080: i/o timeout')
   ok(reason)
   equal(reason!.kind, 'connection-timeout')
   ok(reason!.summary.includes('10.0.0.99'))
@@ -616,28 +617,28 @@ test('summariseFailure detects connection-timeout errors', () => {
 })
 
 test('summariseFailure detects context-deadline-exceeded as a timeout', () => {
-  const reason = summariseFailure('dial tcp api.example.com:443: context deadline exceeded')
+  const reason = summariseFailure('en', 'dial tcp api.example.com:443: context deadline exceeded')
   ok(reason)
   equal(reason!.kind, 'connection-timeout')
 })
 
 test('summariseFailure detects x509 TLS errors and keeps the original message', () => {
-  const reason = summariseFailure('Get "https://expired.badssl.com/": x509: certificate has expired or is not yet valid')
+  const reason = summariseFailure('en', 'Get "https://expired.badssl.com/": x509: certificate has expired or is not yet valid')
   ok(reason)
   equal(reason!.kind, 'tls')
-  ok(reason!.summary.includes('TLS-Handshake'))
+  ok(reason!.summary.includes('TLS handshake'))
   ok(reason!.detail.includes('certificate has expired'))
 })
 
 test('summariseFailure detects HTTP status code errors', () => {
-  const reason = summariseFailure('http response error: status code 500')
+  const reason = summariseFailure('en', 'http response error: status code 500')
   ok(reason)
   equal(reason!.kind, 'http')
   ok(reason!.summary.includes('500'))
 })
 
 test('summariseFailure detects GoError script errors with file and line', () => {
-  const reason = summariseFailure('GoError: file:///app/test.js:25:5   ReferenceError: foo is not defined')
+  const reason = summariseFailure('en', 'GoError: file:///app/test.js:25:5   ReferenceError: foo is not defined')
   ok(reason)
   equal(reason!.kind, 'script')
   ok(reason!.summary.includes('test.js'))
@@ -646,7 +647,7 @@ test('summariseFailure detects GoError script errors with file and line', () => 
 })
 
 test('summariseFailure detects missing k6 process errors', () => {
-  const reason = summariseFailure('Cannot run program "k6" (in directory "/tmp"): error=2, No such file or directory')
+  const reason = summariseFailure('en', 'Cannot run program "k6" (in directory "/tmp"): error=2, No such file or directory')
   ok(reason)
   equal(reason!.kind, 'process')
   ok(reason!.summary.includes('k6'))
@@ -656,7 +657,7 @@ test('summariseFailure detects missing k6 process errors', () => {
 test('summariseFailure detects k6 as a missing command in a shell error', () => {
   // Covers the `k6: command not found` path and the variant without
   // surrounding quotes.
-  const reason = summariseFailure('/bin/sh: k6: command not found')
+  const reason = summariseFailure('en', '/bin/sh: k6: command not found')
   ok(reason)
   equal(reason!.kind, 'process')
 })
@@ -665,7 +666,7 @@ test('summariseFailure detects a "no such file or directory" error from the OS',
   // Plain OS error without explicitly mentioning k6 — the fallback in
   // the process pattern still hits because `no such file or
   // directory` is part of the error message.
-  const reason = summariseFailure('fork/exec /usr/local/bin/k6: no such file or directory')
+  const reason = summariseFailure('en', 'fork/exec /usr/local/bin/k6: no such file or directory')
   ok(reason)
   equal(reason!.kind, 'process')
 })
@@ -675,14 +676,14 @@ test('summariseFailure detects connection-refused against a hostname without exp
   // IPv4 nor an IPv6 address is given, but a hostname without a colon
   // (e.g. when k6 dials a DNS name that points to a port via
   // /etc/hosts).
-  const reason = summariseFailure('dial tcp myservice:8080: connect: connection refused')
+  const reason = summariseFailure('en', 'dial tcp myservice:8080: connect: connection refused')
   ok(reason)
   equal(reason!.kind, 'connection-refused')
   ok(reason!.summary.includes('myservice'))
 })
 
 test('summariseFailure returns an unknown reason for unmatched k6 output', () => {
-  const reason = summariseFailure('first noise line\nSomething completely unexpected\nhappened on the line below')
+  const reason = summariseFailure('en', 'first noise line\nSomething completely unexpected\nhappened on the line below')
   ok(reason)
   equal(reason!.kind, 'unknown')
   // We scan from the end, so the last lines end up in the
@@ -692,7 +693,7 @@ test('summariseFailure returns an unknown reason for unmatched k6 output', () =>
 })
 
 test('summariseFailure strips the ERRO[] prefix in the unknown fallback', () => {
-  const reason = summariseFailure('ERRO[0002] Something completely unexpected\nERRO[0003] actual last error')
+  const reason = summariseFailure('en', 'ERRO[0002] Something completely unexpected\nERRO[0003] actual last error')
   ok(reason)
   equal(reason!.kind, 'unknown')
   // The last line wins: ERRO[0003] is truncated so the UI shows
@@ -701,7 +702,7 @@ test('summariseFailure strips the ERRO[] prefix in the unknown fallback', () => 
 })
 
 test('summariseFailure prefers the first matching pattern and ignores ERRO[] prefixes', () => {
-  const reason = summariseFailure('ERRO[0001] GoError: dial tcp example.com:80: i/o timeout\nERRO[0001] http response error: status code 503')
+  const reason = summariseFailure('en', 'ERRO[0001] GoError: dial tcp example.com:80: i/o timeout\nERRO[0001] http response error: status code 503')
   ok(reason)
   // Both patterns would match, but time-out comes before http in
   // the pattern array — so the time-out label wins.
@@ -756,10 +757,10 @@ test('summarizeFailure detects the k6 binary missing case', () => {
   const run = runWithError(
     'java.io.IOException: Cannot run program "k6": error=2, No such file or directory',
   )
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'k6-missing')
-  equal(failure.diagnosis, 'k6 konnte nicht gestartet werden')
-  equal(failure.detail, 'Cannot run program „k6“ — Binary fehlt im Container')
+  equal(failure.diagnosis, 'k6 could not be started')
+  equal(failure.detail, 'Cannot run program "k6" — binary missing in the container')
   equal(failure.reasons.length, 3)
 })
 
@@ -767,34 +768,34 @@ test('summarizeFailure detects a TLS handshake failure and mentions the TrustSto
   const run = runWithError(
     'ERRO[0001] GoError: net::ERR_CERT_AUTHORITY_INVALID at github.com/grafana/k6/net.(*DialerHolder).Dial (net.go:152)',
   )
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'tls')
-  equal(failure.diagnosis, 'TLS-Handshake fehlgeschlagen')
-  equal(failure.detail, 'Zertifikat wird nicht vertraut (self-signed oder interne CA)')
+  equal(failure.diagnosis, 'TLS handshake failed')
+  equal(failure.detail, 'Certificate is not trusted (self-signed or internal CA)')
   equal(failure.reasons.some(r => r.includes('LASTTEST_TRUSTSTORE_PATH')), true)
 })
 
 test('summarizeFailure extracts the hostname for the DNS failure category', () => {
   const run = runWithError('ERRO[0001] GoError: Getaddrinfo ENOTFOUND api.typo.example.com at net.go:152')
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'dns')
-  equal(failure.detail, 'api.typo.example.com nicht gefunden (ENOTFOUND)')
+  equal(failure.detail, 'api.typo.example.com not found (ENOTFOUND)')
   equal(failure.reasons[0].includes('api.typo.example.com'), true)
 })
 
 test('summarizeFailure falls back to the configured baseUrl when the error omits the hostname', () => {
   const run = runWithError('ERRO[0001] GoError: Getaddrinfo ENOTFOUND')
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'dns')
-  equal(failure.detail, '127.0.0.1 nicht gefunden (ENOTFOUND)')
+  equal(failure.detail, '127.0.0.1 not found (ENOTFOUND)')
 })
 
 test('summarizeFailure reports an unreachable target with the configured baseUrl', () => {
   const run = runWithError('ERRO[0001] GoError: net::ERR_CONNECTION_REFUSED at net.go:152')
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'unreachable')
-  equal(failure.diagnosis, 'Ziel nicht erreichbar')
-  equal(failure.detail, 'Connection refused auf http://127.0.0.1:1')
+  equal(failure.diagnosis, 'Target unreachable')
+  equal(failure.detail, 'Connection refused on http://127.0.0.1:1')
   equal(failure.reasons[0].includes('http://127.0.0.1:1'), true)
   equal(failure.reasons[0].includes('Connection refused'), true)
 })
@@ -806,7 +807,7 @@ test('summarizeFailure without baseUrl still produces a useful detail', () => {
     createdAt: '2026-08-05T16:00:00Z',
     error: 'ERR_CONNECTION_REFUSED',
   }
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'unreachable')
   equal(failure.detail, 'Connection refused')
 })
@@ -820,13 +821,13 @@ test('summarizeFailure classifies a timeout and references the latency threshold
     lt_status_200_listProducts: { count: 581 },
   })
   const run = runWithError('Post "https://slow.test/": context deadline exceeded (Client.Timeout)', summary)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'timeout')
-  equal(failure.diagnosis, 'Antwortzeit zu hoch')
-  equal(failure.detail.includes('1.840 ms'), true)
-  equal(failure.detail.includes('1,0 s'), true)
-  equal(failure.reasons.some(r => r.includes('19 von 600')), true)
-  equal(failure.reasons.some(r => r.includes('3,2 %')), true)
+  equal(failure.diagnosis, 'Response time too high')
+  equal(failure.detail.includes('1,840 ms'), true)
+  equal(failure.detail.includes('1.0 s'), true)
+  equal(failure.reasons.some(r => r.includes('19 of 600')), true)
+  equal(failure.reasons.some(r => r.includes('3.2 %')), true)
 })
 
 test('summarizeFailure classifies a timeout without any 5xx as a pure latency issue', () => {
@@ -838,9 +839,9 @@ test('summarizeFailure classifies a timeout without any 5xx as a pure latency is
     lt_status_504_listProducts: { count: 0 },
   })
   const run = runWithError('context deadline exceeded', summary)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'timeout')
-  equal(failure.reasons.some(r => r.includes('gerissen')), true)
+  equal(failure.reasons.some(r => r.includes('breached')), true)
 })
 
 test('summarizeFailure classifies a run dominated by 5xx as a server-error run', () => {
@@ -853,9 +854,9 @@ test('summarizeFailure classifies a run dominated by 5xx as a server-error run',
     lt_status_200_listProducts: { count: 188 },
   })
   const run = runWithError(undefined, summary)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'server5xx')
-  equal(failure.diagnosis, 'Viele Server-Fehler (5xx)')
+  equal(failure.diagnosis, 'Many server errors (5xx)')
   equal(failure.detail.includes('502'), true)
   equal(failure.reasons.some(r => r.includes('getProduct')), true)
   equal(failure.reasons.some(r => r.includes('listProducts')), true)
@@ -869,11 +870,11 @@ test('summarizeFailure classifies a run dominated by 4xx as a client-error run',
     lt_status_200_searchProducts: { count: 120 },
   })
   const run = runWithError(undefined, summary)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'threshold-failure-rate')
-  equal(failure.diagnosis, 'Hohe Client-Fehlerrate (4xx)')
+  equal(failure.diagnosis, 'High client error rate (4xx)')
   equal(failure.detail.includes('401'), true)
-  equal(failure.reasons.some(r => r.includes('Bearer-Token')), true)
+  equal(failure.reasons.some(r => r.includes('bearer token')), true)
 })
 
 test('summarizeFailure classifies a run dominated by 403 as a client-error run', () => {
@@ -884,9 +885,9 @@ test('summarizeFailure classifies a run dominated by 403 as a client-error run',
     lt_status_200_searchProducts: { count: 360 },
   })
   const run = runWithError(undefined, summary)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'threshold-failure-rate')
-  equal(failure.reasons.some(r => r.includes('Berechtigung')), true)
+  equal(failure.reasons.some(r => r.includes('permission')), true)
 })
 
 test('summarizeFailure classifies a high-latency run with mixed 4xx as latency-only', () => {
@@ -898,11 +899,11 @@ test('summarizeFailure classifies a high-latency run with mixed 4xx as latency-o
     lt_status_401_searchProducts: { count: 24 },
   })
   const run = runWithError(undefined, summary)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'threshold-latency')
-  equal(failure.diagnosis, 'Antwortzeit zu hoch')
-  equal(failure.detail.includes('1.840 ms'), true)
-  equal(failure.reasons.some(r => r.includes('4,0 %')), true)
+  equal(failure.diagnosis, 'Response time too high')
+  equal(failure.detail.includes('1,840 ms'), true)
+  equal(failure.reasons.some(r => r.includes('4.0 %')), true)
 })
 
 test('summarizeFailure classifies a k6 script error and extracts the file:line reference', () => {
@@ -913,28 +914,28 @@ test('summarizeFailure classifies a k6 script error and extracts the file:line r
       '  hint: script exception',
     ].join('\n'),
   )
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'script')
-  equal(failure.diagnosis, 'k6-Skriptfehler')
+  equal(failure.diagnosis, 'k6 script error')
   equal(failure.detail.includes('ReferenceError: bearerToken is not defined'), true)
   equal(failure.detail.includes('test.js:42'), true)
 })
 
 test('summarizeFailure falls back to the unknown category when no signal matches', () => {
   const run = runWithError('level=info msg="some unrelated log line"')
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'unknown')
-  equal(failure.diagnosis, 'k6-Lauf fehlgeschlagen')
+  equal(failure.diagnosis, 'k6 run failed')
   equal(failure.detail, 'level=info msg="some unrelated log line"')
-  equal(failure.reasons[0].includes('Erste Fehlerzeile'), true)
+  equal(failure.reasons[0].includes('First error line'), true)
 })
 
 test('summarizeFailure falls back to unknown when both error and summary are missing', () => {
   const run = runWithError(undefined, undefined)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'unknown')
-  equal(failure.diagnosis, 'Unbekannter Fehler')
-  equal(failure.reasons[0].includes('steht nicht in run.error'), true)
+  equal(failure.diagnosis, 'Unknown error')
+  equal(failure.reasons[0].includes('is not in run.error'), true)
 })
 
 test('summarizeFailure prefers an explicit error text over a threshold breach', () => {
@@ -944,21 +945,21 @@ test('summarizeFailure prefers an explicit error text over a threshold breach', 
     http_req_duration: { 'p(95)': 1840 },
   })
   const run = runWithError('ERR_CONNECTION_REFUSED', summary)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'unreachable')
 })
 
 test('summarizeFailure returns reasons for the unreachable case even with no summary', () => {
   const run = runWithError('ERR_CONNECTION_REFUSED')
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.reasons.some(r => r.includes('Connection refused')), true)
 })
 
 test('buildMetricRow omits the metric row entirely for RUNNING and QUEUED runs', () => {
-  const failure = summarizeFailure(runWithError(undefined))
+  const failure = summarizeFailure('en', runWithError(undefined))
   for (const status of ['RUNNING', 'QUEUED']) {
     const run: TestRun = { id: 'run', status, createdAt: '2026-08-05T16:00:00Z' }
-    deepEqual(buildMetricRow(run, undefined, failure), [])
+    deepEqual(buildMetricRow('en', run, undefined, failure), [])
   }
 })
 
@@ -974,10 +975,10 @@ test('buildMetricRow reports request count, failure rate and throughput for a he
       }),
     },
   })
-  const failure = summarizeFailure({ id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRawWith({}) } })
-  const items = buildMetricRow({ id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRawWith({}) } }, summary, failure)
+  const failure = summarizeFailure('en', { id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRawWith({}) } })
+  const items = buildMetricRow('en', { id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRawWith({}) } }, summary, failure)
   const labels = items.map(item => item.label)
-  deepEqual(labels, ['Requests', 'p(95)', 'Fehlerquote', 'Durchsatz', 'Daten empfangen'])
+  deepEqual(labels, ['Requests', 'p(95)', 'Failure rate', 'Throughput', 'Data received'])
   equal(items[0].value, '600')
   equal(items[1].value, '184 ms')
   equal(items[2].severity, 'normal')
@@ -998,10 +999,10 @@ test('buildMetricRow highlights a failing request rate and shows network error c
       }),
     },
   })
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
   const labels = items.map(item => item.label)
-  deepEqual(labels, ['Requests', 'p(95)', 'Fehlerquote', 'Status 0 (Netzwerkfehler)'])
+  deepEqual(labels, ['Requests', 'p(95)', 'Failure rate', 'Status 0 (network error)'])
   equal(items[0].value, '60')
   equal(items[1].value, '–')
   equal(items[2].severity, 'error')
@@ -1022,10 +1023,10 @@ test('buildMetricRow reports both 5xx and 2xx counts for the server5xx category'
   })
   const summary = parseK6Summary({ id: 'run', status: 'FAILED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
   const labels = items.map(item => item.label)
-  deepEqual(labels, ['Requests', 'p(95)', 'Fehlerquote', '5xx', '2xx'])
+  deepEqual(labels, ['Requests', 'p(95)', 'Failure rate', '5xx', '2xx'])
   equal(items[3].value, '312×')
   equal(items[4].value, '238×')
 })
@@ -1039,10 +1040,10 @@ test('buildMetricRow reports 4xx counts for the threshold-failure-rate category'
   })
   const summary = parseK6Summary({ id: 'run', status: 'FAILED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
   const labels = items.map(item => item.label)
-  deepEqual(labels, ['Requests', 'p(95)', 'Fehlerquote', '4xx'])
+  deepEqual(labels, ['Requests', 'p(95)', 'Failure rate', '4xx'])
   equal(items[3].value, '480×')
   equal(items[3].severity, 'error')
 })
@@ -1055,10 +1056,10 @@ test('buildMetricRow highlights a latency that exceeds the threshold', () => {
   })
   const summary = parseK6Summary({ id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
   const run: TestRun = { id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } }
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
   const p95Item = items.find(item => item.label === 'p(95)')!
-  equal(p95Item.value, '1.840 ms')
+  equal(p95Item.value, '1,840 ms')
   equal(p95Item.severity, 'error')
 })
 
@@ -1068,19 +1069,19 @@ test('buildMetricRow shows a placeholder hint when the run failed before any ite
     summary: { raw: summaryRawWith({ http_reqs: { count: 0 } }) },
   })
   const run = runWithError('ReferenceError: bearerToken is not defined at file:///tmp/test.js:42', summaryRawWith({}))
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
   const labels = items.map(item => item.label)
-  deepEqual(labels, ['Requests', 'p(95)', 'Fehlerquote', 'Hinweis'])
-  equal(items[3].value, 'Skript brach vor dem ersten Request ab')
+  deepEqual(labels, ['Requests', 'p(95)', 'Failure rate', 'Note'])
+  equal(items[3].value, 'Script aborted before the first request')
 })
 
 test('buildMetricRow gracefully degrades when the summary cannot be parsed', () => {
   const run = runWithError(undefined, undefined)
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, undefined, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, undefined, failure)
   const labels = items.map(item => item.label)
-  deepEqual(labels, ['Requests', 'p(95)', 'Fehlerquote'])
+  deepEqual(labels, ['Requests', 'p(95)', 'Failure rate'])
   equal(items[0].value, '–')
   equal(items[1].value, '–')
   equal(items[2].value, '–')
@@ -1098,9 +1099,9 @@ test('buildMetricRow keeps the failure rate clean (no decimal) when it is an int
     },
   })
   const run: TestRun = { id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRawWith({}) } }
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
-  const fehlerquote = items.find(item => item.label === 'Fehlerquote')!
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
+  const fehlerquote = items.find(item => item.label === 'Failure rate')!
   equal(fehlerquote.value, '100 %')
 })
 
@@ -1116,22 +1117,22 @@ test('progressHint reports the elapsed and remaining duration while the run is R
       apiTitle: 'API', apiVersion: '1', baseUrl: 'https://x', loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 10 }, operations: [],
     },
   }
-  equal(progressHint(run), 'läuft seit 4 s · voraussichtlich noch 6 s')
+  equal(progressHint('en', run), 'running for 4 s · about 6 s left')
 })
 
 test('progressHint returns a generic hint while the run is RUNNING but the start time is unknown', () => {
   const run: TestRun = { id: 'run', status: 'RUNNING', createdAt: '2026-08-05T16:00:00Z' }
-  equal(progressHint(run), 'läuft')
+  equal(progressHint('en', run), 'running')
 })
 
 test('progressHint explains the QUEUED state', () => {
   const run: TestRun = { id: 'run', status: 'QUEUED', createdAt: '2026-08-05T16:00:00Z' }
-  equal(progressHint(run), 'wartet auf Executor (Pool-Größe: 2)')
+  equal(progressHint('en', run), 'waiting for executor (pool size: 2)')
 })
 
 test('progressHint returns undefined for terminal states', () => {
   for (const status of ['COMPLETED', 'FAILED']) {
-    equal(progressHint({ id: 'run', status, createdAt: '2026-08-05T16:00:00Z' }), undefined)
+    equal(progressHint('en', { id: 'run', status, createdAt: '2026-08-05T16:00:00Z' }), undefined)
   }
 })
 
@@ -1142,22 +1143,22 @@ test('summarizeFailure preserves a hostname from the error text when baseUrl is 
     createdAt: '2026-08-05T16:00:00Z',
     error: 'ERRO[0001] GoError: Getaddrinfo ENOTFOUND api.typo.example.com',
   }
-  const failure = summarizeFailure(run)
-  equal(failure.detail, 'api.typo.example.com nicht gefunden (ENOTFOUND)')
+  const failure = summarizeFailure('en', run)
+  equal(failure.detail, 'api.typo.example.com not found (ENOTFOUND)')
 })
 
-test('summarizeFailure falls back to "Zielhost" when neither the error text nor the baseUrl reveal a hostname', () => {
+test('summarizeFailure falls back to "target host" when neither the error text nor the baseUrl reveal a hostname', () => {
   const run: TestRun = {
     id: 'run',
     status: 'FAILED',
     createdAt: '2026-08-05T16:00:00Z',
     error: 'ERRO[0001] GoError: Getaddrinfo ENOTFOUND',
   }
-  const failure = summarizeFailure(run)
-  equal(failure.detail.startsWith('Zielhost'), true)
+  const failure = summarizeFailure('en', run)
+  equal(failure.detail.startsWith('target host'), true)
 })
 
-test('summarizeFailure falls back to "Zielhost" when baseUrl is malformed', () => {
+test('summarizeFailure falls back to "target host" when baseUrl is malformed', () => {
   const run: TestRun = {
     id: 'run',
     status: 'FAILED',
@@ -1171,14 +1172,26 @@ test('summarizeFailure falls back to "Zielhost" when baseUrl is malformed', () =
     },
     error: 'ERRO[0001] GoError: Getaddrinfo ENOTFOUND',
   }
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
+  equal(failure.detail.startsWith('target host'), true)
+})
+
+test('summarizeFailure falls back to the German host placeholder in the dns detail', () => {
+  const run: TestRun = {
+    id: 'run',
+    status: 'FAILED',
+    createdAt: '2026-08-05T16:00:00Z',
+    error: 'ERRO[0001] GoError: Getaddrinfo ENOTFOUND',
+  }
+  const failure = summarizeFailure('de', run)
   equal(failure.detail.startsWith('Zielhost'), true)
+  equal(failure.detail.endsWith('(ENOTFOUND)'), true)
 })
 
 test('summarizeFailure truncates an extremely long error excerpt in the script category', () => {
   const longLine = 'ReferenceError: ' + 'x'.repeat(500)
   const run = runWithError(`${longLine}\n    at file:///tmp/lasttest/test.js:1:1`)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   // The detail embeds the excerpt but trims it to ~160 chars before use.
   equal(failure.detail.includes('…'), true)
   equal(failure.detail.length < longLine.length, true)
@@ -1192,7 +1205,7 @@ test('summarizeFailure classifies a threshold-failure-rate run with a non-401 4x
     lt_status_200_searchProducts: { count: 240 },
   })
   const run = runWithError(undefined, summary)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'threshold-failure-rate')
   // Generic 4xx path is taken when neither 401 nor 403 dominates.
   equal(failure.reasons.some(r => r.includes('429')), true)
@@ -1208,8 +1221,8 @@ test('buildMetricRow adds a Status 504 item when the timeout category has 5xx re
   })
   const summary = parseK6Summary({ id: 'run', status: 'FAILED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
   const run = runWithError('context deadline exceeded', summaryRaw)
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
   const status504 = items.find(item => item.label === 'Status 504')
   equal(status504?.value, '19×')
   equal(status504?.severity, 'error')
@@ -1217,11 +1230,11 @@ test('buildMetricRow adds a Status 504 item when the timeout category has 5xx re
 
 test('buildMetricRow reports the k6-missing hint without showing p(95) or failure rate', () => {
   const run = runWithError('Cannot run program "k6": error=2, No such file or directory')
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, undefined, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, undefined, failure)
   const labels = items.map(item => item.label)
-  deepEqual(labels, ['Requests', 'p(95)', 'Fehlerquote', 'Hinweis'])
-  equal(items[3].value, 'Skript-Ausführung nicht möglich')
+  deepEqual(labels, ['Requests', 'p(95)', 'Failure rate', 'Note'])
+  equal(items[3].value, 'Script execution not possible')
 })
 
 test('buildMetricRow omits throughput and data size when the run is in the unreachable category', () => {
@@ -1237,18 +1250,18 @@ test('buildMetricRow omits throughput and data size when the run is in the unrea
       }),
     },
   })
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
-  equal(items.some(item => item.label === 'Durchsatz'), false)
-  equal(items.some(item => item.label === 'Daten empfangen'), false)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
+  equal(items.some(item => item.label === 'Throughput'), false)
+  equal(items.some(item => item.label === 'Data received'), false)
 })
 
 test('buildMetricRow omits throughput and data size when the run is in the k6-missing category', () => {
   const run = runWithError('Cannot run program "k6"')
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, undefined, failure)
-  equal(items.some(item => item.label === 'Durchsatz'), false)
-  equal(items.some(item => item.label === 'Daten empfangen'), false)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, undefined, failure)
+  equal(items.some(item => item.label === 'Throughput'), false)
+  equal(items.some(item => item.label === 'Data received'), false)
 })
 
 test('buildMetricRow omits throughput and data size when their values are zero', () => {
@@ -1260,10 +1273,10 @@ test('buildMetricRow omits throughput and data size when their values are zero',
   })
   const summary = parseK6Summary({ id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
   const run: TestRun = { id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } }
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
-  equal(items.some(item => item.label === 'Durchsatz'), false)
-  equal(items.some(item => item.label === 'Daten empfangen'), false)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
+  equal(items.some(item => item.label === 'Throughput'), false)
+  equal(items.some(item => item.label === 'Data received'), false)
 })
 
 test('summarizeFailure includes the network-error bullet when the unreachable run captured status-0 responses', () => {
@@ -1273,9 +1286,9 @@ test('summarizeFailure includes the network-error bullet when the unreachable ru
     lt_status_err_listProducts: { count: 60 },
   })
   const run = runWithError('ERR_CONNECTION_REFUSED', summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.reasons.some(r => r.includes('60')), true)
-  equal(failure.reasons.some(r => r.includes('Status 0')), true)
+  equal(failure.reasons.some(r => r.includes('status 0')), true)
 })
 
 test('summarizeFailure includes all 5xx endpoints in the server-error reasons, not only the dominant one', () => {
@@ -1292,7 +1305,7 @@ test('summarizeFailure includes all 5xx endpoints in the server-error reasons, n
     lt_status_200_endpointD: { count: 30 },
   })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   // Cap at 3 most frequent 5xx endpoints to keep the list readable.
   equal(failure.reasons.some(r => r.includes('endpointA') && r.includes('502')), true)
   equal(failure.reasons.some(r => r.includes('endpointB') && r.includes('502')), true)
@@ -1302,7 +1315,7 @@ test('summarizeFailure includes all 5xx endpoints in the server-error reasons, n
 
 test('summarizeFailure classifies the script category without a file reference', () => {
   const run = runWithError('ERRO[0001] ReferenceError: bearerToken is not defined\n  hint: script exception')
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'script')
   equal(failure.detail.includes('ReferenceError: bearerToken is not defined'), true)
   equal(failure.detail.includes('test.js'), false)
@@ -1315,16 +1328,16 @@ test('summarizeFailure uses 0 % as failure rate when the summary has no http_req
     lt_status_200_searchProducts: { count: 600 },
   })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'threshold-latency')
-  equal(failure.reasons.some(r => r.includes('0,0 %')), true)
+  equal(failure.reasons.some(r => r.includes('0.0 %')), true)
 })
 
 test('summarizeFailure reports unknown when the run has neither error text nor summary', () => {
   const run = runWithError(undefined)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'unknown')
-  equal(failure.reasons[0].includes('steht nicht in run.error'), true)
+  equal(failure.reasons[0].includes('is not in run.error'), true)
 })
 
 test('buildMetricRow handles a successful run with no throughput and no data received metrics', () => {
@@ -1335,10 +1348,10 @@ test('buildMetricRow handles a successful run with no throughput and no data rec
   })
   const summary = parseK6Summary({ id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
   const run: TestRun = { id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } }
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
-  equal(items.some(item => item.label === 'Durchsatz'), false)
-  equal(items.some(item => item.label === 'Daten empfangen'), false)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
+  equal(items.some(item => item.label === 'Throughput'), false)
+  equal(items.some(item => item.label === 'Data received'), false)
 })
 
 test('buildMetricRow does not show Status 0 for an unreachable run that has no per-operation err counters', () => {
@@ -1348,15 +1361,15 @@ test('buildMetricRow does not show Status 0 for an unreachable run that has no p
   })
   const summary = parseK6Summary({ id: 'run', status: 'FAILED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
   const run = runWithError('ERR_CONNECTION_REFUSED', summaryRaw)
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
   equal(items.some(item => item.label.startsWith('Status 0')), false)
 })
 
 test('buildMetricRow falls back to a muted p(95) for a k6-missing run without a summary', () => {
   const run = runWithError('Cannot run program "k6"')
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, undefined, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, undefined, failure)
   const p95 = items.find(item => item.label === 'p(95)')!
   equal(p95.value, '–')
   equal(p95.severity, 'muted')
@@ -1364,11 +1377,11 @@ test('buildMetricRow falls back to a muted p(95) for a k6-missing run without a 
 
 test('buildMetricRow does not show the throughput/data row for script failures without a summary', () => {
   const run = runWithError('ReferenceError: x is not defined at file:///tmp/test.js:1')
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, undefined, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, undefined, failure)
   const labels = items.map(item => item.label)
-  equal(labels.includes('Durchsatz'), false)
-  equal(labels.includes('Daten empfangen'), false)
+  equal(labels.includes('Throughput'), false)
+  equal(labels.includes('Data received'), false)
 })
 
 test('aggregateStatusCodes skips metrics whose name does not match the lt_status_ prefix', () => {
@@ -1383,7 +1396,7 @@ test('aggregateStatusCodes skips metrics whose name does not match the lt_status
       not_a_status_key: { count: 99 },
     },
   } as unknown as K6Summary
-  const failure = summarizeFailure({ id: 'run', status: 'FAILED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: JSON.stringify(summary) } })
+  const failure = summarizeFailure('en', { id: 'run', status: 'FAILED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: JSON.stringify(summary) } })
   // The single usable bucket (lt_status_429_a) drives the dominant code;
   // plain non-prefixed keys are ignored by the aggregator.
   equal(failure.category, 'threshold-failure-rate')
@@ -1405,7 +1418,7 @@ test('aggregateStatusCodes ignores lt_status metrics with null, non-finite, or z
       lt_status_503_c: { count: 1 },
     },
   } as unknown as K6Summary
-  const failure = summarizeFailure({ id: 'run', status: 'FAILED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: JSON.stringify(summary) } })
+  const failure = summarizeFailure('en', { id: 'run', status: 'FAILED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: JSON.stringify(summary) } })
   // The single usable bucket (lt_status_503_c) drives the dominant code.
   equal(failure.detail.includes('503'), true)
 })
@@ -1417,9 +1430,9 @@ test('summarizeFailure adds the network-error bullet to the dns category when th
     lt_status_err_listProducts: { count: 30 },
   })
   const run = runWithError('Getaddrinfo ENOTFOUND api.typo.example.com', summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'dns')
-  equal(failure.reasons.some(r => r.includes('Status 0')), true)
+  equal(failure.reasons.some(r => r.includes('status 0')), true)
 })
 
 test('summarizeFailure falls back to the network-error count when http_reqs is missing in an unreachable run', () => {
@@ -1431,7 +1444,7 @@ test('summarizeFailure falls back to the network-error count when http_reqs is m
     lt_status_err_listProducts: { count: 12 },
   })
   const run = runWithError('ERR_CONNECTION_REFUSED', summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'unreachable')
   equal(failure.reasons.some(r => r.includes('12')), true)
 })
@@ -1442,7 +1455,7 @@ test('summarizeFailure falls back to the network-error count when http_reqs is m
     lt_status_err_listProducts: { count: 8 },
   })
   const run = runWithError('Getaddrinfo ENOTFOUND api.typo.example.com', summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'dns')
   equal(failure.reasons.some(r => r.includes('8')), true)
 })
@@ -1450,21 +1463,36 @@ test('summarizeFailure falls back to the network-error count when http_reqs is m
 test('summarizeFailure uses the configured baseUrl in the tls detail when it is provided', () => {
   // The TLS detail template includes the baseUrl (no fallback) when it is set.
   const run = runWithError('net::ERR_CERT_AUTHORITY_INVALID')
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'tls')
   equal(failure.reasons.some(r => r.includes('http://127.0.0.1:1')), true)
 })
 
-test('summarizeFailure falls back to "Ziel" in the tls reason when no baseUrl is configured', () => {
+test('summarizeFailure falls back to "target" in the tls reason when no baseUrl is configured', () => {
   // The TLS reason line always names a target. When the run lost its
-  // baseUrl configuration, the placeholder "Ziel" stands in.
+  // baseUrl configuration, the placeholder "target" stands in.
   const run: TestRun = {
     id: 'run',
     status: 'FAILED',
     createdAt: '2026-08-05T16:00:00Z',
     error: 'net::ERR_CERT_AUTHORITY_INVALID',
   }
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
+  equal(failure.category, 'tls')
+  equal(failure.reasons.some(r => r.startsWith('target delivers')), true)
+})
+
+test('summarizeFailure uses the German placeholder in the tls reason when no baseUrl is configured', () => {
+  // The TLS reason line always names a target. When the run lost its
+  // baseUrl configuration and the UI is in German, the placeholder
+  // "Ziel" stands in.
+  const run: TestRun = {
+    id: 'run',
+    status: 'FAILED',
+    createdAt: '2026-08-05T16:00:00Z',
+    error: 'net::ERR_CERT_AUTHORITY_INVALID',
+  }
+  const failure = summarizeFailure('de', run)
   equal(failure.category, 'tls')
   equal(failure.reasons.some(r => r.startsWith('Ziel liefert')), true)
 })
@@ -1477,9 +1505,9 @@ test('summarizeFailure omits the latency footnote in the server5xx category when
     lt_status_200_endpointA: { count: 300 },
   })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'server5xx')
-  equal(failure.reasons.some(r => r.includes('Latenz unauff')), false)
+  equal(failure.reasons.some(r => r.includes('Latency unremark')), false)
 })
 
 test('summarizeFailure threshold-failure-rate shows the generic 4xx bullet when neither 401 nor 403 dominates', () => {
@@ -1490,11 +1518,11 @@ test('summarizeFailure threshold-failure-rate shows the generic 4xx bullet when 
     lt_status_200_endpointA: { count: 360 },
   })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   // 240/600 = 40 % 5xx; < 50 % server5xx threshold but > 5 % failure rate.
   // Since dominant is 5xx, the 4xx fallback bullet is NOT pushed.
   equal(failure.category, 'server5xx')
-  equal(failure.reasons.some(r => r.includes('Berechtigung')), false)
+  equal(failure.reasons.some(r => r.includes('permission')), false)
 })
 
 test('summarizeFailure classifies a threshold-failure-rate run with dominant 5xx as server5xx instead', () => {
@@ -1505,7 +1533,7 @@ test('summarizeFailure classifies a threshold-failure-rate run with dominant 5xx
     lt_status_200_endpointA: { count: 700 },
   })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   // 300/1000 = 30 % 5xx share, above 5 % threshold → server5xx.
   equal(failure.category, 'server5xx')
 })
@@ -1519,7 +1547,7 @@ test('summarizeFailure classifies a threshold-failure-rate run with a dominant 5
     lt_status_200_endpointA: { count: 940 },
   })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   // 49/1000 = 4.9 % 5xx share < 5 % → falls through to failure-rate threshold.
   equal(failure.category, 'threshold-failure-rate')
 })
@@ -1532,8 +1560,8 @@ test('buildMetricRow omits the 2xx count when the server5xx run returned no 2xx 
   })
   const summary = parseK6Summary({ id: 'run', status: 'FAILED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
   equal(items.some(item => item.label === '2xx'), false)
 })
 
@@ -1546,11 +1574,11 @@ test('buildMetricRow omits the Status 504 item when the timeout run has no 5xx r
   })
   const summary = parseK6Summary({ id: 'run', status: 'FAILED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
   const run = runWithError('context deadline exceeded', summaryRaw)
-  const failure = summarizeFailure(run)
-  const items = buildMetricRow(run, summary, failure)
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
   equal(items.some(item => item.label === 'Status 504'), false)
   // Throughput is shown when available.
-  equal(items.some(item => item.label === 'Durchsatz'), false)
+  equal(items.some(item => item.label === 'Throughput'), false)
 })
 
 test('summarizeFailure falls back to unknown when summary has no breached thresholds', () => {
@@ -1565,9 +1593,9 @@ test('summarizeFailure falls back to unknown when summary has no breached thresh
     lt_status_201_endpointB: { count: 3 },
   })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'unknown')
-  equal(failure.diagnosis, 'Unbekannter Fehler')
+  equal(failure.diagnosis, 'Unknown error')
 })
 
 test('summarizeFailure includes the latency footnote in the server5xx category when p95 is known', () => {
@@ -1579,9 +1607,9 @@ test('summarizeFailure includes the latency footnote in the server5xx category w
     lt_status_200_endpointA: { count: 300 },
   })
   const run = runWithError(undefined, summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'server5xx')
-  equal(failure.reasons.some(r => r.includes('Latenz unauff')), true)
+  equal(failure.reasons.some(r => r.includes('Latency unremark')), true)
 })
 
 test('summarizeFailure adds the rate-vs-threshold bullet for a timeout run that has zero 5xx responses', () => {
@@ -1592,10 +1620,10 @@ test('summarizeFailure adds the rate-vs-threshold bullet for a timeout run that 
     lt_status_200_endpointA: { count: 594 },
   })
   const run = runWithError('context deadline exceeded', summaryRaw)
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   equal(failure.category, 'timeout')
-  // The bullet must say 'gerissen' when 5xx count is 0.
-  equal(failure.reasons.some(r => r.includes('gerissen')), true)
+  // The bullet must say 'breached' when 5xx count is 0.
+  equal(failure.reasons.some(r => r.includes('breached')), true)
 
 })
 
@@ -1786,5 +1814,149 @@ test('extractPayloadUsage treats a missing or non-numeric count as zero', () => 
   equal(usage[2].count, 0)
   equal(usage[3].count, 5)
   equal(usage[4].count, 0)
+})
+
+// ---- i18n: language-dependent output of the diagnosis helpers -----------
+//
+// The diagnosis helpers (summarizeFailure, summariseFailure,
+// buildMetricRow, progressHint) take an explicit language argument
+// and resolve every user-visible string via the central i18n dict.
+// These tests pin down the two supported languages and the shape of
+// the English output that the UI shows when the user picks
+// "English" in the settings drawer.
+
+test('summarizeFailure returns the English diagnosis for a 4xx-dominated run', () => {
+  const summary = summaryRawWith({
+    http_reqs: { count: 600 },
+    http_req_failed: { value: 0.8 },
+    lt_status_404_updateProduct: { count: 480 },
+    lt_status_200_updateProduct: { count: 120 },
+  })
+  const run = runWithError(undefined, summary)
+  const failure = summarizeFailure('en', run)
+  equal(failure.category, 'threshold-failure-rate')
+  equal(failure.diagnosis, 'High client error rate (4xx)')
+  ok(failure.detail.includes('404'))
+  ok(failure.detail.includes('480'))
+  ok(failure.reasons.some(r => r.includes('updateProduct')))
+  ok(failure.reasons.some(r => r.includes('480')))
+  ok(failure.reasons.some(r => r.includes('breached')))
+  ok(failure.reasons.some(r => r.includes('80%') || r.includes('80 %')))
+})
+
+test('summarizeFailure returns the German diagnosis for the same 4xx-dominated run', () => {
+  const summary = summaryRawWith({
+    http_reqs: { count: 600 },
+    http_req_failed: { value: 0.8 },
+    lt_status_404_updateProduct: { count: 480 },
+    lt_status_200_updateProduct: { count: 120 },
+  })
+  const run = runWithError(undefined, summary)
+  const failure = summarizeFailure('de', run)
+  equal(failure.category, 'threshold-failure-rate')
+  equal(failure.diagnosis, 'Hohe Client-Fehlerrate (4xx)')
+  ok(failure.detail.includes('404'))
+  ok(failure.reasons.some(r => r.includes('updateProduct')))
+  ok(failure.reasons.some(r => r.includes('480')))
+  ok(failure.reasons.some(r => r.includes('gerissen')))
+  ok(failure.reasons.some(r => r.includes('80%') || r.includes('80 %')))
+})
+
+test('summariseFailure returns the English pattern output for a DNS error', () => {
+  const reason = summariseFailure('en', 'ERRO[0001] GoError: dial tcp: lookup api.example.com: no such host')
+  ok(reason)
+  equal(reason!.kind, 'dns')
+  ok(reason!.summary.includes('api.example.com'))
+  ok(reason!.summary.includes('DNS resolution'))
+  ok(reason!.detail.includes('no such host'))
+  ok(reason!.hint != null)
+})
+
+test('summariseFailure returns the German pattern output for the same DNS error', () => {
+  const reason = summariseFailure('de', 'ERRO[0001] GoError: dial tcp: lookup api.example.com: no such host')
+  ok(reason)
+  equal(reason!.kind, 'dns')
+  ok(reason!.summary.includes('api.example.com'))
+  ok(reason!.summary.includes('DNS-Auflösung'))
+  ok(reason!.detail.includes('no such host'))
+  ok(reason!.hint != null)
+})
+
+test('buildMetricRow renders English labels for a successful run', () => {
+  const summaryRaw = summaryRawWith({
+    http_reqs: { count: 100, rate: 12.5 },
+    http_req_failed: { value: 0 },
+    http_req_duration: { 'p(95)': 200 },
+    data_received: { count: 1024 },
+  })
+  const summary = parseK6Summary({ id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
+  const run: TestRun = { id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } }
+  const failure = summarizeFailure('en', run)
+  const items = buildMetricRow('en', run, summary, failure)
+  const labels = items.map(item => item.label)
+  deepEqual(labels, ['Requests', 'p(95)', 'Failure rate', 'Throughput', 'Data received'])
+})
+
+test('buildMetricRow renders German labels for the same run', () => {
+  const summaryRaw = summaryRawWith({
+    http_reqs: { count: 100, rate: 12.5 },
+    http_req_failed: { value: 0 },
+    http_req_duration: { 'p(95)': 200 },
+    data_received: { count: 1024 },
+  })
+  const summary = parseK6Summary({ id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } })
+  const run: TestRun = { id: 'run', status: 'COMPLETED', createdAt: '2026-08-05T16:00:00Z', summary: { raw: summaryRaw } }
+  const failure = summarizeFailure('de', run)
+  const items = buildMetricRow('de', run, summary, failure)
+  const labels = items.map(item => item.label)
+  deepEqual(labels, ['Requests', 'p(95)', 'Fehlerquote', 'Durchsatz', 'Daten empfangen'])
+})
+
+test('progressHint renders English for a RUNNING run with a known duration', () => {
+  const now = Date.now()
+  const startedAt = new Date(now - 4_000).toISOString()
+  const run: TestRun = {
+    id: 'run',
+    status: 'RUNNING',
+    createdAt: startedAt,
+    startedAt,
+    configuration: {
+      apiTitle: 'API', apiVersion: '1', baseUrl: 'https://x',
+      loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 10 }, operations: [],
+    },
+  }
+  equal(progressHint('en', run), 'running for 4 s · about 6 s left')
+})
+
+test('progressHint renders German for the same RUNNING run', () => {
+  const now = Date.now()
+  const startedAt = new Date(now - 4_000).toISOString()
+  const run: TestRun = {
+    id: 'run',
+    status: 'RUNNING',
+    createdAt: startedAt,
+    startedAt,
+    configuration: {
+      apiTitle: 'API', apiVersion: '1', baseUrl: 'https://x',
+      loadProfile: { type: 'constant-vus', virtualUsers: 1, durationSeconds: 10 }, operations: [],
+    },
+  }
+  equal(progressHint('de', run), 'läuft seit 4 s · voraussichtlich noch 6 s')
+})
+
+test('formatInteger uses the English locale when called with lang=en', () => {
+  equal(formatInteger(13378, 'en'), '13,378')
+})
+
+test('formatInteger uses the German locale when called with lang=de', () => {
+  equal(formatInteger(13378, 'de'), '13.378')
+})
+
+test('formatNumber uses the English locale when called with lang=en', () => {
+  equal(formatNumber(33.333, 1, 'en'), '33.3')
+})
+
+test('formatNumber uses the German locale when called with lang=de', () => {
+  equal(formatNumber(33.333, 1, 'de'), '33,3')
 })
 

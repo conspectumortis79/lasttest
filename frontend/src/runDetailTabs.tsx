@@ -294,7 +294,7 @@ export function FailureTab({ run }: { run: TestRun }) {
         : translate(language, 'detail.failure.empty.hint.pending')}
     />
   }
-  const reason = summarizeFailure(run)
+  const reason = summarizeFailure(language, run)
   if (!reason) {
     return <EmptyState
       title={translate(language, 'detail.failure.empty.title')}

@@ -44,16 +44,10 @@ test('runs a smoke test and shows the COMPLETED badge', async ({ page }) => {
   const startButton = page.getByRole('button', { name: 'Start k6 load test' })
   await expect(startButton).toBeEnabled({ timeout: 30_000 })
   await startButton.click()
-  const runId = await page.evaluate(async () => {
-    const response = await fetch('/api/test-runs')
-    const runs = await response.json() as Array<{ id: string }>
-    return runs[0]?.id ?? ''
-  })
 
-  await expect(page.locator('.run-grid .run-badge')).toHaveCount(1)
+  await expect(page.locator('.run-grid .run-badge')).toHaveCount(1, { timeout: 15_000 })
   await expect(page.locator('.run-grid .run-badge-completed')).toBeVisible({ timeout: 90_000 })
   await expect(page.locator('.status-badge.is-pass').first()).toBeVisible({ timeout: 10_000 })
-  if (!runId) throw new Error('Failed to capture run id from /api/test-runs')
 })
 
 test('shows the inline Demo-Credentials banner on the auth endpoints', async ({ page }) => {

@@ -34,12 +34,12 @@ test('Wiki opens the glossary popup with an input', async ({ page }) => {
 test('the Demo-API link is hidden when the demo is off', async ({ page, context, request }) => {
   await context.close()
   const isolatedContext = await page.context().browser()!.newContext({
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:8286',
     storageState: {
       cookies: [],
       origins: [
         {
-          origin: 'http://localhost:5173',
+          origin: 'http://localhost:8286',
           localStorage: [
             { name: 'lasttest.language', value: 'en' },
             { name: 'lasttest.demo.enabled', value: 'false' },

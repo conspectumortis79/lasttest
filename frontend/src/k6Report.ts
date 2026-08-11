@@ -1,3 +1,5 @@
+import { translate, type SupportedLanguage } from './i18n.ts'
+
 type ReportParameterValue = { name: string, location: string, value: string }
 
 type ReportPayload = {
@@ -459,20 +461,20 @@ export function checkSuccessRate(summary: K6Summary): number | undefined {
   return total > 0 ? (checks.passes ?? 0) / total * 100 : undefined
 }
 
-export function formatNumber(value: number | undefined, digits = 2): string {
+export function formatNumber(value: number | undefined, digits = 2, lang: SupportedLanguage = 'de'): string {
   if (value == null || !Number.isFinite(value)) return '–'
-  return new Intl.NumberFormat('de-DE', {
+  return new Intl.NumberFormat(lang === 'de' ? 'de-DE' : 'en-US', {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(value)
 }
 
-export function formatInteger(value: number | undefined): string {
+export function formatInteger(value: number | undefined, lang: SupportedLanguage = 'de'): string {
   if (value == null || !Number.isFinite(value)) return '–'
-  return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 }).format(value)
+  return new Intl.NumberFormat(lang === 'de' ? 'de-DE' : 'en-US', { maximumFractionDigits: 0 }).format(value)
 }
 
-export function formatBytes(value: number | undefined): string {
+export function formatBytes(value: number | undefined, lang: SupportedLanguage = 'de'): string {
   if (value == null || !Number.isFinite(value)) return '–'
   const units = ['B', 'KiB', 'MiB', 'GiB']
   let amount = value
@@ -482,17 +484,17 @@ export function formatBytes(value: number | undefined): string {
     if (amount < 1024 || candidate === units.at(-1)) break
     amount /= 1024
   }
-  return `${formatNumber(amount)} ${unit}`
+  return `${formatNumber(amount, 2, lang)} ${unit}`
 }
 
-export function formatTimestamp(value: string | undefined): string {
+export function formatTimestamp(value: string | undefined, lang: SupportedLanguage = 'de'): string {
   if (!value) return '–'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '–'
-  return new Intl.DateTimeFormat('de-DE', {
+  return new Intl.DateTimeFormat(lang === 'de' ? 'de-DE' : 'en-US', {
     dateStyle: 'medium',
     timeStyle: 'medium',
-    timeZone: 'Europe/Berlin',
+    timeZone: lang === 'de' ? 'Europe/Berlin' : 'UTC',
   }).format(date)
 }
 
@@ -666,72 +668,72 @@ export type FailureReason = {
   hint?: string
 }
 
-const FAILURE_HINT_BY_KIND: Record<Exclude<FailureKind, 'unknown'>, string> = {
-  dns: 'Prüfe, ob der Hostname in der Base-URL korrekt geschrieben ist und ob DNS aus dem k6-Container erreichbar ist.',
-  'connection-refused': 'Der Zielport ist nicht offen oder die Anwendung läuft nicht. Prüfe Firewall, Portweiterleitung und ob der Dienst gestartet ist.',
-  'connection-timeout': 'Die Anfrage hat das Zeitlimit überschritten. Prüfe Routing, Firewall und ob das Ziel auf eingehende Verbindungen antwortet.',
-  tls: 'Prüfe das Zertifikat des Ziels (Gültigkeit, Aussteller, Hostname). Eventuell fehlt eine CA oder das Zertifikat ist abgelaufen.',
-  http: 'Der Server hat mit einem HTTP-Fehler geantwortet. Prüfe den Statuscode in der k6-Konsolenausgabe.',
-  script: 'Das generierte k6-Skript enthält einen Fehler. Prüfe die k6-Konsolenausgabe auf die genaue Stelle.',
-  process: 'k6 konnte nicht gestartet werden. Prüfe, ob die k6-Binary installiert und im PATH verfügbar ist.',
-}
 
 type FailurePattern = {
   kind: Exclude<FailureKind, 'unknown'>
   regex: RegExp
-  buildSummary: (match: RegExpMatchArray) => string
-  buildDetail: (match: RegExpMatchArray) => string
+  buildSummary: (lang: SupportedLanguage, match: RegExpMatchArray) => string
+  buildDetail: (lang: SupportedLanguage, match: RegExpMatchArray) => string
 }
 
-// Order matters: the first matching pattern wins. The script and
-// HTTP patterns are therefore placed last because they are very
-// broad.
 const FAILURE_PATTERNS: readonly FailurePattern[] = [
   {
     kind: 'dns',
     // k6 v0.x / v1.x: "dial tcp[:PORT]: lookup HOST: <reason>"
     // k6 v2.x: "lookup HOST on <resolver>:<port>: <reason>" (Go's pure DNS error, no dial prefix)
     regex: /(?:dial tcp(?::\d+)?:\s*)?lookup ([^\s:]+)(?:\s+on\s+[0-9.:a-fA-F[\]]+)?:\s*(no such host|Temporary failure in name resolution|Server misbehaving)/i,
-    buildSummary: match => `DNS-Auflösung fehlgeschlagen für „${match[1]}".`,
-    buildDetail: match => `k6 konnte den Hostnamen ${match[1]} nicht auflösen (${match[2]}).`,
+    buildSummary: (l, match) => translate(l, 'failure.pattern.dns.summary', { host: match[1] }),
+    buildDetail: (l, match) => translate(l, 'failure.pattern.dns.detail', { host: match[1], reason: match[2] }),
   },
   {
     kind: 'connection-refused',
     regex: /dial tcp ([0-9.]+|\[[0-9a-fA-F:]+\]|[^:]+):(\d+):\s*connect: connection refused/i,
-    buildSummary: match => `Verbindung abgelehnt (${match[1]}:${match[2]}).`,
-    buildDetail: match => `k6 hat „connection refused" von ${match[1]}:${match[2]} erhalten — der Zielport antwortet nicht.`,
+    buildSummary: (l, match) => translate(l, 'failure.pattern.connectionRefused.summary', { host: match[1], port: match[2] }),
+    buildDetail: (l, match) => translate(l, 'failure.pattern.connectionRefused.detail', { host: match[1], port: match[2] }),
   },
   {
     kind: 'connection-timeout',
     regex: /dial tcp ([0-9.]+|\[[0-9a-fA-F:]+\]|[^:]+):(\d+):\s*(i\/o timeout|context deadline exceeded)/i,
-    buildSummary: match => `Verbindungs-Timeout zu ${match[1]}:${match[2]}.`,
-    buildDetail: match => `k6 hat innerhalb des Zeitlimits keine Antwort von ${match[1]}:${match[2]} erhalten.`,
+    buildSummary: (l, match) => translate(l, 'failure.pattern.connectionTimeout.summary', { host: match[1], port: match[2] }),
+    buildDetail: (l, match) => translate(l, 'failure.pattern.connectionTimeout.detail', { host: match[1], port: match[2] }),
   },
   {
     kind: 'tls',
     regex: /x509:\s*([^\n]+)/i,
-    buildSummary: match => `TLS-Handshake fehlgeschlagen: ${match[1].trim()}.`,
-    buildDetail: match => `Das TLS-Zertifikat des Ziels wurde abgelehnt (${match[1].trim()}).`,
+    buildSummary: (l, match) => translate(l, 'failure.pattern.tls.summary', { detail: match[1].trim() }),
+    buildDetail: (l, match) => translate(l, 'failure.pattern.tls.detail', { detail: match[1].trim() }),
   },
   {
     kind: 'http',
     regex: /http response error.*?status code (\d{3})/i,
-    buildSummary: match => `HTTP-Fehler ${match[1]} vom Server.`,
-    buildDetail: match => `k6 hat einen HTTP-Status ${match[1]} als Fehler gewertet (Threshold oder harter Fehler).`,
+    buildSummary: (l, match) => translate(l, 'failure.pattern.http.summary', { status: match[1] }),
+    buildDetail: (l, match) => translate(l, 'failure.pattern.http.detail', { status: match[1] }),
   },
   {
     kind: 'script',
     regex: /(?:GoError: )?([^\n:]+\.js):(\d+):\d+\s+([^\n]+)/,
-    buildSummary: match => `Skript-Fehler in ${match[1]} (Zeile ${match[2]}): ${match[3].trim()}`,
-    buildDetail: match => `${match[1]}:${match[2]} — ${match[3].trim()}`,
+    buildSummary: (l, match) => translate(l, 'failure.pattern.script.summary', { file: match[1], line: match[2], message: match[3].trim() }),
+    buildDetail: (l, match) => translate(l, 'failure.pattern.script.detail', { file: match[1], line: match[2], message: match[3].trim() }),
   },
   {
     kind: 'process',
     regex: /(?:Cannot find k6|Cannot run program "?'?k6"?'?|k6: command not found|no such file or directory)/i,
-    buildSummary: () => 'k6 konnte nicht gestartet werden.',
-    buildDetail: () => 'Die k6-Binary wurde nicht gefunden oder ist nicht ausführbar.',
+    buildSummary: l => translate(l, 'failure.pattern.process.summary'),
+    buildDetail: l => translate(l, 'failure.pattern.process.detail'),
   },
-] as const
+  ] as const
+
+function failureHintForKind(lang: SupportedLanguage, kind: Exclude<FailureKind, 'unknown'>): string {
+  switch (kind) {
+    case 'dns': return translate(lang, 'failure.hint.dns')
+    case 'connection-refused': return translate(lang, 'failure.hint.connectionRefused')
+    case 'connection-timeout': return translate(lang, 'failure.hint.connectionTimeout')
+    case 'tls': return translate(lang, 'failure.hint.tls')
+    case 'http': return translate(lang, 'failure.hint.http')
+    case 'script': return translate(lang, 'failure.hint.script')
+    case 'process': return translate(lang, 'failure.hint.process')
+  }
+}
 
 // Takes the first non-empty line, strips an "ERRO[<seconds>]" prefix
 // (which k6 prepends to every error message) and returns the cleaned
@@ -752,7 +754,7 @@ export function extractErrorLine(text: string): string {
   return text.trim()
 }
 
-export function summariseFailure(error: string | undefined | null): FailureReason | undefined {
+export function summariseFailure(lang: SupportedLanguage, error: string | undefined | null): FailureReason | undefined {
   if (!error) return undefined
   const trimmed = error.trim()
   if (trimmed.length === 0) return undefined
@@ -761,22 +763,23 @@ export function summariseFailure(error: string | undefined | null): FailureReaso
   // and only later contains the actual test request errors. The
   // last error is the one that matters.
   const lines = trimmed.split(/\r?\n/).reverse()
-  for (const pattern of FAILURE_PATTERNS) {
+  const patterns = FAILURE_PATTERNS
+  for (const pattern of patterns) {
     for (const line of lines) {
       const match = line.match(pattern.regex)
       if (match) {
         return {
           kind: pattern.kind,
-          summary: pattern.buildSummary(match),
-          detail: pattern.buildDetail(match),
-          hint: FAILURE_HINT_BY_KIND[pattern.kind],
+          summary: pattern.buildSummary(lang, match),
+          detail: pattern.buildDetail(lang, match),
+          hint: failureHintForKind(lang, pattern.kind),
         }
       }
     }
   }
   return {
     kind: 'unknown',
-    summary: 'Test fehlgeschlagen.',
+    summary: translate(lang, 'failure.pattern.unknown.summary'),
     detail: extractErrorLine(trimmed),
   }
 }
@@ -1077,7 +1080,7 @@ function failureCategory(run: TestRun, summary: K6Summary | undefined): FailureC
 }
 
 // Human-readable diagnosis + detail + bullet list for a given run.
-export function summarizeFailure(run: TestRun): FailureSummary {
+export function summarizeFailure(lang: SupportedLanguage, run: TestRun): FailureSummary {
   const summary = parseK6Summary(run)
   const category = failureCategory(run, summary)
   const baseUrl = run.configuration?.baseUrl
@@ -1089,41 +1092,44 @@ export function summarizeFailure(run: TestRun): FailureSummary {
   const failureRatePercent = failureRate * 100
   const p95 = summary ? metric(summary, 'http_req_duration')['p(95)'] : undefined
   const excerpt = shortErrorExcerpt(errorText)
+  const targetHostFallback = lang === 'de' ? 'Zielhost' : 'target host'
 
   switch (category) {
     case 'k6-missing':
       return {
         category,
-        diagnosis: 'k6 konnte nicht gestartet werden',
-        detail: 'Cannot run program „k6“ — Binary fehlt im Container',
+        diagnosis: translate(lang, 'failure.category.k6Missing.diagnosis'),
+        detail: translate(lang, 'failure.category.k6Missing.detail'),
         reasons: [
-          'Java-ProcessBuilder hat das k6-Binary nicht gefunden.',
-          'Prüfe, ob das Docker-Image korrekt gebaut wurde (k6 muss aus grafana/k6:latest stagen).',
-          'Im Selbst-Setup: ist k6 auf dem PATH?',
+          translate(lang, 'failure.category.k6Missing.reason1'),
+          translate(lang, 'failure.category.k6Missing.reason2'),
+          translate(lang, 'failure.category.k6Missing.reason3'),
         ],
       }
     case 'tls': {
-      const target = baseUrl ?? 'Ziel'
+      const target = baseUrl ?? (lang === 'de' ? 'Ziel' : 'target')
       return {
         category,
-        diagnosis: 'TLS-Handshake fehlgeschlagen',
-        detail: 'Zertifikat wird nicht vertraut (self-signed oder interne CA)',
+        diagnosis: translate(lang, 'failure.category.tls.diagnosis'),
+        detail: translate(lang, 'failure.category.tls.detail'),
         reasons: [
-          `${target} liefert ein Zertifikat, dem die JVM (und damit Go's crypto/tls) nicht vertraut.`,
-          'Hint: TrustStore über LASTTEST_TRUSTSTORE_PATH setzen (siehe USER_GUIDE §13.1). Für k6 zusätzlich SSL_CERT_FILE.',
-          'Bereits der erste Request schlug fehl — kein einziger Statuscode erreicht.',
+          translate(lang, 'failure.category.tls.reason1', { target }),
+          translate(lang, 'failure.category.tls.reason2'),
+          translate(lang, 'failure.category.tls.reason3'),
         ],
       }
     }
     case 'unreachable': {
       const reasonsList: string[] = []
-      if (baseUrl) reasonsList.push(`${baseUrl} lehnt TCP-Verbindungen ab (Connection refused).`)
-      if (networkErrors > 0) reasonsList.push(`Alle ${totalRequests || networkErrors} Requests schlugen fehl — Status 0 (kein HTTP-Response erhalten).`)
-      reasonsList.push(`Threshold http_req_failed (5 %) gerissen — tatsächlich ${failureRatePercent.toFixed(0)} %.`)
+      if (baseUrl) reasonsList.push(translate(lang, 'failure.category.unreachable.reason1', { baseUrl }))
+      if (networkErrors > 0) reasonsList.push(translate(lang, 'failure.category.unreachable.reason2', { count: totalRequests || networkErrors }))
+      reasonsList.push(translate(lang, 'failure.category.unreachable.reason3', { percent: failureRatePercent.toFixed(0) }))
       return {
         category,
-        diagnosis: 'Ziel nicht erreichbar',
-        detail: baseUrl ? `Connection refused auf ${baseUrl}` : 'Connection refused',
+        diagnosis: translate(lang, 'failure.category.unreachable.diagnosis'),
+        detail: baseUrl
+          ? translate(lang, 'failure.category.unreachable.detailWithBaseUrl', { baseUrl })
+          : translate(lang, 'failure.category.unreachable.detail'),
         reasons: reasonsList,
       }
     }
@@ -1133,30 +1139,30 @@ export function summarizeFailure(run: TestRun): FailureSummary {
         const match = /ENOTFOUND\s+(\S+)/.exec(errorText)
         return match?.[1]
       })()
-      const host = hostFromError ?? hostnameFromBaseUrl ?? 'Zielhost'
+      const host = hostFromError ?? hostnameFromBaseUrl ?? targetHostFallback
       const reasonsList: string[] = [
-        `Host ${host} konnte nicht via DNS aufgelöst werden.`,
-        'Container-Egress: läuft docker compose in einem Netzwerk ohne DNS-Forwarder?',
+        translate(lang, 'failure.category.dns.reason1', { host }),
+        translate(lang, 'failure.category.dns.reason2'),
       ]
-      if (networkErrors > 0) reasonsList.push(`Alle ${totalRequests || networkErrors} Requests schlugen fehl — Status 0 (kein HTTP-Response).`)
+      if (networkErrors > 0) reasonsList.push(translate(lang, 'failure.category.dns.reason3', { count: totalRequests || networkErrors }))
       return {
         category,
-        diagnosis: 'DNS-Auflösung fehlgeschlagen',
-        detail: `${host} nicht gefunden (ENOTFOUND)`,
+        diagnosis: translate(lang, 'failure.category.dns.diagnosis'),
+        detail: translate(lang, 'failure.category.dns.detail', { host }),
         reasons: reasonsList,
       }
     }
     case 'timeout': {
-      const p95Text = `${formatNumber(p95, 0)} ms`
+      const p95Text = `${formatNumber(p95, 0, lang)} ms`
       const reasonsList: string[] = []
-      reasonsList.push(`Threshold http_req_duration p(95) < ${LATENCY_THRESHOLD_MS} ms gerissen — gemessen ${p95Text}.`)
+      reasonsList.push(translate(lang, 'failure.category.timeout.reason1', { latencyMs: LATENCY_THRESHOLD_MS, p95: p95Text }))
       const fiveXx = countByStatusFamily(buckets, '5')
-      if (fiveXx > 0) reasonsList.push(`${fiveXx} von ${totalRequests} Requests mit HTTP 5xx (Gateway Timeout).`)
-      reasonsList.push(`Threshold http_req_failed (5 %) ${fiveXx > 0 ? 'knapp gehalten — ' + formatNumber(failureRatePercent, 1) + ' %' : 'gerissen — ' + formatNumber(failureRatePercent, 1) + ' %'}.`)
+      if (fiveXx > 0) reasonsList.push(translate(lang, 'failure.category.timeout.reason2', { fiveXx, total: totalRequests }))
+      reasonsList.push(translate(lang, fiveXx > 0 ? 'failure.category.timeout.reason3.with5xx' : 'failure.category.timeout.reason3.no5xx', { percent: formatNumber(failureRatePercent, 1, lang) }))
       return {
         category,
-        diagnosis: 'Antwortzeit zu hoch',
-        detail: `p(95) ${p95Text} über Threshold (${formatNumber(LATENCY_THRESHOLD_MS / 1000, 1)} s) — 30 s Timeout gerissen`,
+        diagnosis: translate(lang, 'failure.category.timeout.diagnosis'),
+        detail: translate(lang, 'failure.category.timeout.detail', { p95: p95Text, threshold: formatNumber(LATENCY_THRESHOLD_MS / 1000, 1, lang) }),
         reasons: reasonsList,
       }
     }
@@ -1167,15 +1173,15 @@ export function summarizeFailure(run: TestRun): FailureSummary {
         .sort((a, b) => b.count - a.count)
         .slice(0, 3)
       const reasonsList: string[] = []
-      reasonsList.push(`Threshold http_req_failed (5 %) gerissen — tatsächlich ${failureRatePercent.toFixed(0)} %.`)
+      reasonsList.push(translate(lang, 'failure.category.server5xx.reason1', { percent: failureRatePercent.toFixed(0) }))
       for (const bucket of fiveXxBuckets) {
-        reasonsList.push(`Endpunkt ${bucket.operationId} antwortete ${bucket.count}× mit HTTP ${bucket.code}.`)
+        reasonsList.push(translate(lang, 'failure.category.server5xx.reason2', { operationId: bucket.operationId, count: bucket.count, code: bucket.code }))
       }
-      if (p95 != null && Number.isFinite(p95)) reasonsList.push(`Latenz unauff\u00e4llig (p(95) ${Math.round(p95)} ms) — der Server ist erreichbar und antwortet, nur nicht korrekt.`)
+      if (p95 != null && Number.isFinite(p95)) reasonsList.push(translate(lang, 'failure.category.server5xx.reason3', { p95: Math.round(p95) }))
       return {
         category,
-        diagnosis: 'Viele Server-Fehler (5xx)',
-        detail: `Häufigster Fehlercode: ${dominant.code} — ${dominant.count}\u00d7 von ${totalRequests} Requests`,
+        diagnosis: translate(lang, 'failure.category.server5xx.diagnosis'),
+        detail: translate(lang, 'failure.category.server5xx.detail', { code: dominant.code, count: dominant.count, total: totalRequests }),
         reasons: reasonsList,
       }
     }
@@ -1183,31 +1189,31 @@ export function summarizeFailure(run: TestRun): FailureSummary {
       const dominant = dominantErrorCode(buckets)!
       const fourXx = countByStatusFamily(buckets, '4')
       const reasonsList: string[] = []
-      reasonsList.push(`Threshold http_req_failed (5 %) gerissen — tatsächlich ${failureRatePercent.toFixed(0)} %.`)
+      reasonsList.push(translate(lang, 'failure.category.thresholdFailureRate.reason1', { percent: failureRatePercent.toFixed(0) }))
       if (dominant.code === '401') {
-        reasonsList.push(`Endpunkt ${dominant.operationId} antwortete ${dominant.count}\u00d7 mit HTTP 401 — Bearer-Token pr\u00fcfen.`)
-        reasonsList.push('Hinweis: 401 trotz konfiguriertem Token deutet auf falsches Pr\u00e4fix oder abgelaufenes Token hin.')
+        reasonsList.push(translate(lang, 'failure.category.thresholdFailureRate.reason2.401', { operationId: dominant.operationId, count: dominant.count }))
+        reasonsList.push(translate(lang, 'failure.category.thresholdFailureRate.reason3.401'))
       } else if (dominant.code === '403') {
-        reasonsList.push(`Endpunkt ${dominant.operationId} antwortete ${dominant.count}\u00d7 mit HTTP 403 — fehlende Berechtigung pr\u00fcfen.`)
+        reasonsList.push(translate(lang, 'failure.category.thresholdFailureRate.reason2.403', { operationId: dominant.operationId, count: dominant.count }))
       } else if (fourXx > 0) {
-        reasonsList.push(`Endpunkt ${dominant.operationId} antwortete ${dominant.count}\u00d7 mit HTTP ${dominant.code}.`)
+        reasonsList.push(translate(lang, 'failure.category.thresholdFailureRate.reason2.generic', { operationId: dominant.operationId, count: dominant.count, code: dominant.code }))
       }
       return {
         category,
-        diagnosis: 'Hohe Client-Fehlerrate (4xx)',
-        detail: `Häufigster Fehlercode: ${dominant.code} — ${dominant.count}\u00d7 von ${totalRequests} Requests`,
+        diagnosis: translate(lang, 'failure.category.thresholdFailureRate.diagnosis'),
+        detail: translate(lang, 'failure.category.thresholdFailureRate.detail', { code: dominant.code, count: dominant.count, total: totalRequests }),
         reasons: reasonsList,
       }
     }
     case 'threshold-latency': {
-      const p95Text = `${formatNumber(p95, 0)} ms`
+      const p95Text = `${formatNumber(p95, 0, lang)} ms`
       return {
         category,
-        diagnosis: 'Antwortzeit zu hoch',
-        detail: `p(95) ${p95Text} über Threshold (${formatNumber(LATENCY_THRESHOLD_MS / 1000, 1)} s)`,
+        diagnosis: translate(lang, 'failure.category.thresholdLatency.diagnosis'),
+        detail: translate(lang, 'failure.category.thresholdLatency.detail', { p95: p95Text, threshold: formatNumber(LATENCY_THRESHOLD_MS / 1000, 1, lang) }),
         reasons: [
-          `Threshold http_req_duration p(95) < ${LATENCY_THRESHOLD_MS} ms gerissen — gemessen ${p95Text}.`,
-          `Fehlerrate unauff\u00e4llig (${formatNumber(failureRatePercent, 1)} %).`,
+          translate(lang, 'failure.category.thresholdLatency.reason1', { latencyMs: LATENCY_THRESHOLD_MS, p95: p95Text }),
+          translate(lang, 'failure.category.thresholdLatency.reason2', { percent: formatNumber(failureRatePercent, 1, lang) }),
         ],
       }
     }
@@ -1216,14 +1222,16 @@ export function summarizeFailure(run: TestRun): FailureSummary {
       const fileRef = fileMatch ? `${fileMatch[1]}:${fileMatch[2]}` : undefined
       // `excerpt` is always defined for script errors (regex matches require
       // a non-empty errorText), but TypeScript can't prove this.
-      const detail = fileRef ? `${excerpt!} in ${fileRef}` : excerpt!
+      const detail = fileRef
+        ? translate(lang, 'failure.category.script.detailWithFile', { excerpt: excerpt!, fileRef })
+        : translate(lang, 'failure.category.script.detail', { excerpt: excerpt! })
       return {
         category,
-        diagnosis: 'k6-Skriptfehler',
+        diagnosis: translate(lang, 'failure.category.script.diagnosis'),
         detail,
         reasons: [
-          'Skript konnte nicht initialisiert werden — keine einzige Iteration wurde ausgeführt.',
-          'Wahrscheinliche Ursache: OpenAPI-Definition enthält ein Feld, das lasttest nicht ins k6-Skript gemappt hat. Spezifikation gegen Demo vergleichen.',
+          translate(lang, 'failure.category.script.reason1'),
+          translate(lang, 'failure.category.script.reason2'),
         ],
       }
     }
@@ -1237,11 +1245,13 @@ export function summarizeFailure(run: TestRun): FailureSummary {
       // for no behavioural gain.
       return {
         category: 'unknown',
-        diagnosis: excerpt ? 'k6-Lauf fehlgeschlagen' : 'Unbekannter Fehler',
-        detail: excerpt ?? 'Siehe k6-Konsolenausgabe für Details.',
+        diagnosis: excerpt
+          ? translate(lang, 'failure.category.unknown.diagnosis.withExcerpt')
+          : translate(lang, 'failure.category.unknown.diagnosis'),
+        detail: excerpt ?? translate(lang, 'failure.category.unknown.detail'),
         reasons: excerpt
-          ? [`Erste Fehlerzeile: ${excerpt}`]
-          : ['Der Lauf ist fehlgeschlagen, aber die Diagnose steht nicht in run.error.'],
+          ? [translate(lang, 'failure.category.unknown.reason1', { excerpt })]
+          : [translate(lang, 'failure.category.unknown.reason2')],
       }
   }
 }
@@ -1253,6 +1263,7 @@ export function summarizeFailure(run: TestRun): FailureSummary {
 // p95, a server-error 5xx cares about 2xx vs 5xx counts but not
 // about throughput).
 export function buildMetricRow(
+  lang: SupportedLanguage,
   run: TestRun,
   summary: K6Summary | undefined,
   failure: FailureSummary,
@@ -1275,51 +1286,51 @@ export function buildMetricRow(
   const networkErrors = networkErrorCount(buckets)
 
   const items: MetricItem[] = []
-  items.push({ label: 'Requests', value: totalRequests != null ? formatInteger(totalRequests) : '–', severity: 'normal' })
+  items.push({ label: translate(lang, 'metric.label.requests'), value: totalRequests != null ? formatInteger(totalRequests, lang) : '–', severity: 'normal' })
 
   if (failure.category === 'unreachable' || failure.category === 'dns') {
-    items.push({ label: 'p(95)', value: '–', severity: 'muted' })
+    items.push({ label: translate(lang, 'metric.label.p95'), value: '–', severity: 'muted' })
   } else if (p95 != null && Number.isFinite(p95)) {
-    items.push({ label: 'p(95)', value: `${formatNumber(p95, 0)} ms`, severity: p95 > LATENCY_THRESHOLD_MS ? 'error' : 'normal' })
+    items.push({ label: translate(lang, 'metric.label.p95'), value: `${formatNumber(p95, 0, lang)} ms`, severity: p95 > LATENCY_THRESHOLD_MS ? 'error' : 'normal' })
   } else {
-    items.push({ label: 'p(95)', value: '–', severity: 'muted' })
+    items.push({ label: translate(lang, 'metric.label.p95'), value: '–', severity: 'muted' })
   }
 
   if (failure.category === 'k6-missing' || failure.category === 'script') {
-    items.push({ label: 'Fehlerquote', value: '–', severity: 'muted' })
+    items.push({ label: translate(lang, 'metric.label.failureRate'), value: '–', severity: 'muted' })
     if (failure.category === 'script') {
-      items.push({ label: 'Hinweis', value: 'Skript brach vor dem ersten Request ab', severity: 'warn' })
+      items.push({ label: translate(lang, 'metric.label.hint'), value: translate(lang, 'metric.hint.scriptFailed'), severity: 'warn' })
     } else {
-      items.push({ label: 'Hinweis', value: 'Skript-Ausführung nicht möglich', severity: 'warn' })
+      items.push({ label: translate(lang, 'metric.label.hint'), value: translate(lang, 'metric.hint.scriptNotExecutable'), severity: 'warn' })
     }
     return items
   }
 
   if (failureRatePercent != null && Number.isFinite(failureRatePercent)) {
-    items.push({ label: 'Fehlerquote', value: `${formatNumber(failureRatePercent, failureRatePercent % 1 === 0 ? 0 : 1)} %`, severity: failureRatePercent > 5 ? 'error' : 'normal' })
+    items.push({ label: translate(lang, 'metric.label.failureRate'), value: `${formatNumber(failureRatePercent, failureRatePercent % 1 === 0 ? 0 : 1, lang)} %`, severity: failureRatePercent > 5 ? 'error' : 'normal' })
   } else {
-    items.push({ label: 'Fehlerquote', value: '–', severity: 'muted' })
+    items.push({ label: translate(lang, 'metric.label.failureRate'), value: '–', severity: 'muted' })
   }
 
   if (failure.category === 'unreachable' || failure.category === 'dns') {
     if (networkErrors > 0) {
-      items.push({ label: 'Status 0 (Netzwerkfehler)', value: `${formatInteger(networkErrors)}\u00d7`, severity: 'error' })
+      items.push({ label: translate(lang, 'metric.label.status0'), value: `${formatInteger(networkErrors, lang)}\u00d7`, severity: 'error' })
     }
   } else if (failure.category === 'server5xx') {
-    if (fiveXx > 0) items.push({ label: '5xx', value: `${formatInteger(fiveXx)}\u00d7`, severity: 'error' })
-    if (twoXx > 0) items.push({ label: '2xx', value: `${formatInteger(twoXx)}\u00d7`, severity: 'normal' })
+    if (fiveXx > 0) items.push({ label: translate(lang, 'metric.label.5xx'), value: `${formatInteger(fiveXx, lang)}\u00d7`, severity: 'error' })
+    if (twoXx > 0) items.push({ label: translate(lang, 'metric.label.2xx'), value: `${formatInteger(twoXx, lang)}\u00d7`, severity: 'normal' })
   } else if (failure.category === 'threshold-failure-rate') {
-    if (fourXx > 0) items.push({ label: '4xx', value: `${formatInteger(fourXx)}\u00d7`, severity: 'error' })
+    if (fourXx > 0) items.push({ label: translate(lang, 'metric.label.4xx'), value: `${formatInteger(fourXx, lang)}\u00d7`, severity: 'error' })
   } else if (failure.category === 'timeout') {
-    if (fiveXx > 0) items.push({ label: 'Status 504', value: `${formatInteger(fiveXx)}\u00d7`, severity: 'error' })
+    if (fiveXx > 0) items.push({ label: translate(lang, 'metric.label.status504'), value: `${formatInteger(fiveXx, lang)}\u00d7`, severity: 'error' })
   }
 
   if (failure.category !== 'unreachable' && failure.category !== 'dns') {
     if (throughput != null && Number.isFinite(throughput) && throughput > 0) {
-      items.push({ label: 'Durchsatz', value: `${formatNumber(throughput)} /s`, severity: 'normal' })
+      items.push({ label: translate(lang, 'metric.label.throughput'), value: `${formatNumber(throughput, undefined, lang)} /s`, severity: 'normal' })
     }
     if (dataReceived != null && Number.isFinite(dataReceived) && dataReceived > 0) {
-      items.push({ label: 'Daten empfangen', value: formatBytes(dataReceived), severity: 'normal' })
+      items.push({ label: translate(lang, 'metric.label.dataReceived'), value: formatBytes(dataReceived, lang), severity: 'normal' })
     }
   }
   return items
@@ -1327,19 +1338,19 @@ export function buildMetricRow(
 
 // Convenience: human-readable status hint used while a run is still
 // running or waiting. Mirrors the wording of the original report card.
-export function progressHint(run: TestRun): string | undefined {
+export function progressHint(lang: SupportedLanguage, run: TestRun): string | undefined {
   if (run.status === 'RUNNING') {
     const started = run.startedAt ? new Date(run.startedAt).getTime() : undefined
     const duration = run.configuration?.loadProfile?.durationSeconds
     if (started != null && Number.isFinite(started) && duration != null) {
       const elapsed = Math.max(0, Math.floor((Date.now() - started) / 1000))
       const remaining = Math.max(0, duration - elapsed)
-      return `läuft seit ${elapsed} s · voraussichtlich noch ${remaining} s`
+      return translate(lang, 'progressHint.running', { elapsed, remaining })
     }
-    return 'läuft'
+    return translate(lang, 'progressHint.runningGeneric')
   }
   if (run.status === 'QUEUED') {
-    return 'wartet auf Executor (Pool-Größe: 2)'
+    return translate(lang, 'progressHint.queued')
   }
   return undefined
 }

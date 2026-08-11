@@ -3,8 +3,13 @@ import { expandOperation } from './helpers.ts'
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByLabel('Swagger / OpenAPI Specification'))
-    .toContainText('Lasttest Demo API', { timeout: 10_000 })
+  // The App auto-loads the bundled demo spec into the textarea when
+  // `lasttest.demo.enabled` is set in localStorage (see
+  // `e2e/global-setup.ts`). This spec-validation suite wants a clean
+  // slate, so we explicitly clear the textarea before each test.
+  const textarea = page.getByLabel('Swagger / OpenAPI Specification')
+  await expect(textarea).toBeVisible()
+  await textarea.fill('')
   await page.getByLabel('URL to the Swagger UI or OpenAPI specification').fill('')
   const lang = await page.evaluate(() => localStorage.getItem('lasttest.language'))
   expect(lang).toBe('en')

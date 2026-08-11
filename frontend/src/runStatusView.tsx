@@ -352,13 +352,13 @@ export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) 
     // killed), otherwise fall back to a hand-rolled placeholder
     // so the call to RunFailure stays type-safe when no
     // classification was possible (e.g. error text was empty).
-    const reason = reasonOverride ?? summariseFailure(run.error)
+    const reason = reasonOverride ?? summariseFailure(lang, run.error)
     if (reason) return <RunFailure run={run} reason={reason} lang={lang} />
     const placeholder = {
       kind: 'process' as const,
-      summary: translate(lang, 'summary.runtime') === 'Runtime' ? 'k6 aborted' : 'k6 abgebrochen',
+      summary: translate(lang, 'runStatusView.aborted.summary'),
       detail: translate(lang, 'result.aborted.detail'),
-      hint: 'Wenn die k6-Ausgabe unvollständig erscheint, ist das erwartet — der Prozess wurde sofort beendet.',
+      hint: translate(lang, 'runStatusView.aborted.hint'),
     }
     return <RunFailure run={run} reason={placeholder} lang={lang} />
   }
@@ -373,7 +373,7 @@ export function RunStatusView({ run, now, reasonOverride }: RunStatusViewProps) 
     //      failure block so the user sees the actual cause (DNS,
     //      connection refused, …) and is not distracted by
     //      threshold cards.
-    const reason = reasonOverride ?? summariseFailure(run.error)
+    const reason = reasonOverride ?? summariseFailure(lang, run.error)
     // Only infrastructure failures (DNS, connection, script, process,
     // TLS) displace the threshold cards — for `http`/`unknown` the
     // server actually answered, so the threshold metrics are

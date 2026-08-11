@@ -648,7 +648,7 @@ test('summarizeFailure uses placeholder defaults when summary is undefined', () 
     createdAt: '2026-01-01T00:00:00Z',
     error: 'some non-empty error message',
   }
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   ok(failure !== undefined)
   ok(failure.category !== undefined)
 })
@@ -666,7 +666,7 @@ test('summarizeFailure uses summary values when summary is provided', () => {
     error: 'GoError: script error',
     summary: { raw: JSON.stringify({ metrics: { http_reqs: { count: 100 }, http_req_failed: { value: 0.5 }, http_req_duration: { 'p(95)': 2000 } } }) },
   }
-  const failure = summarizeFailure(run)
+  const failure = summarizeFailure('en', run)
   ok(failure !== undefined)
   // The exact category depends on the error string; what we
   // care about is that the function returns a summary at all
