@@ -2,7 +2,7 @@
   "cookies": [],
   "origins": [
     {
-      "origin": "http://localhost:8286",
+      "origin": "http://localhost:5173",
       "localStorage": [
         {
           "name": "lasttest.demo.enabled",

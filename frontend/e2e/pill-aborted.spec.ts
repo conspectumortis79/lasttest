@@ -1,10 +1,16 @@
 import { expect, test } from '@playwright/test'
+import { ensureDemoApiEnabled } from './demoToggleFixture.ts'
 
 // Visual snapshot of the ABORTED result-header pill so it can be
 // compared with the FAILED pill — they should share the same
 // tonal palette now.
 
 test.beforeEach(async ({ page }) => {
+  // See demoToggleFixture.ts: an earlier spec file in this
+  // sequential suite may have disabled the demo-API toggle on
+  // the server; this suite imports the demo spec, so it must
+  // always start from an enabled toggle.
+  await ensureDemoApiEnabled()
   // The visual contract uses German UI labels (e.g.
   // "Validieren & importieren"). Pin the language before the
   // app boots — `useLanguage` defaults to English and the
@@ -18,7 +24,7 @@ test('ABORTED pill — visual snapshot for design parity', async ({ page }) => {
   // (cross-session runs are not loaded from the server).
   const unreachableSpec = `openapi: 3.0.3
 info:
-  title: Demo
+  title: Pill Aborted Probe
   version: "1"
 servers:
   - url: http://localhost:8286/demo-api
@@ -35,6 +41,13 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(unreachableSpec),
   })
+  // Wait for the SPECIFIC uploaded content before clicking
+  // import — the demo-toggle auto-load effect can fill this
+  // textarea concurrently with the bundled demo spec (whose
+  // title also contains the substring "Demo", which is why the
+  // title above was changed to something unambiguous), and a
+  // click that races it would import the wrong document.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Pill Aborted Probe')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await page.getByLabel('Virtual Users').fill('1')
   await page.getByLabel('Dauer (Sekunden)').fill('60')

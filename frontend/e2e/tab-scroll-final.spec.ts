@@ -14,6 +14,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureDemoApiEnabled } from './demoToggleFixture.ts'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const demoSpecification = path.resolve(currentDirectory, '../../demo/openapi-demo.yaml')
@@ -45,6 +46,11 @@ async function closeAnyOpenPopup(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  // See demoToggleFixture.ts: an earlier spec file in this
+  // sequential suite may have disabled the demo-API toggle on
+  // the server; this suite imports the demo spec, so it must
+  // always start from an enabled toggle.
+  await ensureDemoApiEnabled()
   await page.addInitScript(() => {
     localStorage.setItem('lasttest.language', 'de')
   })

@@ -1,6 +1,7 @@
 import { expect, test, type Page, request as playwrightRequest } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureDemoApiEnabled } from './demoToggleFixture.ts'
 
 // Standalone smoke tests for the right-click run-badge context
 // menu. The tests clean up between runs so they don't starve the
@@ -39,6 +40,12 @@ async function forceAbortRun(runId: string): Promise<void> {
 }
 
 test.beforeEach(async ({ page }) => {
+  // See demoToggleFixture.ts: an earlier spec file in this
+  // sequential suite may have disabled the demo-API toggle on
+  // the server; this suite imports the demo spec and runs it
+  // against the demo API, so it must always start from an
+  // enabled toggle.
+  await ensureDemoApiEnabled()
   // Pin the language to German via localStorage so the
   // button labels, menu items and status texts match the
   // assertions below. Without this the default English
@@ -225,6 +232,11 @@ paths:
       mimeType: 'application/yaml',
       buffer: Buffer.from(unreachableSpec),
     })
+    // Wait for the SPECIFIC uploaded content before clicking
+    // import — the demo-toggle auto-load effect can fill this
+    // textarea concurrently with the bundled demo spec, and a
+    // click that races it would import the wrong document.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Bulk Remove Probe')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Bulk Remove Probe' })).toBeVisible()
 
@@ -309,6 +321,11 @@ paths:
       mimeType: 'application/yaml',
       buffer: Buffer.from(unreachableSpec),
     })
+    // Wait for the SPECIFIC uploaded content before clicking
+    // import — the demo-toggle auto-load effect can fill this
+    // textarea concurrently with the bundled demo spec, and a
+    // click that races it would import the wrong document.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Lone Failed Probe')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Lone Failed Probe' })).toBeVisible()
     await page.getByLabel('Virtual Users').fill('1')
@@ -469,6 +486,11 @@ paths:
       mimeType: 'application/yaml',
       buffer: Buffer.from(unreachableSpec),
     })
+    // Wait for the SPECIFIC uploaded content before clicking
+    // import — the demo-toggle auto-load effect can fill this
+    // textarea concurrently with the bundled demo spec, and a
+    // click that races it would import the wrong document.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Timeline Bulk Probe')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Timeline Bulk Probe' })).toBeVisible()
     await page.getByLabel('Virtual Users').fill('1')
@@ -494,6 +516,11 @@ paths:
       mimeType: 'application/yaml',
       buffer: Buffer.from(unreachableSpec),
     })
+    // Wait for the SPECIFIC uploaded content before clicking
+    // import — the demo-toggle auto-load effect can fill this
+    // textarea concurrently with the bundled demo spec, and a
+    // click that races it would import the wrong document.
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Timeline Bulk Probe')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Timeline Bulk Probe' })).toBeVisible()
     await page.getByLabel('Virtual Users').fill('1')

@@ -1,6 +1,7 @@
 import { expect, test, type Page, request as playwrightRequest } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureDemoApiEnabled } from './demoToggleFixture.ts'
 
 // E2E coverage for the inline icon-actions on the run badge
 // (the variant A "always visible" mockup). The buttons live
@@ -46,6 +47,11 @@ async function forceAbortRun(runId: string): Promise<void> {
 }
 
 test.beforeEach(async ({ page }) => {
+  // See demoToggleFixture.ts: an earlier spec file in this
+  // sequential suite may have disabled the demo-API toggle on
+  // the server; this suite imports the demo spec, so it must
+  // always start from an enabled toggle.
+  await ensureDemoApiEnabled()
   // The app's default language is English, but the production
   // chrome (and every other e2e spec) is German. Pin the
   // language via localStorage so the rendered button labels,

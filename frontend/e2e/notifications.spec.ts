@@ -18,6 +18,7 @@
 // the spec can assert on the title/body the App would have
 // fired, without firing a real OS notification.
 import { expect, test, type Page } from '@playwright/test'
+import { ensureDemoApiEnabled } from './demoToggleFixture.ts'
 
 async function openSettings(page: Page) {
   await page.getByRole('button', { name: 'Einstellungen öffnen' }).click()
@@ -33,6 +34,11 @@ async function closeSettings(page: Page) {
 
 test.describe('Settings drawer — notifications', () => {
   test.beforeEach(async ({ context, page }) => {
+    // See demoToggleFixture.ts: an earlier spec file in this
+    // sequential suite may have disabled the demo-API toggle on
+    // the server; this suite imports the demo spec, so it must
+    // always start from an enabled toggle.
+    await ensureDemoApiEnabled()
     // The browser would normally ask the user for permission
     // via a one-shot prompt. Granting the permission up-front
     // makes the spec deterministic and avoids the prompt

@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureDemoApiEnabled } from './demoToggleFixture.ts'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const demoSpecification = path.resolve(currentDirectory, '../../demo/openapi-demo.yaml')
@@ -97,6 +98,12 @@ async function setParameterValue(locator: Locator, value: string): Promise<void>
 }
 
 test.beforeEach(async ({ page }) => {
+  // See demoToggleFixture.ts: an earlier spec file in this
+  // sequential suite may have disabled the demo-API toggle on
+  // the server; this suite imports the demo spec and runs
+  // load tests against it, so it must always start from an
+  // enabled toggle.
+  await ensureDemoApiEnabled()
   // Pin the language to German so the German UI labels
   // (e.g. "Validieren & importieren", "Virtual Users" vs.
   // "Virtuelle Benutzer", "k6-Lasttest starten") match the
@@ -421,10 +428,14 @@ paths:
   })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Other API')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'Other API' })).toBeVisible()
   await expect(page.locator('.operation-card')).toHaveCount(1)
@@ -454,10 +465,11 @@ paths:
   })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently,
+  // so we wait for the SPECIFIC uploaded content (matched via
+  // the spec's title) rather than merely "any content".
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Single')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByLabel('Base-URL')).toHaveValue('http://localhost:8286/api')
 
@@ -487,10 +499,14 @@ paths:
   })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Connection Refused')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'Connection Refused' })).toBeVisible()
 
@@ -1144,19 +1160,17 @@ paths:
         '200': {description: OK}
 `
 
-  await page.locator('input[type="file"]').setInputFiles({
-    name: 'two.yaml',
-    mimeType: 'application/yaml',
-    buffer: Buffer.from(twoEndpointsSpec),
-  })
-
-  // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
-  await page.getByRole('button', { name: 'Validieren & importieren' }).click()
-  await expect(page.getByRole('heading', { name: /Two Endpoints/ })).toBeVisible()
+  // `not.toHaveValue('')` is not a strong enough guard here:
+  // the demo-toggle auto-load effect (`useDemoStatus.tsx`)
+  // asynchronously fills the SAME textarea with the bundled
+  // demo spec on mount, and that fill can win the race against
+  // `setInputFiles` — the textarea is non-empty either way, so
+  // the old assertion passed while the textarea actually held
+  // the demo spec, not `twoEndpointsSpec`. `importTypedSpec`'s
+  // `toContainText(expectedTitle)` guard (used everywhere else
+  // in this file) waits for the SPECIFIC content instead of
+  // merely "any content", which is the fix.
+  await importTypedSpec(page, twoEndpointsSpec, 'two.yaml', 'Two Endpoints')
   await expect(page.locator('.operation-card')).toHaveCount(2)
 
   // getAlpha is initially selected. We make it invalid.
@@ -1499,10 +1513,14 @@ paths:
   })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('DNS Failure')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'DNS Failure' })).toBeVisible()
 
@@ -1547,10 +1565,14 @@ paths:
   })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Connection Refused')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'Connection Refused' })).toBeVisible()
 
@@ -1616,10 +1638,14 @@ test.describe('A) Import-Robustheit', () => {
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Swagger 2.0 API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Swagger 2.0 API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(1)
@@ -1648,10 +1674,14 @@ test.describe('A) Import-Robustheit', () => {
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('OpenAPI JSON API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'OpenAPI JSON API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(2)
@@ -1681,10 +1711,14 @@ components:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('API-Key API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'API-Key API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(1)
@@ -1709,10 +1743,14 @@ components:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Basic Auth API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Basic Auth API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(1)
@@ -1765,10 +1803,14 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Header-Param API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Header-Param API' })).toBeVisible()
     await expandOperation(page, 'getVersion')
@@ -1823,10 +1865,14 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Deprecated API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Deprecated API' })).toBeVisible()
     // Both cards are rendered (also the deprecated one).
@@ -1859,10 +1905,14 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Tagged API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Tagged API' })).toBeVisible()
     await expect(page.locator('.operation-card')).toHaveCount(3)
@@ -1904,10 +1954,11 @@ components:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently,
+  // so we wait for the SPECIFIC uploaded content rather than
+  // merely "any content".
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Cyclic API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     // Either the spec still loads, or the importer surfaces an error.
     // Both are acceptable; the only requirement is no infinite stack trace.
@@ -1926,14 +1977,23 @@ components:
     for (const opId of demoOpIds) {
       await expect(page.locator('.operation-card', { has: page.getByLabel(`Operation ${opId}`) })).toBeVisible()
     }
-    // Re-import the same demo file.
+    // Re-import the same demo file. The textarea already
+    // contains the demo spec from the first import above, so
+    // `toContainText('Lasttest Demo API')` would pass
+    // immediately without proving the second upload actually
+    // landed — clear the textarea first so the wait below is
+    // meaningful.
+    await page.getByLabel('Swagger / OpenAPI-Dokumentation').fill('')
     await page.locator('input[type="file"]').setInputFiles(demoSpecification)
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently
+  // with the SAME demo spec, so waiting for the content to be
+  // non-empty again is sufficient here (unlike the other
+  // imports in this file, there is no *different* content to
+  // disambiguate from).
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Lasttest Demo API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     // Heading stays visible. The re-import may collapse the
     // existing cards into the freshly-imported set (so a
@@ -1971,10 +2031,14 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('minLength API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'minLength API' })).toBeVisible()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
@@ -1999,10 +2063,11 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently,
+  // so we wait for the SPECIFIC uploaded content rather than
+  // merely "any content".
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('minLength Exact')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const codeInput = page.getByLabel('listItems · Payload 1: code')
@@ -2025,10 +2090,11 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently,
+  // so we wait for the SPECIFIC uploaded content rather than
+  // merely "any content".
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('maxLength API')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const codeInput = page.getByLabel('listItems · Payload 1: code')
@@ -2052,10 +2118,11 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently,
+  // so we wait for the SPECIFIC uploaded content rather than
+  // merely "any content".
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Integer Min')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const countInput = page.getByLabel('listItems · Payload 1: count')
@@ -2079,10 +2146,11 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently,
+  // so we wait for the SPECIFIC uploaded content rather than
+  // merely "any content".
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Integer Max')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const countInput = page.getByLabel('listItems · Payload 1: count')
@@ -2115,10 +2183,14 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Scientific Float')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Scientific Float' })).toBeVisible()
     await page.locator('.operation-card', { has: page.getByLabel('Operation listItems') }).locator('button.expand-toggle').click()
@@ -2192,10 +2264,14 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Array Body')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Array Body' })).toBeVisible()
     await page.getByLabel('Endpunkt POST /items auswählen').check()
@@ -2227,10 +2303,11 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently,
+  // so we wait for the SPECIFIC uploaded content rather than
+  // merely "any content".
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Extra Props')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.getByLabel('Endpunkt POST /items auswählen').check()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
@@ -2255,10 +2332,11 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently,
+  // so we wait for the SPECIFIC uploaded content rather than
+  // merely "any content".
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Date Format')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await page.locator('.operation-card').first().locator('button.expand-toggle').click()
     const dayInput = page.getByLabel('listEvents · Payload 1: day')
@@ -2486,10 +2564,14 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea
+  // concurrently, so we wait for the SPECIFIC uploaded
+  // content (matched via the heading text we expect after
+  // import) rather than merely "any content" — otherwise
+  // the click can fire while the textarea still holds the
+  // bundled demo spec.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Unreachable-Demo')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByRole('heading', { name: 'Unreachable-Demo' })).toBeVisible()
     await page.getByLabel('Virtual Users').fill('1')
@@ -2613,10 +2695,11 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently,
+  // so we wait for the SPECIFIC uploaded content rather than
+  // merely "any content".
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Custom Base')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     await expect(page.getByLabel('Base-URL')).toHaveValue('http://default.example/api')
     await page.getByLabel('Base-URL').fill('http://mein-custom.example/v2')
@@ -2637,10 +2720,11 @@ paths:
     })
 
   // The file input's onChange handler is async
-  // (`setSpecification(await file.text())`); wait for the
-  // textarea to pick up the new content before triggering
-  // the import so the click does not race the file load.
-    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).not.toHaveValue('')
+  // (`setSpecification(await file.text())`); the demo-toggle
+  // auto-load effect can ALSO fill this textarea concurrently,
+  // so we wait for the SPECIFIC uploaded content rather than
+  // merely "any content".
+    await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Server Select')
     await page.getByRole('button', { name: 'Validieren & importieren' }).click()
     const selector = page.getByLabel('Server auswählen')
     await selector.selectOption('http://b.example/api')

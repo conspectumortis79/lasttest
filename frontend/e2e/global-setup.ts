@@ -28,10 +28,29 @@ import { fileURLToPath } from 'node:url'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const storageStatePath = resolve(currentDirectory, '.demo-enabled-storage.json')
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:8286'
+// The backend that owns the demo-API toggle (`POST
+// /api/demo-traffic/enabled`) always listens on 8286, regardless
+// of which origin the browser navigates to.
+const backendURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:8286'
+// The origin the BROWSER actually navigates to for `page.goto('/')`
+// — must match `use.baseURL` / `projects[].use.baseURL` in
+// playwright.config.ts. `localStorage` is origin-scoped, so a
+// `storageState` entry written under the WRONG origin is silently
+// ignored by the browser: `readStoredDemoEnabled()` in
+// `useDemoStatus.tsx` then always sees `null` (→ `false`) on the
+// very first render, and the provider's own "local wins" sync
+// effect immediately POSTs `{enabled: false}` back to the backend
+// — turning the demo API off again within a few hundred
+// milliseconds of every single `page.goto('/')`, no matter what
+// this file wrote to `storageState`. This was verified by polling
+// `GET /demo-api/products` once every 300 ms across a full test
+// run: the status flips from 200 to 404 within the first second,
+// well before any test body could have touched the Settings
+// drawer.
+const appOrigin = process.env.PLAYWRIGHT_APP_ORIGIN ?? 'http://localhost:5173'
 
 export default async function globalSetup(): Promise<void> {
-  const context = await request.newContext({ baseURL })
+  const context = await request.newContext({ baseURL: backendURL })
   try {
     const response = await context.post('/api/demo-traffic/enabled', {
       data: { enabled: true },
@@ -51,7 +70,7 @@ export default async function globalSetup(): Promise<void> {
     cookies: [],
     origins: [
       {
-        origin: baseURL,
+        origin: appOrigin,
         localStorage: [
           { name: 'lasttest.demo.enabled', value: 'true' },
         ],

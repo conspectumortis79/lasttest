@@ -20,6 +20,7 @@
 import { expect, test, type Page, request as playwrightRequest } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureDemoApiEnabled } from './demoToggleFixture.ts'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const demoSpecification = path.resolve(currentDirectory, '../../demo/openapi-demo.yaml')
@@ -47,6 +48,12 @@ async function forceAbortRun(runId: string): Promise<void> {
 }
 
 test.beforeEach(async ({ page }) => {
+  // See demoToggleFixture.ts: several tests in THIS file
+  // disable the demo toggle as part of their own assertions
+  // (e.g. "flipping the Settings switch off ..."). Re-enable
+  // it before every test so no test's cleanup depends on
+  // ordering relative to the others.
+  await ensureDemoApiEnabled()
   await page.addInitScript(() => localStorage.setItem('lasttest.language', 'de'))
   await page.goto('/')
 })

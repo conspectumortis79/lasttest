@@ -41,6 +41,11 @@ paths:
     mimeType: 'application/yaml',
     buffer: Buffer.from(unreachableSpec),
   })
+  // Wait for the SPECIFIC uploaded content before clicking
+  // import — the demo-toggle auto-load effect can fill this
+  // textarea concurrently with the bundled demo spec, and a
+  // click that races it would import the wrong document.
+  await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Connection Refused')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'Connection Refused' })).toBeVisible()
 

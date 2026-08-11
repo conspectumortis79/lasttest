@@ -10,9 +10,19 @@
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureDemoApiEnabled } from './demoToggleFixture.ts'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const demoSpecification = path.resolve(currentDirectory, '../../demo/openapi-demo.yaml')
+
+test.beforeEach(async () => {
+  // See demoToggleFixture.ts: an earlier spec file in this
+  // sequential suite may have disabled the demo-API toggle on
+  // the server; every test in this file imports the demo spec
+  // and runs it against the demo API, so it must always start
+  // from an enabled toggle.
+  await ensureDemoApiEnabled()
+})
 
 async function importDemo(page: Page) {
   await page.locator('input[type="file"]').setInputFiles(demoSpecification)
