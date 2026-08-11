@@ -35,16 +35,24 @@ paths:
         '200': {description: OK}
 `
 
-  await page.goto('/')
+  // Turn the demo toggle OFF for this test's own page. The
+  // server-side toggle may be enabled by another worker running
+  // in parallel (or by a previous test in this worker); if it
+  // is, `App.tsx`'s auto-load effect asynchronously `fetch`es
+  // the bundled demo spec into the SAME textarea this test is
+  // about to fill via `setInputFiles`, and that fetch can
+  // resolve AFTER our upload and silently overwrite it. Turning
+  // the toggle off routes the effect into its synchronous
+  // `else` branch instead, removing the race entirely.
+  await page.getByRole('button', { name: 'Einstellungen' }).click()
+  await page.locator('[data-testid="settings-demo-api-switch"]').uncheck()
+  await page.keyboard.press('Escape')
+
   await page.locator('input[type="file"]').setInputFiles({
     name: 'refused.yaml',
     mimeType: 'application/yaml',
     buffer: Buffer.from(unreachableSpec),
   })
-  // Wait for the SPECIFIC uploaded content before clicking
-  // import — the demo-toggle auto-load effect can fill this
-  // textarea concurrently with the bundled demo spec, and a
-  // click that races it would import the wrong document.
   await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Connection Refused')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await expect(page.getByRole('heading', { name: 'Connection Refused' })).toBeVisible()
