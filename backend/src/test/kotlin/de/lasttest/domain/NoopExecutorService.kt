@@ -29,7 +29,6 @@ sealed class StubExecutorService : AbstractExecutorService() {
 
 class NoopExecutorService : StubExecutorService() {
     override fun execute(command: Runnable) {
-        // Intentionally a no-op — see class kdoc.
     }
 }
 

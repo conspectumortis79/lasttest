@@ -19,7 +19,6 @@ async function newestRunId(page: Page): Promise<string> {
 
 test('?report=<id> for a known run renders the printable report', async ({ page }) => {
   test.setTimeout(90_000)
-  // Drive a run so the report has real data.
   await page.goto('/')
   await startDemoRunAndAwaitTerminal(page, { operation: 'listProducts', vus: '1', duration: '1' })
   const id = await newestRunId(page)

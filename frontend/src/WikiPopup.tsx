@@ -12,11 +12,10 @@
 // everything client-side — no backend round-trip, no extra route.
 //
 // The inline HTML rendered into the new window is built by
-// `renderWikiWindowHtml` below. It only allows three tags
-// (`<strong>`, `<em>`, `<code>`) — every other character is
-// HTML-escaped. The glossary entries are bundled at build time
-// (trusted content), but the escape still protects against an
-// accidental `<script>` in a future entry.
+// `renderWikiWindowHtml` in `./wikiWindow.ts`. That module owns
+// the result-window rendering and the small keyboard-shortcut
+// script (Escape closes the popup); it is split out so the
+// component stays focused on the search modal.
 //
 // Live suggestions: while the user types, the popup lists up to
 // 8 candidate entries below the field. Pressing Enter on a
@@ -25,8 +24,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { SupportedLanguage } from './i18n.ts'
-import { filterEntries, lookupEntry, wikiBody, wikiTitle } from './wikiSearch.ts'
+import { filterEntries, lookupEntry } from './wikiSearch.ts'
 import type { WikiEntry } from './wikiData.ts'
+import { renderWikiWindowHtml } from './wikiWindow.ts'
 
 type WikiPopupProps = {
   open: boolean
@@ -78,100 +78,6 @@ function openEntryInWindow(entry: WikiEntry, language: SupportedLanguage, matche
   // a generous delay because the window has not necessarily read
   // the URL yet when `open` returns.
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-}
-
-const ESCAPE_MAP: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, c => ESCAPE_MAP[c] ?? c)
-}
-
-/**
- * Renders an inline-tag whitelist into the wiki body. Only
- * `<strong>`, `<em>` and `<code>` survive — every other tag is
- * escaped. This is the same approach as the DocPopup markdown
- * renderer but smaller (the wiki body never contains markdown).
- */
-function renderInlineTags(text: string): string {
-  const stashed: string[] = []
-  // Sentinel markers use a multi-character bracket pattern that
-  // is not legal HTML, so the HTML-escape pass leaves them
-  // untouched. We pick a distinct prefix so the substitution
-  // regex is unambiguous.
-  const openToken = '⦃WIKI_INLINE_'
-  const closeToken = '⦄'
-  let prepared = text.replace(/<(strong|em|code)>([\s\S]*?)<\/\1>/g, (_match, tag: string, inner: string) => {
-    const index = stashed.length
-    stashed.push(`<${tag}>${escapeHtml(inner)}</${tag}>`)
-    return `${openToken}${index}${closeToken}`
-  })
-  prepared = escapeHtml(prepared)
-  if (stashed.length > 0) {
-    const pattern = openToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      + '(\\d+)'
-      + closeToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    prepared = prepared.replace(
-      new RegExp(pattern, 'g'),
-      (_match, index: string) => stashed[Number(index)] ?? '',
-    )
-  }
-  return prepared
-}
-
-/**
- * Builds the self-contained HTML document for the wiki result
- * window. The style block inlines the same dark palette the
- * toolbar uses, so the new window feels like part of the app
- * even though it lives outside the React tree.
- */
-function renderWikiWindowHtml(entry: WikiEntry, language: SupportedLanguage, matchedAlias: string): string {
-  const titleText = wikiTitle(entry, language)
-  const bodyText = renderInlineTags(wikiBody(entry, language))
-  const heading = language === 'de' ? 'lasttest Wiki' : 'lasttest Wiki'
-  const matchedOn = language === 'de'
-    ? `Aufgelöst über: <code>${escapeHtml(matchedAlias)}</code>`
-    : `Matched on: <code>${escapeHtml(matchedAlias)}</code>`
-  const closeLabel = language === 'de' ? 'Schließen' : 'Close'
-  // No external CSS or JS — the new window is fully self-contained.
-  return `<!doctype html>
-<html lang="${language}">
-<head>
-<meta charset="utf-8">
-<title>${escapeHtml(titleText)} — ${escapeHtml(heading)}</title>
-<style>
-  :root { color-scheme: dark; }
-  body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #e8edf5; background: #0b1018; }
-  .wrap { max-width: 720px; margin: 0 auto; padding: 28px 24px 64px; }
-  .brand { font-size: 12px; font-weight: 700; color: #79e6c8; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px; }
-  h1 { margin: 0 0 12px; font-size: 24px; line-height: 1.25; color: #fff; }
-  .matched { font-size: 12px; color: #93a2b8; margin-bottom: 24px; font-family: ui-monospace, Menlo, monospace; }
-  .matched code { background: #1a2638; padding: 1px 6px; border-radius: 4px; color: #dbe5f3; }
-  .body { font-size: 15px; line-height: 1.6; color: #dbe5f3; }
-  .body strong { color: #fff; }
-  .body code { background: #1a2638; padding: 1px 6px; border-radius: 4px; font-size: 13px; color: #79e6c8; font-family: ui-monospace, Menlo, monospace; }
-  .actions { margin-top: 32px; display: flex; gap: 8px; }
-  .actions button { padding: 8px 14px; border-radius: 7px; border: 1px solid #233049; background: #1a2638; color: #dbe5f3; font: inherit; cursor: pointer; }
-  .actions button:hover { border-color: #7d63ff; color: #fff; }
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="brand">${escapeHtml(heading)}</div>
-  <h1>${escapeHtml(titleText)}</h1>
-  <div class="matched">${matchedOn}</div>
-  <div class="body">${bodyText}</div>
-  <div class="actions">
-    <button type="button" onclick="window.close()">${escapeHtml(closeLabel)}</button>
-  </div>
-</div>
-</body>
-</html>`
 }
 
 export function WikiPopup({ open, language, onClose, initialQuery, strings }: WikiPopupProps) {

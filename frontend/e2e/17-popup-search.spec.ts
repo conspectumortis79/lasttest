@@ -31,6 +31,22 @@ test('the Wiki popup shows a no-match pulse for an unknown query', async ({ page
   await expect(dialog.locator('.wiki-popup-empty')).toBeVisible()
 })
 
+test('Escape inside the wiki description window closes that window', async ({ page }) => {
+  await page.getByRole('button', { name: 'Wiki' }).click()
+  const dialog = page.locator('div[role="dialog"]', { has: page.getByRole('heading', { name: /Wiki/i }) })
+  const searchbox = dialog.locator('input[type="search"]')
+  await searchbox.fill('preAllocatedVUs')
+  const popupPromise = page.waitForEvent('popup')
+  await searchbox.press('Enter')
+  const popup = await popupPromise
+  await popup.waitForLoadState('domcontentloaded')
+  await expect(popup.locator('h1')).toContainText(/Pre-Allocated VUs/i)
+  await popup.bringToFront()
+  const closePromise = popup.waitForEvent('close', { timeout: 5_000 })
+  await popup.keyboard.press('Escape')
+  await closePromise
+})
+
 test('the User Guide popup filters the document content via its search field', async ({ page }) => {
   await page.getByRole('button', { name: 'User Guide' }).click()
   const dialog = page.locator('div[role="dialog"]', { has: page.getByRole('heading', { name: /User Guide/i }) })

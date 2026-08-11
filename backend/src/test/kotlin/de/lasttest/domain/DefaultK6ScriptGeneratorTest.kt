@@ -256,7 +256,6 @@ class DefaultK6ScriptGeneratorTest {
                 destructive = false,
                 parameters = emptyList(),
                 requestBodyExample = null,
-                // No authRequirements — the spec does not protect this endpoint.
             )
         val publicSpec = specification.copy(operations = listOf(publicOperation))
         val configuration =

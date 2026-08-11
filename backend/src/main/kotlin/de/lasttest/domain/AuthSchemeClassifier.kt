@@ -32,7 +32,7 @@ internal object AuthSchemeClassifier {
                 ?.toList()
                 ?: emptyList()
         return AuthRequirement.OpenIdConnect(
-            schemeName = "", // overwritten in classify()
+            schemeName = "",
             openIdConnectUrl = discoveryUrl,
             scopes = scopes,
         )

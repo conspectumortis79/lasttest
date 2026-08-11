@@ -29,19 +29,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")
-    // The `com.fasterxml.jackson` ObjectMapper used by the
-    // service and controller layers needs the Kotlin module
-    // to deserialise Kotlin data classes (CreateTestRunRequest,
-    // TestRunConfiguration). Without it Jackson cannot find
-    // a constructor for the class and silently returns null,
-    // which would turn every historical-rerun lookup into a
-    // 409 instead of a 202.
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("io.swagger.parser.v3:swagger-parser:2.1.37")
-    // H2 is used as the embedded database for persisting test runs,
-    // time-series samples, per-operation statistics, and the demo
-    // request log. The file-based mode keeps the data on the host
-    // (mounted as a Docker volume) so it survives container restarts.
     runtimeOnly("com.h2database:h2")
 
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
@@ -111,23 +100,6 @@ tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
     includeProductionLogic()
     violationRules {
-        // The class-level filtering already happened above via
-        // `includeProductionLogic()` (`classDirectories.setFrom(...)`),
-        // so this rule only ever sees the production-relevant
-        // classes listed in `coverageIncludes`. Do NOT also set
-        // `includes` here: for a BUNDLE-element rule, JaCoCo's
-        // `Rule.matches()` checks the pattern against the BUNDLE's
-        // own name ("lasttest"), not against the individual class
-        // names inside it. A class-name pattern list therefore never
-        // matches the bundle name, the rule is silently skipped for
-        // the whole bundle, and `jacocoTestCoverageVerification`
-        // passes unconditionally regardless of actual coverage —
-        // this was verified by temporarily setting `includes =
-        // listOf("*")`, which made the previously-silent verification
-        // correctly fail on the < 100% branch/line/instruction ratio.
-        // Leaving `includes` at its JaCoCo default ("*") lets the
-        // bundle-name wildcard match unconditionally, so the limits
-        // below are actually enforced against the filtered class set.
         rule {
             element = "BUNDLE"
             listOf("INSTRUCTION", "LINE", "BRANCH").forEach { counterName ->

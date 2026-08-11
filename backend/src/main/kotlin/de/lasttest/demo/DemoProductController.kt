@@ -29,33 +29,11 @@ class DemoProductController(
         SEED_PRODUCTS.forEach { seed -> products[seed.id] = seed }
     }
 
-    /**
-     * Returns a 404 `ResponseEntity` when the demo is disabled,
-     * `null` when it is enabled. The early-out happens before any
-     * business logic so the handler cost is bounded to a single
-     * volatile read on the cold path. Spring's own dispatcher
-     * still runs — the toggle does not bypass the URL mapping —
-     * so the response shape stays consistent with the enabled
-     * path.
-     *
-     * The wildcard body type matches the call-site pattern
-     * "return whatever `notFoundIfDisabled()` gave us as a
-     * `ResponseEntity<MyBody>`"; the cast helper below makes that
-     * safe because the only thing this method ever returns is a
-     * 404 with no body, which serialises to the same wire format
-     * regardless of the body type the caller declares.
-     */
     @Suppress("UNCHECKED_CAST")
     private fun notFoundIfDisabled(): ResponseEntity<*>? =
         if (toggle.isEnabled()) {
             null
         } else {
-            // `ResponseEntity.notFound().build()` returns
-            // `ResponseEntity<Void>`. We widen it to the call-site
-            // `ResponseEntity<*>` because the caller's return type
-            // varies per handler — the wire response (a 404 with
-            // no body) is identical regardless of the declared
-            // body type, so the cast is safe at runtime.
             @Suppress("UNCHECKED_CAST")
             (ResponseEntity.notFound().build<Any>() as ResponseEntity<*>)
         }
@@ -109,11 +87,6 @@ class DemoProductController(
         @RequestParam("id") id: Long,
     ): ResponseEntity<Map<String, Any>> {
         notFoundIfDisabled()?.let { return it.cast() }
-        // Real-world pattern: API key in a custom header (Stripe,
-        // GitHub, Twilio, …). The demo backend is strict — every
-        // value other than the pinned demo key is rejected with
-        // 401, so a typo or an empty field is immediately visible
-        // in the k6 report instead of silently passing.
         if (!hasApiKey(apiKey)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
         }
@@ -136,22 +109,9 @@ class DemoProductController(
         @RequestHeader(name = "Authorization", required = false) authorization: String?,
     ): ResponseEntity<Map<String, Any>> {
         notFoundIfDisabled()?.let { return it.cast() }
-        // OAuth 2.0 demo. The wire format is identical to Bearer
-        // (RFC 6750) — the k6 script sends `Authorization: Bearer
-        // <token>` and the controller validates the opaque token
-        // here. The same hygiene as the Bearer demo: every value
-        // other than the pinned demo token is rejected with 401,
-        // every credential must carry the `Bearer ` prefix, and
-        // the token must be non-empty after the prefix.
         if (!hasOAuth2Token(authorization)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
         }
-        // In a real OAuth 2.0 system the resource server would
-        // validate the token against the authorization server
-        // (signature, expiry, audience, scope). For the demo we
-        // hardcode the response so the user can see what their
-        // token "decodes to" — useful for the k6 report and the
-        // smoke test in the E2E suite.
         return ResponseEntity.ok(
             mapOf(
                 "userId" to "demo-user",
@@ -167,17 +127,6 @@ class DemoProductController(
         @RequestHeader(name = "Authorization", required = false) authorization: String?,
     ): ResponseEntity<Map<String, Any>> {
         notFoundIfDisabled()?.let { return it.cast() }
-        // OpenID Connect demo. Same wire format as OAuth 2.0 and
-        // Bearer (RFC 6750) — the k6 script sends
-        // `Authorization: Bearer <id_token>` and the controller
-        // validates the opaque token here. The pinned token is
-        // different from the OAuth 2.0 demo so a smoke test can
-        // tell the two endpoints apart on the wire. A real OIDC
-        // resource server would verify the ID token's signature
-        // against the OP's JWKS endpoint, check the `iss` / `aud`
-        // / `exp` claims, and call the userinfo endpoint; the
-        // demo keeps the loop closed so a typo is immediately
-        // visible in the k6 report.
         if (!hasOidcIdToken(authorization)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
         }
@@ -236,16 +185,6 @@ class DemoProductController(
         return if (products.remove(id) != null) ResponseEntity.noContent().build() else ResponseEntity.notFound().build()
     }
 
-    /**
-     * Narrow helper that turns the wildcard `ResponseEntity<*>?`
-     * from [notFoundIfDisabled] into a typed
-     * [ResponseEntity] for the caller's return type. The cast is
-     * safe because the only `ResponseEntity` we ever return from
-     * [notFoundIfDisabled] is a 404 with no body — the caller
-     * then returns it as `ResponseEntity<Whatever>` and Spring
-     * serialises the body as `null`, which is exactly what the
-     * caller asked for.
-     */
     @Suppress("UNCHECKED_CAST")
     private fun <T : Any> ResponseEntity<*>.cast(): ResponseEntity<T> = this as ResponseEntity<T>
 
@@ -268,28 +207,9 @@ class DemoProductController(
             return false
         }
         val token = authorization.substring(BEARER_PREFIX.length).trim()
-        // The demo backend now requires the exact demo token. The
-        // earlier "any non-empty value is accepted" behaviour was
-        // too permissive to be useful as a smoke test for an auth-
-        // protected endpoint — the k6 report would always pass and
-        // hide typos in the configuration.
         return token == DEMO_BEARER_TOKEN
     }
 
-    /**
-     * Validates the [Authorization] header as an HTTP Basic header
-     * (RFC 7617) AND requires it to carry the exact demo
-     * credentials. The header must be of the form
-     * `Basic <base64(username:password)>`, the base64 must decode
-     * cleanly, the decoded value must split on a single `:`, and
-     * username + password must both be non-empty and match the
-     * pinned demo pair (case-sensitive, see RFC 7617 § 2.2 which
-     * leaves case-sensitivity up to the server).
-     *
-     * Single Responsibility in action: [hasBearerToken] and
-     * [hasBasicCredentials] each own one scheme so the two demo
-     * endpoints can evolve independently.
-     */
     private fun hasBasicCredentials(authorization: String?): Boolean {
         if (authorization == null) return false
         if (!authorization.startsWith(BASIC_PREFIX, ignoreCase = true)) return false
@@ -304,36 +224,15 @@ class DemoProductController(
         val username = decoded.substring(0, separator)
         val password = decoded.substring(separator + 1)
         if (username.isEmpty() || password.isEmpty()) return false
-        // Strict mode: only the pinned demo pair is accepted. The
-        // check is on the raw decoded bytes, not the wire form, so
-        // the wire base64 must decode to the exact "alice:s3cret"
-        // (no padding tricks, no case-folding, no whitespace
-        // injection).
         return username == DEMO_BASIC_USERNAME && password == DEMO_BASIC_PASSWORD
     }
 
-    /**
-     * Validates the `X-API-Key` header. Same hygiene as
-     * [hasBasicCredentials]: trim whitespace, treat empty as
-     * "not set", and require an exact match against the pinned
-     * demo key (case-sensitive — real-world API keys are
-     * case-sensitive tokens, see e.g. Stripe's `sk_test_…` and
-     * `sk_live_…`).
-     */
     private fun hasApiKey(apiKey: String?): Boolean {
         val key = apiKey?.trim().orEmpty()
         if (key.isEmpty()) return false
         return key == DEMO_API_KEY
     }
 
-    /**
-     * Validates the `Authorization` header as an OAuth 2.0 bearer
-     * token (RFC 6750). Same shape as [hasBearerToken] but with a
-     * pinned demo token. In a real resource server the validation
-     * would call out to the authorization server; the demo keeps
-     * the loop closed so the user sees a deterministic 401 for any
-     * typo.
-     */
     private fun hasOAuth2Token(authorization: String?): Boolean {
         if (authorization == null) return false
         if (!authorization.startsWith(BEARER_PREFIX, ignoreCase = true)) return false
@@ -342,16 +241,6 @@ class DemoProductController(
         return token == DEMO_OAUTH2_TOKEN
     }
 
-    /**
-     * Validates the `Authorization` header as an OpenID Connect
-     * ID token (RFC 6750). Same wire format as Bearer and OAuth 2.0;
-     * pinned to a different demo token so the smoke test can tell
-     * the OIDC endpoint apart from the OAuth 2.0 one. The pinned
-     * value matches the `DemoOpenIdConnect` entry in
-     * `frontend/src/demoCredentials.ts` and the
-     * `description` field on `/products/my-profile` in the demo
-     * spec.
-     */
     private fun hasOidcIdToken(authorization: String?): Boolean {
         if (authorization == null) return false
         if (!authorization.startsWith(BEARER_PREFIX, ignoreCase = true)) return false
@@ -364,12 +253,6 @@ class DemoProductController(
         const val BEARER_PREFIX = "Bearer "
         const val BASIC_PREFIX = "Basic "
 
-        // Demo credentials for the bundled `demo/openapi-demo.yaml`.
-        // The same values are surfaced in the UI's yellow
-        // "Demo-Credentials" banner and in the spec `description`
-        // field so the user can see them in three places at once.
-        // Changing the value here requires a matching change in
-        // `frontend/src/demoCredentials.ts` and in the spec.
         const val DEMO_BEARER_TOKEN = "demo-bearer-token"
         const val DEMO_BASIC_USERNAME = "alice"
         const val DEMO_BASIC_PASSWORD = "s3cret"
