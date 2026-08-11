@@ -1,6 +1,12 @@
 package de.lasttest.demo
 
+import de.lasttest.domain.DemoRequestLogEntity
+import de.lasttest.domain.DemoRequestLogRepository
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+import org.springframework.data.domain.Sort
 import java.time.Instant
+import java.util.Optional
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -139,6 +145,114 @@ class RingBufferDemoRequestLogTest {
         // The repository is the in-memory no-op; "all rows gone"
         // is observable through its `count()`.
         assertEquals(0, noopRepository.count(), "persistent copy must be wiped on clear()")
+    }
+
+    @Test
+    fun `record swallows the exception when the repository save call fails`() {
+        // The H2 side-write is best-effort: a transient DB error
+        // (e.g. connection pool exhaustion) must not propagate to
+        // the caller (the interceptor, on the hot path of every
+        // demo request) and must not stop the in-memory ring
+        // buffer from accepting the entry.
+        val failingRepository =
+            object : DemoRequestLogRepository {
+                override fun <S : DemoRequestLogEntity> save(entity: S): S = throw IllegalStateException("boom")
+
+                override fun <S : DemoRequestLogEntity> saveAll(entities: Iterable<S>): List<S> = throw UnsupportedOperationException()
+
+                override fun findById(id: Long): Optional<DemoRequestLogEntity> = Optional.empty()
+
+                override fun existsById(id: Long): Boolean = false
+
+                override fun findAll(): List<DemoRequestLogEntity> = emptyList()
+
+                override fun findAllById(ids: Iterable<Long>): List<DemoRequestLogEntity> = emptyList()
+
+                override fun count(): Long = 0
+
+                override fun deleteById(id: Long) = Unit
+
+                override fun delete(entity: DemoRequestLogEntity) = Unit
+
+                override fun deleteAllById(ids: Iterable<Long>) = Unit
+
+                override fun deleteAll(entities: Iterable<DemoRequestLogEntity>) = Unit
+
+                override fun deleteAll() = Unit
+
+                override fun findAll(pageable: Pageable): Page<DemoRequestLogEntity> = Page.empty(pageable)
+
+                override fun findAll(sort: Sort): List<DemoRequestLogEntity> = emptyList()
+
+                override fun findAllByOrderByTimestampDesc(pageable: Pageable): List<DemoRequestLogEntity> = emptyList()
+
+                override fun findByRunIdOrderByTimestampDesc(
+                    runId: String,
+                    pageable: Pageable,
+                ): List<DemoRequestLogEntity> = emptyList()
+            }
+        val log = RingBufferDemoRequestLog(failingRepository)
+
+        // record() must not throw despite the repository failure,
+        // and the entry must still be visible in the in-memory
+        // snapshot.
+        log.record(entry("1", runId = "r"))
+
+        val snapshot = log.snapshot(runId = null, limit = 10)
+        assertEquals(listOf("1"), snapshot.map(DemoRequestLogEntry::method))
+    }
+
+    @Test
+    fun `clear swallows the exception when the repository deleteAll call fails`() {
+        // Symmetric to the record() case: a transient DB error on
+        // the delete side must not prevent the in-memory buffer
+        // from being cleared, which is what the live dashboard
+        // actually reads.
+        val failingRepository =
+            object : DemoRequestLogRepository {
+                override fun <S : DemoRequestLogEntity> save(entity: S): S = entity
+
+                override fun <S : DemoRequestLogEntity> saveAll(entities: Iterable<S>): List<S> = entities.toList()
+
+                override fun findById(id: Long): Optional<DemoRequestLogEntity> = Optional.empty()
+
+                override fun existsById(id: Long): Boolean = false
+
+                override fun findAll(): List<DemoRequestLogEntity> = emptyList()
+
+                override fun findAllById(ids: Iterable<Long>): List<DemoRequestLogEntity> = emptyList()
+
+                override fun count(): Long = 0
+
+                override fun deleteById(id: Long) = Unit
+
+                override fun delete(entity: DemoRequestLogEntity) = Unit
+
+                override fun deleteAllById(ids: Iterable<Long>) = Unit
+
+                override fun deleteAll(entities: Iterable<DemoRequestLogEntity>) = Unit
+
+                override fun deleteAll(): Unit = throw IllegalStateException("boom")
+
+                override fun findAll(pageable: Pageable): Page<DemoRequestLogEntity> = Page.empty(pageable)
+
+                override fun findAll(sort: Sort): List<DemoRequestLogEntity> = emptyList()
+
+                override fun findAllByOrderByTimestampDesc(pageable: Pageable): List<DemoRequestLogEntity> = emptyList()
+
+                override fun findByRunIdOrderByTimestampDesc(
+                    runId: String,
+                    pageable: Pageable,
+                ): List<DemoRequestLogEntity> = emptyList()
+            }
+        val log = RingBufferDemoRequestLog(failingRepository)
+        log.record(entry("1", runId = "r"))
+
+        // clear() must not throw despite the repository failure,
+        // and the in-memory buffer must still be emptied.
+        log.clear()
+
+        assertTrue(log.snapshot(runId = null, limit = 10).isEmpty())
     }
 
     @Test

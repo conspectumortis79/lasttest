@@ -336,9 +336,24 @@ class TestRunEncryptionKeyProviderTest {
     }
 
     private companion object {
+        /**
+         * Generates a 32-byte key whose LAST byte is never one
+         * of the whitespace markers [TestRunEncryptionKeyProvider]
+         * strips (`0x0A`, `0x0D`, `0x20`). Without this guard,
+         * a purely random key collides with one of those three
+         * values roughly 1 in 85 times (3/256), which would make
+         * `stripTrailingWhitespace` truncate a genuine key byte
+         * and turn a 32-byte key into a 31-byte one — failing
+         * the provider's length check for a reason that has
+         * nothing to do with the behaviour under test.
+         */
         fun randomKey(): ByteArray {
             val out = ByteArray(32)
             java.security.SecureRandom().nextBytes(out)
+            val forbidden = setOf(0x0A.toByte(), 0x0D.toByte(), 0x20.toByte())
+            while (out[out.size - 1] in forbidden) {
+                java.security.SecureRandom().nextBytes(out)
+            }
             return out
         }
 

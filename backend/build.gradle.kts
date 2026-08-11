@@ -111,15 +111,25 @@ tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
     includeProductionLogic()
     violationRules {
-        // JaCoCo rule is applied to the filtered set, not to the whole
-        // "bundle lasttest". This makes the 100% threshold refer to the
-        // production-relevant classes listed in `coverageIncludes`
-        // (see above). Single source of truth: DTOs, the Spring bootstrap,
-        // and helper classes with no business logic are excluded so they
-        // cannot dilute the threshold.
+        // The class-level filtering already happened above via
+        // `includeProductionLogic()` (`classDirectories.setFrom(...)`),
+        // so this rule only ever sees the production-relevant
+        // classes listed in `coverageIncludes`. Do NOT also set
+        // `includes` here: for a BUNDLE-element rule, JaCoCo's
+        // `Rule.matches()` checks the pattern against the BUNDLE's
+        // own name ("lasttest"), not against the individual class
+        // names inside it. A class-name pattern list therefore never
+        // matches the bundle name, the rule is silently skipped for
+        // the whole bundle, and `jacocoTestCoverageVerification`
+        // passes unconditionally regardless of actual coverage —
+        // this was verified by temporarily setting `includes =
+        // listOf("*")`, which made the previously-silent verification
+        // correctly fail on the < 100% branch/line/instruction ratio.
+        // Leaving `includes` at its JaCoCo default ("*") lets the
+        // bundle-name wildcard match unconditionally, so the limits
+        // below are actually enforced against the filtered class set.
         rule {
             element = "BUNDLE"
-            includes = coverageIncludes
             listOf("INSTRUCTION", "LINE", "BRANCH").forEach { counterName ->
                 limit {
                     counter = counterName

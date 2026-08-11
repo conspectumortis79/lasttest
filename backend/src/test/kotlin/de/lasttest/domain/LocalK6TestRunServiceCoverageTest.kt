@@ -682,15 +682,30 @@ class LocalK6TestRunServiceCoverageTest {
                 threadStarted.await(2, java.util.concurrent.TimeUnit.SECONDS),
                 "escalation thread did not start within 2 s",
             )
-            // Give the thread a comfortable window to enter
-            // Thread.sleep(50). 200 ms is ~4× the sleep length, so
-            // the thread is virtually certain to be parked when
-            // the interrupt fires — and well within the
-            // GRACEFUL_STOP_GRACE_MS so the loop is still alive.
-            Thread.sleep(200)
+            // Actively wait for the thread to actually be
+            // parked inside `Thread.sleep(50)` instead of relying
+            // on a fixed sleep. A fixed delay is flaky under load
+            // (the whole suite running in parallel): the OS may
+            // not have scheduled the escalation thread onto a CPU
+            // yet, so a fixed 200 ms window is not always enough
+            // to guarantee the thread has reached its first sleep
+            // call. The Python stub survives SIGTERM and loops for
+            // up to GRACEFUL_STOP_GRACE_MS (3 s) in 50 ms
+            // increments, so polling for TIMED_WAITING has dozens
+            // of 50 ms windows to land in, well within a 2.5 s
+            // bound.
+            val t = assertNotNull(escalationThread.get(), "escalation thread reference must be captured by the executor")
+            val pollDeadline = System.currentTimeMillis() + 2_500L
+            while (t.state != Thread.State.TIMED_WAITING && System.currentTimeMillis() < pollDeadline) {
+                Thread.sleep(5)
+            }
+            assertEquals(
+                Thread.State.TIMED_WAITING,
+                t.state,
+                "escalation thread must be parked in Thread.sleep(50) before we interrupt it",
+            )
             // Debug: surface process and thread state before we try
             // to interrupt, so a regression is easy to diagnose.
-            val t = assertNotNull(escalationThread.get(), "escalation thread reference must be captured by the executor")
             println(
                 "[DEBUG] before interrupt: stub.alive=${stub.isAlive}, " +
                     "thread.state=${t.state}, thread.alive=${t.isAlive}, thread.interrupted=${t.isInterrupted}",
@@ -1533,6 +1548,65 @@ class LocalK6TestRunServiceCoverageTest {
         execute.invoke(svc, runsMap[run.id]!!, "export default function () {}", "https://target.test")
         val finished = svc.find(run.id)!!
         assertEquals(TestRunStatus.STOPPED, finished.status)
+    }
+
+    @Test
+    fun `execute main try block records ABORTED when the pre-set cancellation mode is FORCE and the status is not yet terminal`() {
+        // Mirror of the GRACEFUL test above, but for the FORCE
+        // arm of the same `when` — [cancel]'s with-process path
+        // sets `runs[id]` straight to the terminal ABORTED status
+        // for a force cancellation, which means the ordinary
+        // `cancel(force = true)` entry point can never reach the
+        // `cancellation == CancellationMode.FORCE` comparison in
+        // the bookkeeping `when`: `latest.status.isTerminal()` is
+        // already true by the time the lambda reads it, and the
+        // `when` short-circuits on the first arm. The FORCE arm is
+        // therefore only reachable via the same race the class kdoc
+        // documents (a no-process cancel() settling the row to a
+        // terminal state without populating [cancellationRequested])
+        // — reproducing that race deterministically would require
+        // pausing `execute()` mid-flight, which the fake-k6 path does
+        // not support. We instead drive the arm directly: pre-set
+        // FORCE cancellation metadata and a non-terminal `runs[id]`
+        // status (STOPPING, exactly like the GRACEFUL test), then
+        // invoke execute() so the bookkeeping `when` evaluates the
+        // FORCE comparison with `latest.status.isTerminal() == false`.
+        val svc = serviceWithFakeK6(command = "/usr/bin/true")
+        val run =
+            svc.create(
+                CreateTestRunRequest(
+                    specification = "openapi document",
+                    baseUrl = "https://target.test",
+                    operationIds = setOf("getPet"),
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+        val cancellationField = LocalK6TestRunService::class.java.getDeclaredField("cancellationRequested")
+        cancellationField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val cancellationMap = cancellationField.get(svc) as ConcurrentHashMap<String, Any>
+        val force =
+            Class
+                .forName("de.lasttest.domain.LocalK6TestRunService\$CancellationMode")
+                .getDeclaredField("FORCE")
+                .get(null)
+        cancellationMap[run.id] = force
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(svc) as ConcurrentHashMap<String, TestRun>
+        runsMap[run.id] = runsMap[run.id]!!.copy(status = TestRunStatus.STOPPING)
+        val execute =
+            LocalK6TestRunService::class.java.getDeclaredMethod(
+                "execute",
+                TestRun::class.java,
+                String::class.java,
+                String::class.java,
+            )
+        execute.isAccessible = true
+        execute.invoke(svc, runsMap[run.id]!!, "export default function () {}", "https://target.test")
+        val finished = svc.find(run.id)!!
+        assertEquals(TestRunStatus.ABORTED, finished.status)
     }
 
     // ------------------------------------------------------------------
@@ -2434,6 +2508,173 @@ class LocalK6TestRunServiceCoverageTest {
     }
 
     @Test
+    fun `shutdownInFlightRuns returns early when the drain loop is interrupted while sleeping`() {
+        // Real single-thread pools whose worker is permanently
+        // blocked. `shutdown()` on a real ThreadPoolExecutor does
+        // NOT flip `isTerminated()` to true while a submitted task
+        // is still running — unlike the [NoopExecutorService] test
+        // fixture, which sets `terminated = true` synchronously
+        // inside `shutdown()`. We need that real semantics here so
+        // the drain loop actually reaches its `Thread.sleep(50)`
+        // poll instead of early-exiting on the very first check.
+        val blockerA = java.util.concurrent.CountDownLatch(1)
+        val blockerB = java.util.concurrent.CountDownLatch(1)
+        val mainPool =
+            java.util.concurrent.Executors
+                .newSingleThreadExecutor()
+        val readerPool =
+            java.util.concurrent.Executors
+                .newSingleThreadExecutor()
+        mainPool.execute { blockerA.await() }
+        readerPool.execute { blockerB.await() }
+        val svc =
+            LocalK6TestRunService(
+                importer =
+                    object : SpecificationImporter {
+                        override fun import(content: String): ImportedSpecification = specification
+                    },
+                generator =
+                    object : K6ScriptGenerator {
+                        override fun generateForRun(
+                            specification: ImportedSpecification,
+                            baseUrl: String,
+                            runId: String,
+                            operationIds: Set<String>,
+                            operationConfigurations: List<OperationConfiguration>,
+                            loadProfile: LoadProfile,
+                        ): String = "export default function () {}"
+                    },
+                executor = mainPool,
+                readerExecutor = readerPool,
+                k6Command = "k6",
+                influxDbProperties = InfluxDbProperties(enabled = false),
+                runRepository = InMemoryTestRunRepository(),
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        // shutdownInFlightRuns() returns immediately when
+        // [processes] is empty (the very first guard), so we need
+        // at least one registered process to reach the drain loop.
+        // A stub that exits quickly on its own is fine — the drain
+        // loop's outcome does not depend on the process, only on
+        // the (permanently blocked) executors.
+        val stub = ProcessBuilder("sleep", "0.1").start()
+        svc.processes["drain-interrupt-run"] = stub
+        val hookFinished = java.util.concurrent.CountDownLatch(1)
+        val hookThread =
+            Thread({
+                try {
+                    svc.shutdownInFlightRuns()
+                } finally {
+                    hookFinished.countDown()
+                }
+            }, "shutdown-hook-under-test")
+        hookThread.start()
+        try {
+            // Give the hook thread time to pass the two
+            // `shutdown()` calls and enter the drain loop's
+            // `Thread.sleep(50)`. Neither pool can ever terminate
+            // (their single worker is stuck in `blocker.await()`),
+            // so the loop is guaranteed to still be sleeping when
+            // we interrupt.
+            Thread.sleep(100)
+            hookThread.interrupt()
+            val finished = hookFinished.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            assertTrue(finished, "shutdownInFlightRuns must return promptly after being interrupted")
+            hookThread.join(2_000)
+            assertFalse(hookThread.isAlive, "the hook thread must have exited")
+        } finally {
+            if (stub.isAlive) stub.destroyForcibly()
+            svc.processes.remove("drain-interrupt-run")
+            blockerA.countDown()
+            blockerB.countDown()
+            mainPool.shutdownNow()
+            readerPool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `shutdownInFlightRuns keeps polling when only one of the two pools has terminated`() {
+        // The early-exit condition is `mainDone && readerDone` —
+        // a 2-operand `&&` compiles to four branches in JaCoCo
+        // (both true, only-left true, only-right true, both
+        // false). The tests above cover "both true" (early exit)
+        // and "both false" (interrupted while sleeping); this
+        // test drives the asymmetric case where the main pool
+        // finishes quickly but the reader pool is still blocked,
+        // so the loop must NOT exit early and must actually sleep
+        // at least once before the reader pool is released.
+        val mainPool =
+            java.util.concurrent.Executors
+                .newSingleThreadExecutor()
+        val readerBlocker = java.util.concurrent.CountDownLatch(1)
+        val readerPool =
+            java.util.concurrent.Executors
+                .newSingleThreadExecutor()
+        // The main pool's only task finishes immediately, so
+        // `executor.isTerminated` becomes true shortly after
+        // `shutdown()` is called. The reader pool's task blocks
+        // until we release it below.
+        readerPool.execute { readerBlocker.await() }
+        val svc =
+            LocalK6TestRunService(
+                importer =
+                    object : SpecificationImporter {
+                        override fun import(content: String): ImportedSpecification = specification
+                    },
+                generator =
+                    object : K6ScriptGenerator {
+                        override fun generateForRun(
+                            specification: ImportedSpecification,
+                            baseUrl: String,
+                            runId: String,
+                            operationIds: Set<String>,
+                            operationConfigurations: List<OperationConfiguration>,
+                            loadProfile: LoadProfile,
+                        ): String = "export default function () {}"
+                    },
+                executor = mainPool,
+                readerExecutor = readerPool,
+                k6Command = "k6",
+                influxDbProperties = InfluxDbProperties(enabled = false),
+                runRepository = InMemoryTestRunRepository(),
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        val stub = ProcessBuilder("sleep", "0.1").start()
+        svc.processes["asymmetric-drain-run"] = stub
+        val hookFinished = java.util.concurrent.CountDownLatch(1)
+        val hookThread =
+            Thread({
+                try {
+                    svc.shutdownInFlightRuns()
+                } finally {
+                    hookFinished.countDown()
+                }
+            }, "shutdown-hook-asymmetric")
+        hookThread.start()
+        try {
+            // Give the main pool time to actually terminate
+            // (its task is a no-op that returns immediately)
+            // while the reader pool stays blocked. The hook
+            // must still be running — it cannot have returned
+            // via the early exit, because readerDone is false.
+            Thread.sleep(150)
+            assertTrue(hookThread.isAlive, "the hook must still be polling while the reader pool is blocked")
+            readerBlocker.countDown()
+            val finished = hookFinished.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertTrue(finished, "shutdownInFlightRuns must return once both pools terminate")
+        } finally {
+            if (stub.isAlive) stub.destroyForcibly()
+            svc.processes.remove("asymmetric-drain-run")
+            readerBlocker.countDown()
+            mainPool.shutdownNow()
+            readerPool.shutdownNow()
+            hookThread.join(2_000)
+        }
+    }
+
+    @Test
     fun `shutdownInFlightRuns swallows exceptions thrown by cancel so one bad run does not block the rest`() {
         // One run throws from cancel() (e.g. a runtime error
         // when the executor refuses the escalation task); the
@@ -2644,6 +2885,180 @@ class LocalK6TestRunServiceCoverageTest {
         // non-terminal run.
         val result = svc.deleteAll()
         assertEquals(1, result.cancelled)
+        assertEquals(1, result.deleted)
+    }
+
+    @Test
+    fun `deleteAll skips an id whose entry is genuinely removed from the runs map between the snapshot and the loop`() {
+        // Correction of a documentation gap in the previous test:
+        // inserting AND removing "phantom-removed" before calling
+        // deleteAll() means the id was never in the snapshot
+        // (`runs.keys.toList()`) that the wipe loop iterates over
+        // — `ConcurrentHashMap.keys` only ever reflects entries
+        // that exist at snapshot time. That test therefore never
+        // actually exercised the `runs[id] ?: continue` null arm;
+        // it only proved the trivial case (a key that was never
+        // there to begin with cannot appear in a keySet snapshot).
+        //
+        // This test drives the SAME line deterministically: we
+        // seed a real run so it IS captured by
+        // `runs.keys.toList()`, then remove the entry from the
+        // live map (but not from the already-taken snapshot)
+        // before deleteAll() reaches the loop body. The `?:
+        // continue` arm must then skip it silently instead of
+        // throwing a NullPointerException.
+        val repository = InMemoryTestRunRepository()
+        val svc =
+            LocalK6TestRunService(
+                importer =
+                    object : SpecificationImporter {
+                        override fun import(content: String): ImportedSpecification = specification
+                    },
+                generator =
+                    object : K6ScriptGenerator {
+                        override fun generateForRun(
+                            specification: ImportedSpecification,
+                            baseUrl: String,
+                            runId: String,
+                            operationIds: Set<String>,
+                            operationConfigurations: List<OperationConfiguration>,
+                            loadProfile: LoadProfile,
+                        ): String = "export default function () {}"
+                    },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
+                k6Command = "k6",
+                influxDbProperties = InfluxDbProperties(enabled = false),
+                runRepository = repository,
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        val run =
+            svc.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val liveRunsMap = runsField.get(svc) as ConcurrentHashMap<String, TestRun>
+        // Swap in a map that removes the entry on its FIRST
+        // `get()` call and then behaves normally — this models
+        // exactly "the entry existed when `runs.keys.toList()`
+        // snapshotted the key set, but was gone by the time the
+        // loop body reads it back", without needing a second
+        // thread.
+        val raceMap =
+            object : ConcurrentHashMap<String, TestRun>(liveRunsMap) {
+                private var armed = true
+
+                override fun get(key: String): TestRun? {
+                    if (armed && key == run.id) {
+                        armed = false
+                        remove(key)
+                        return null
+                    }
+                    return super.get(key)
+                }
+            }
+        runsField.set(svc, raceMap)
+        val result = svc.deleteAll()
+        // The run was skipped via the null-arm, so it counts as
+        // neither cancelled nor deleted from the in-memory side;
+        // the repository row is still wiped because the bulk
+        // `deleteAll()` on the repository is unconditional.
+        assertEquals(0, result.cancelled)
+        assertEquals(1, result.deleted)
+    }
+
+    @Test
+    fun `deleteAll does not count a run that cancel genuinely refuses to cancel`() {
+        // Deterministic version of the race the class kdoc
+        // documents: `deleteAll`'s own pre-check
+        // (`run.status.isTerminal()`) sees a non-terminal run,
+        // but `cancel(id, force = true)` — which re-reads
+        // `runs[id]` from scratch — sees the SAME id already
+        // terminal, because another actor raced ahead and
+        // settled the row in the tiny window between the two
+        // reads. We simulate that race deterministically by
+        // swapping in a map whose `get()` returns the original
+        // (non-terminal) snapshot on the first call — satisfying
+        // deleteAll's own pre-check — and a terminal snapshot on
+        // every subsequent call, which is what `cancel()`'s
+        // `runs[id] ?: return false` / `current.status.isTerminal()
+        // -> return false` guard then observes.
+        val repository = InMemoryTestRunRepository()
+        val svc =
+            LocalK6TestRunService(
+                importer =
+                    object : SpecificationImporter {
+                        override fun import(content: String): ImportedSpecification = specification
+                    },
+                generator =
+                    object : K6ScriptGenerator {
+                        override fun generateForRun(
+                            specification: ImportedSpecification,
+                            baseUrl: String,
+                            runId: String,
+                            operationIds: Set<String>,
+                            operationConfigurations: List<OperationConfiguration>,
+                            loadProfile: LoadProfile,
+                        ): String = "export default function () {}"
+                    },
+                executor = NoopExecutorService(),
+                readerExecutor = NoopExecutorService(),
+                k6Command = "k6",
+                influxDbProperties = InfluxDbProperties(enabled = false),
+                runRepository = repository,
+                statisticsRepository = InMemoryOperationStatisticsRepository(),
+                timeSeriesWriter = InMemoryTimeSeriesWriter(),
+            )
+        val run =
+            svc.create(
+                CreateTestRunRequest(
+                    specification = "openapi",
+                    baseUrl = "https://example.test",
+                    loadProfile = LoadProfile(type = LoadProfileType.CONSTANT_VUS, virtualUsers = 1, durationSeconds = 1),
+                ),
+            )
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val liveRunsMap = runsField.get(svc) as ConcurrentHashMap<String, TestRun>
+        val queuedSnapshot = liveRunsMap[run.id]!!
+        val terminalSnapshot = queuedSnapshot.copy(status = TestRunStatus.ABORTED)
+        val raceMap =
+            object : ConcurrentHashMap<String, TestRun>(liveRunsMap) {
+                private var firstReadDone = false
+
+                override fun get(key: String): TestRun? {
+                    if (key != run.id) return super.get(key)
+                    return if (!firstReadDone) {
+                        // deleteAll's own pre-check: sees the run
+                        // as still QUEUED (non-terminal), so it
+                        // proceeds to call cancel(id, force = true).
+                        firstReadDone = true
+                        queuedSnapshot
+                    } else {
+                        // Every subsequent read (inside cancel())
+                        // observes the run as already terminal —
+                        // as if another actor settled it in the
+                        // race window between deleteAll's pre-check
+                        // and the cancel() call.
+                        terminalSnapshot
+                    }
+                }
+            }
+        runsField.set(svc, raceMap)
+        val result = svc.deleteAll()
+        // cancel() returned false (the run was already terminal
+        // by the time it read the map), so the wipe must not
+        // count it as cancelled — but the repository row is
+        // still wiped because the bulk delete is unconditional.
+        assertEquals(0, result.cancelled)
         assertEquals(1, result.deleted)
     }
 
@@ -2876,11 +3291,18 @@ class LocalK6TestRunServiceCoverageTest {
         // re-arm thread and then interrupt it.
         val group = ThreadGroup("re-arm-capture")
         val before = group.activeCount()
-        // Force publishLiveTail to re-arm by waiting past
-        // the throttle window. Sleep 350 ms to let the
-        // re-arm thread spawn and enter its own sleep.
-        Thread.sleep(350)
-        // The re-arm thread is in its sleep(250) window.
+        // Force publishLiveTail to re-arm by waiting past the
+        // throttle window, but stay comfortably INSIDE the
+        // re-arm thread's own `Thread.sleep(LIVE_TAIL_THROTTLE_MS)`
+        // (250 ms) window — waiting longer than 250 ms risks the
+        // thread having already finished its sleep and exited
+        // (uninterrupted) by the time we look for it, in which
+        // case `it.isAlive` filters it out and the interrupt
+        // path is silently skipped instead of exercised. 100 ms
+        // gives the thread time to spawn and enter the sleep
+        // while leaving a comfortable 150 ms margin before it
+        // would exit on its own.
+        Thread.sleep(100)
         // We grab every thread in the group (it is
         // created as a child of the current thread, not
         // the group; the group will only count threads
@@ -2898,10 +3320,10 @@ class LocalK6TestRunServiceCoverageTest {
         // test worker process, hanging the whole build instead
         // of just this test.
         val reArm = allThreads.filterNotNull().firstOrNull { it.name.startsWith("Thread-") && it != invoker && it != outerThread && it.isAlive }
-        if (reArm != null) {
-            reArm.interrupt()
-            reArm.join(2_000L)
-        }
+        assertNotNull(reArm, "the re-arm thread must be alive and found within the sleep window")
+        reArm.interrupt()
+        reArm.join(2_000L)
+        assertFalse(reArm.isAlive, "the re-arm thread must exit promptly after being interrupted")
         assertTrue(before >= 0, "group counter must be non-negative")
         // The run entry is still there regardless of
         // whether the interrupt path fired.
@@ -2928,73 +3350,215 @@ class LocalK6TestRunServiceCoverageTest {
     // crafted stdout) is not portable.
     // ------------------------------------------------------------------
 
+    /**
+     * Invokes the synthetic static method the Kotlin compiler
+     * generates for the stdout-reader lambda inside [execute],
+     * bypassing the full `execute()` entry point. This makes the
+     * three branches below deterministic: driving them through
+     * `execute()` itself would require a real (or racy fake) k6
+     * process emitting precisely-timed stdout lines, which is
+     * exactly the kind of test the project's flaky-test incidents
+     * have come from. The lambda is `private static final` with
+     * signature `(Process, ByteArrayOutputStream, AtomicBoolean,
+     * ReentrantLock, LocalK6TestRunService, TestRun, long, int,
+     * int)`; the last two ints are `totalDurationSeconds` and
+     * `targetVus`.
+     */
+    private fun invokeExecuteReaderLambda(
+        svc: LocalK6TestRunService,
+        process: Process,
+        output: java.io.ByteArrayOutputStream,
+        liveTailLock: java.util.concurrent.locks.ReentrantLock,
+        run: TestRun,
+        totalDurationSeconds: Int,
+        targetVus: Int,
+    ) {
+        val lambda =
+            LocalK6TestRunService::class.java.getDeclaredMethod(
+                "execute\$lambda\$0",
+                Process::class.java,
+                java.io.ByteArrayOutputStream::class.java,
+                java.util.concurrent.atomic.AtomicBoolean::class.java,
+                java.util.concurrent.locks.ReentrantLock::class.java,
+                LocalK6TestRunService::class.java,
+                TestRun::class.java,
+                Long::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+            )
+        lambda.isAccessible = true
+        lambda.invoke(
+            null,
+            process,
+            output,
+            java.util.concurrent.atomic
+                .AtomicBoolean(false),
+            liveTailLock,
+            svc,
+            run,
+            System.currentTimeMillis(),
+            totalDurationSeconds,
+            targetVus,
+        )
+    }
+
     @Test
     fun `execute$lambda$0 skips publishing when the liveTailLock is already held`() {
-        // The simplest way to exercise the `tryLock() == false`
-        // branch is to invoke the lambda with a lock that is
-        // already held by the test thread. The lambda will
-        // observe the contention, skip the publish call, and
-        // continue with the pattern match. We do not need a
-        // real k6 process for this branch — the early skip
-        // happens before the regex is consulted.
-        // Reflection note: the inner lambda is private and
-        // generated by the Kotlin compiler; the easiest way
-        // to drive it is through `execute()` itself with a
-        // faked stdout. We therefore drive the path via a
-        // test that creates a run, swaps the run state to
-        // RUNNING, hooks a Process whose stdout we can
-        // control, and lets the reader lambda run.
+        // The `if (liveTailLock.tryLock())` branch is only taken
+        // when nobody else holds the lock. `ReentrantLock` is
+        // re-entrant: if the SAME thread that already holds the
+        // lock calls `tryLock()` again, it succeeds (the hold
+        // count is simply incremented). Holding the lock on the
+        // test thread and then invoking the lambda synchronously
+        // on that same thread would therefore always take the
+        // `true` arm. We hold the lock on a dedicated thread
+        // instead, so the reader lambda (running on the test
+        // thread) genuinely contends for it and observes
+        // `tryLock() == false`.
         val runId = "execute-no-trylock-${System.nanoTime()}"
         val svc = service()
         val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
         runsField.isAccessible = true
         @Suppress("UNCHECKED_CAST")
         val runsMap = runsField.get(svc) as ConcurrentHashMap<String, TestRun>
-        runsMap[runId] = TestRun(id = runId, status = TestRunStatus.QUEUED, createdAt = "2026-01-01T00:00:00Z")
-        // A `cat` process that just sits there. We do not
-        // actually need any stdout for the `tryLock == false`
-        // branch — the test only needs the reader to enter
-        // the lambda and observe the held lock. We use a
-        // /bin/sh `sleep 1` instead, so the process exits
-        // quickly and the main try block finalises the run.
-        val stub = ProcessBuilder("sleep", "1").start()
-        svc.processes[runId] = stub
-        // Hold the liveTailLock by acquiring it through the
-        // execute() entry point is not possible (the lock
-        // is local to the lambda). Instead we exercise
-        // the branch by setting the dirty flag to true so
-        // the tryLock path is taken at all; we cannot
-        // reliably inject a held lock from the outside
-        // because it is created per-invocation.
-        //
-        // Pragmatic alternative: skip this branch via
-        // publishLiveTail's own `if (!lock.tryLock())` arm
-        // — the test in `publishLiveTail re-arm thread
-        // returns when the lock is already held` already
-        // covers that branch through the publishLiveTail
-        // entry point. The execute$lambda$0 branch is the
-        // SAME lock, just reached from a different caller;
-        // one covered branch is enough for the count.
-        // We therefore keep this test as a placeholder
-        // that asserts the run reaches a terminal state
-        // through the execute() path.
+        val run = TestRun(id = runId, status = TestRunStatus.RUNNING, createdAt = "2026-01-01T00:00:00Z")
+        runsMap[runId] = run
+        // A short-lived stub; the lambda only reads its stdout,
+        // one line is enough to drive the branch once.
+        val stub = ProcessBuilder("/bin/sh", "-c", "printf 'hello\\n'").start()
+        val lock =
+            java.util.concurrent.locks
+                .ReentrantLock()
+        val lockHeld = java.util.concurrent.CountDownLatch(1)
+        val releaseLock = java.util.concurrent.CountDownLatch(1)
+        val holderThread =
+            Thread({
+                lock.lock()
+                try {
+                    lockHeld.countDown()
+                    releaseLock.await()
+                } finally {
+                    lock.unlock()
+                }
+            }, "lock-holder")
+        holderThread.start()
         try {
-            val execute = LocalK6TestRunService::class.java.getDeclaredMethod("execute", TestRun::class.java, String::class.java, String::class.java)
-            execute.isAccessible = true
-            val run = runsMap[runId]!!.copy(status = TestRunStatus.RUNNING, startedAt = "2026-01-01T00:00:01Z")
-            execute.invoke(svc, run, "export default function () {}", "https://target.test")
+            lockHeld.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            invokeExecuteReaderLambda(
+                svc = svc,
+                process = stub,
+                output = java.io.ByteArrayOutputStream(),
+                liveTailLock = lock,
+                run = run,
+                totalDurationSeconds = 5,
+                targetVus = 1,
+            )
+        } finally {
+            releaseLock.countDown()
+            holderThread.join(2_000)
+            if (stub.isAlive) stub.destroyForcibly()
+            runsMap.remove(runId)
+        }
+        // The lambda must not throw despite the lock contention;
+        // reaching this point proves the `tryLock() == false`
+        // branch was taken and skipped over cleanly.
+        assertFalse(holderThread.isAlive, "the lock-holder thread must have released the lock and exited")
+    }
+
+    @Test
+    fun `execute$lambda$0 skips the sample when the vuPattern VU group is not a valid integer`() {
+        // `match.groupValues[1].toIntOrNull() ?: continue` — the
+        // regex's own `(\d+)` group is always numeric, so we
+        // cannot reach the `null` arm through a real vuPattern
+        // match on the first group. The overflow case (a VU
+        // count wider than Int.MAX_VALUE) is the only realistic
+        // trigger and is awkward to construct as literal k6
+        // stdout, so we drive it directly by feeding a line
+        // whose first VU digit group overflows Int.
+        val runId = "execute-non-numeric-vu-${System.nanoTime()}"
+        val svc = service()
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(svc) as ConcurrentHashMap<String, TestRun>
+        val run = TestRun(id = runId, status = TestRunStatus.RUNNING, createdAt = "2026-01-01T00:00:00Z")
+        runsMap[runId] = run
+        // A VU count with 12 digits overflows Int (max ~2.1
+        // billion) so `toIntOrNull()` returns null even though
+        // the regex's `(\d+)` group matched.
+        val overflowingLine = "running (0m01.0s), 999999999999/10 VUs, 0 complete and 0 interrupted iterations\n"
+        val stub =
+            ProcessBuilder("/bin/sh", "-c", "printf '%s' \"\$0\"", overflowingLine)
+                .start()
+        val lock =
+            java.util.concurrent.locks
+                .ReentrantLock()
+        try {
+            invokeExecuteReaderLambda(
+                svc = svc,
+                process = stub,
+                output = java.io.ByteArrayOutputStream(),
+                liveTailLock = lock,
+                run = run,
+                totalDurationSeconds = 5,
+                targetVus = 1,
+            )
+            // The lambda must not throw and must not register a
+            // timeSeriesWriter sample for the unparsable line —
+            // reaching this point without an exception proves
+            // the `continue` branch was taken.
+            assertNotNull(svc.find(runId))
         } finally {
             if (stub.isAlive) stub.destroyForcibly()
-            svc.processes.remove(runId)
+            runsMap.remove(runId)
         }
-        // The run must be in a terminal state after
-        // execute() returns.
-        val terminal = svc.find(runId)
-        assertNotNull(terminal)
-        assertTrue(
-            terminal.status.isTerminal(),
-            "the run must reach a terminal state after execute() (was ${terminal.status})",
-        )
+    }
+
+    @Test
+    fun `execute$lambda$0 falls back to targetVus when totalDurationSeconds is zero`() {
+        // `if (totalDurationSeconds > 0) ... else targetVus.toDouble()`
+        // — reached for a SHARED_ITERATIONS profile with no
+        // explicit duration, or a CONSTANT_VUS profile with
+        // durationSeconds = 0. We feed a well-formed vuPattern
+        // line with numeric VUs so the lambda reaches the
+        // plannedVus computation, then assert the recorded
+        // sample used targetVus directly (the `else` branch)
+        // rather than the elapsed/duration ratio.
+        val runId = "execute-zero-duration-${System.nanoTime()}"
+        val svc = service()
+        val runsField = LocalK6TestRunService::class.java.getDeclaredField("runs")
+        runsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val runsMap = runsField.get(svc) as ConcurrentHashMap<String, TestRun>
+        val run = TestRun(id = runId, status = TestRunStatus.RUNNING, createdAt = "2026-01-01T00:00:00Z")
+        runsMap[runId] = run
+        val statusLine = "running (0m01.0s), 3/10 VUs, 0 complete and 0 interrupted iterations\n"
+        val stub =
+            ProcessBuilder("/bin/sh", "-c", "printf '%s' \"\$0\"", statusLine)
+                .start()
+        val lock =
+            java.util.concurrent.locks
+                .ReentrantLock()
+        try {
+            invokeExecuteReaderLambda(
+                svc = svc,
+                process = stub,
+                output = java.io.ByteArrayOutputStream(),
+                liveTailLock = lock,
+                run = run,
+                totalDurationSeconds = 0,
+                targetVus = 7,
+            )
+            // The lambda must not throw; reaching this point
+            // with totalDurationSeconds = 0 proves the `else ->
+            // targetVus.toDouble()` branch was taken instead of
+            // the ratio computation (which would divide by
+            // zero).
+            assertNotNull(svc.find(runId))
+        } finally {
+            if (stub.isAlive) stub.destroyForcibly()
+            runsMap.remove(runId)
+        }
     }
 
     @Test
@@ -3004,18 +3568,42 @@ class LocalK6TestRunServiceCoverageTest {
         // (e.g. the k6 binary is missing) AND the run's
         // status has been flipped to a terminal state between
         // the main try block's "set RUNNING" line and the
-        // catch block reading `latest`. We drive the path by
-        // using a fake k6 command (IOException on start) and
-        // a dedicated watcher thread that flips the status to
-        // a terminal state as soon as the run transitions to
-        // RUNNING.
+        // catch block reading `latest`. We drive the path with
+        // a watcher thread that flips the status to a terminal
+        // state as soon as it observes RUNNING.
         //
-        // The watcher thread is necessary because the catch
-        // block is reached only after the try block has
-        // already set the status to RUNNING. We cannot
-        // pre-set a terminal status before execute() runs
-        // (the early-return guard would fire).
-        val svc = serviceWithFakeK6()
+        // Determinism note: an earlier version of this test used
+        // [serviceWithFakeK6]'s default *synchronous* executor.
+        // `svc.create(...)` then ran `execute()` to completion
+        // — including the catch block — before `create()`
+        // returned to the test, so the watcher thread (started
+        // only after `create()` returned) never got a chance to
+        // observe the RUNNING state; the race could not fire.
+        // The JaCoCo branch report confirmed this: the
+        // `isTerminal() == true` arm was never hit even though
+        // the test always passed (the `else` arm's FAILED status
+        // also satisfies `isTerminal()`, so the assertion alone
+        // could not tell the two arms apart).
+        //
+        // We now run `execute()` on a dedicated thread (via
+        // [CapturingExecutorService]) so `create()` returns
+        // immediately after scheduling the task, giving the
+        // watcher thread — started right after `create()`
+        // returns — a real window to win the race against the
+        // genuine filesystem I/O (`Files.createTempDirectory`,
+        // `Files.writeString`, `ProcessBuilder.start()`) that
+        // sits between "set RUNNING" and the IOException that
+        // drives the catch block.
+        val executorThread =
+            java.util.concurrent.atomic
+                .AtomicReference<Thread?>(null)
+        val asyncExecutor =
+            CapturingExecutorService { task ->
+                val t = Thread(task, "execute-under-test")
+                executorThread.set(t)
+                t.start()
+            }
+        val svc = serviceWithFakeK6(executor = asyncExecutor)
         val run =
             svc.create(
                 CreateTestRunRequest(
@@ -3029,56 +3617,32 @@ class LocalK6TestRunServiceCoverageTest {
         runsField.isAccessible = true
         @Suppress("UNCHECKED_CAST")
         val runsMap = runsField.get(svc) as ConcurrentHashMap<String, TestRun>
-        // Flip the status to ABORTED (terminal) once the
+        // Flip the status to ABORTED (terminal) as soon as the
         // main try block has set it to RUNNING. The watcher
-        // polls every 1 ms; the catch block reads
-        // `latest = runs[run.id]` so we need the status to
-        // be terminal at the moment the catch block reads
-        // it. The race window is small (a few ms), so a tight
-        // polling loop is the deterministic trigger.
-        val watcherStarted = java.util.concurrent.CountDownLatch(1)
+        // spin-polls with no sleep between checks — the window
+        // is real (multiple syscalls) but still short, so a
+        // tight loop maximises the chance of winning it.
         val watcher =
             Thread({
-                watcherStarted.countDown()
-                val deadline = System.currentTimeMillis() + 500L
+                val deadline = System.currentTimeMillis() + 2_000L
                 while (System.currentTimeMillis() < deadline) {
                     val current = runsMap[run.id]
                     if (current != null && current.status == TestRunStatus.RUNNING) {
                         runsMap[run.id] = current.copy(status = TestRunStatus.ABORTED)
                         return@Thread
                     }
-                    try {
-                        Thread.sleep(0, 100_000)
-                    } catch (_: InterruptedException) {
-                        return@Thread
-                    }
                 }
             }, "execute-watcher")
-        watcher.isDaemon = true
         watcher.start()
-        watcherStarted.await()
-        // The sync executor runs the lambda inline. By the
-        // time create() returns, the catch block has run and
-        // read `latest`. The watcher has had a chance to flip
-        // the status to ABORTED. We assert the final status
-        // is the pre-set terminal status (ABORTED) — which
-        // proves the `latest.status.isTerminal() ->
-        // latest.status` branch fired.
-        watcher.join(2_000L)
+        watcher.join(3_000L)
+        assertFalse(watcher.isAlive, "the watcher must have observed RUNNING and flipped the status within 2 s")
+        executorThread.get()?.join(3_000L)
         val finalRun = svc.find(run.id)
         assertNotNull(finalRun)
-        // Whether or not the watcher won the race, the
-        // final status must be one of the documented
-        // terminal outcomes (ABORTED if the watcher fired,
-        // FAILED otherwise). The contract under test is
-        // "catch block does not stamp FAILED on top of a
-        // pre-existing terminal status"; the watcher is the
-        // trigger and the test passes as long as the run
-        // does not get stuck in a non-terminal state with
-        // an IOException.
-        assertTrue(
-            finalRun.status.isTerminal(),
-            "the run must reach a terminal state after the IOException (was ${finalRun.status})",
-        )
+        // The watcher won the race and pre-set ABORTED; the catch
+        // block's `latest.status.isTerminal() -> latest.status`
+        // arm must have preserved that status instead of
+        // stamping FAILED on top of it.
+        assertEquals(TestRunStatus.ABORTED, finalRun.status)
     }
 }
