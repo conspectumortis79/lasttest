@@ -44,7 +44,7 @@ export default defineConfig({
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:8286',
     storageState: storageStatePath,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
@@ -88,7 +88,7 @@ export default defineConfig({
       testIgnore: [/demo-traffic\.spec\.ts$/, /pill-aborted\.spec\.ts$/, /pill-failed\.spec\.ts$/],
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://localhost:5173',
+        baseURL: 'http://localhost:8286',
         storageState: storageStatePath,
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
@@ -109,7 +109,7 @@ export default defineConfig({
       dependencies: ['chromium'],
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://localhost:5173',
+        baseURL: 'http://localhost:8286',
         storageState: storageStatePath,
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
@@ -119,7 +119,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'docker compose -f ../docker-compose.yml up --build',
-    url: 'http://localhost:5173',
+    url: 'http://localhost:8286',
     reuseExistingServer: true,
     timeout: 180_000,
   },

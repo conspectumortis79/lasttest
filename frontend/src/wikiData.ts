@@ -383,7 +383,7 @@ export const WIKI_ENTRIES: ReadonlyArray<WikiEntry> = [
     termDe: 'Vorab zugewiesene VUs',
     aliases: ['preallocatedvus', 'preallocated vus', 'pre allocated vus', 'pre-allocated vus', 'preallocated', 'vorab zugewiesene vus', 'preallocatedvus feld'],
     category: 'field',
-    title: { en: 'preAllocatedVUs', de: 'preAllocatedVUs (vorab zugewiesene VUs)' },
+    title: { en: 'preAllocatedVUs (Pre-Allocated VUs)', de: 'preAllocatedVUs (vorab zugewiesene VUs)' },
     body: {
       en: 'For the <code>constant-arrival-rate</code> executor the <code>preAllocatedVUs</code> field is the size of the initial VU pool. k6 allocates this many VUs at the start of the run so that the first burst of requests does not pay the VU startup cost. When response time spikes and the pool cannot keep up, k6 grows it up to <code>maxVUs</code>.',
       de: 'Beim <code>constant-arrival-rate</code>-Executor ist <code>preAllocatedVUs</code> die Größe des anfänglichen VU-Pools. k6 allokiert diese VUs zu Laufbeginn, damit die erste Request-Welle nicht unter dem VU-Startup leidet. Steigt die Antwortzeit und reicht der Pool nicht, vergrößert k6 ihn bis <code>maxVUs</code>.',

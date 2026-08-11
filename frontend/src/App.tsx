@@ -1946,9 +1946,10 @@ type TestRunSummaryProps = {
 }
 
 function TestRunSummary({ run }: TestRunSummaryProps) {
+  const { language } = useLanguage()
   const summary = parseK6Summary(run)
-  const failure = summarizeFailure(run)
-  const metricItems = buildMetricRow(run, summary, failure)
+  const failure = summarizeFailure(language, run)
+  const metricItems = buildMetricRow(language, run, summary, failure)
   // As soon as k6 is done, <RunStatusView> takes over the full
   // result presentation (badge + threshold notice + cards + run
   // foot). We then hide the metric row and the failure causes here.

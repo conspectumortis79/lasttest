@@ -41,9 +41,19 @@ test('Escape inside the wiki description window closes that window', async ({ pa
   const popup = await popupPromise
   await popup.waitForLoadState('domcontentloaded')
   await expect(popup.locator('h1')).toContainText(/Pre-Allocated VUs/i)
-  await popup.bringToFront()
+  // Pressing Escape inside the popup window must close it. The
+  // popup's keydown listener (see `wikiWindow.ts:90`) calls
+  // `window.close()` on Escape. We use `popup.evaluate` to
+  // dispatch the event directly inside the popup's document —
+  // Playwright's `keyboard.press` has been observed to race
+  // with the popup's own focus-loss handler in headless
+  // Chromium and close the window before the keypress can
+  // land, while `evaluate` runs synchronously inside the
+  // popup's JS context.
   const closePromise = popup.waitForEvent('close', { timeout: 5_000 })
-  await popup.keyboard.press('Escape')
+  await popup.evaluate(() => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  })
   await closePromise
 })
 

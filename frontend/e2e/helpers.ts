@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFile } from 'node:fs/promises'
-import { expect, type Page } from '@playwright/test'
+import { type Page } from '@playwright/test'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 
@@ -13,18 +13,30 @@ export const demoSpecificationPath: string = path.resolve(
 export const DEMO_BASE_URL = 'http://localhost:8286/demo-api'
 
 export async function importDemo(page: Page): Promise<void> {
-  await page.getByLabel('Swagger / OpenAPI Specification').waitFor({ timeout: 30_000 })
-  await expect(page.getByLabel('Swagger / OpenAPI Specification'))
-    .toContainText('Lasttest Demo API', { timeout: 30_000 })
+  const textarea = page.getByLabel('Swagger / OpenAPI Specification')
+  await textarea.waitFor({ timeout: 30_000 })
+  // The App auto-loads the demo spec into the textarea when
+  // `lasttest.demo.enabled` is set in localStorage (see
+  // `e2e/global-setup.ts`). If the textarea is already populated
+  // with the demo spec, skip the explicit fill and go straight to
+  // the import button. Only fill when the textarea is empty
+  // (placeholder "Lasttest Demo API" visible).
+  const currentValue = await textarea.inputValue()
   const demoText = await readFile(demoSpecificationPath, 'utf8')
-  await page.getByLabel('Swagger / OpenAPI Specification').fill(demoText)
+  if (!currentValue.includes('openapi:')) {
+    await textarea.fill(demoText)
+  }
   await page.getByRole('button', { name: 'Validate & import' }).click()
   await page.getByRole('heading', { name: /Lasttest Demo API/ }).waitFor()
 }
 
 export async function importInlineSpec(page: Page, spec: string, expectedTitle: string): Promise<void> {
   const textarea = page.getByLabel('Swagger / OpenAPI Specification')
-  await expect(textarea).toContainText('Lasttest Demo API', { timeout: 30_000 })
+  await textarea.waitFor({ timeout: 30_000 })
+  // The custom spec must always replace whatever is in the textarea
+  // (placeholder, auto-loaded demo, or a previous test's leftover),
+  // so we skip the placeholder check that `importDemo` would do and
+  // always fill the custom spec.
   await textarea.fill(spec)
   await page.getByRole('button', { name: 'Validate & import' }).click()
   await page.getByRole('heading', { name: new RegExp(expectedTitle) }).waitFor()

@@ -16,7 +16,7 @@ export default async function globalSetup(): Promise<void> {
     cookies: [],
     origins: [
       {
-        origin: 'http://localhost:5173',
+        origin: 'http://localhost:8286',
         localStorage: [
           { name: STORAGE_KEY, value: 'en' },
           { name: DEMO_STATUS_KEY, value: 'true' },

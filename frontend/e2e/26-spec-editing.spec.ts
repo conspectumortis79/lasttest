@@ -42,7 +42,13 @@ paths:
 
 test('editing the textarea and re-importing updates the operations card', async ({ page }) => {
   const textarea = page.getByLabel('Swagger / OpenAPI Specification')
-  await expect(textarea).toContainText('Lasttest Demo API', { timeout: 30_000 })
+  // The App auto-loads the bundled demo spec into the textarea when
+  // `lasttest.demo.enabled` is set in localStorage (see
+  // `e2e/global-setup.ts`). This test wants to start from a clean
+  // slate, so we explicitly clear the textarea before filling the
+  // first spec.
+  await expect(textarea).toBeVisible()
+  await textarea.fill('')
 
   await textarea.fill(SINGLE_OP_SPEC)
   await page.getByRole('button', { name: 'Validate & import' }).click()
