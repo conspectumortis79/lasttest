@@ -35,18 +35,29 @@ paths:
       responses:
         '200': {description: OK}
 `
-  await page.goto('/')
+  // Turn the demo toggle OFF for this test's own page. The
+  // `beforeEach` above only guarantees the SERVER-side toggle
+  // is enabled at navigation time; `App.tsx`'s auto-load effect
+  // then asynchronously `fetch`es the bundled demo spec into
+  // the SAME textarea this test is about to fill via
+  // `setInputFiles`. Under load (parallel workers), that fetch
+  // can resolve AFTER our upload and silently overwrite it —
+  // no amount of waiting on the textarea's content closes that
+  // window, because the fetch can still be in flight when the
+  // wait succeeds and land afterwards. Disabling the toggle
+  // before uploading routes the effect into its `else` branch
+  // (`setSpecification(sample)`, a synchronous, one-shot reset)
+  // instead of the racy `fetch` branch, removing the race
+  // entirely rather than trying to out-wait it.
+  await page.getByRole('button', { name: 'Einstellungen' }).click()
+  await page.locator('[data-testid="settings-demo-api-switch"]').uncheck()
+  await page.keyboard.press('Escape')
+
   await page.locator('input[type="file"]').setInputFiles({
     name: 'demo.yaml',
     mimeType: 'application/yaml',
     buffer: Buffer.from(unreachableSpec),
   })
-  // Wait for the SPECIFIC uploaded content before clicking
-  // import — the demo-toggle auto-load effect can fill this
-  // textarea concurrently with the bundled demo spec (whose
-  // title also contains the substring "Demo", which is why the
-  // title above was changed to something unambiguous), and a
-  // click that races it would import the wrong document.
   await expect(page.getByLabel('Swagger / OpenAPI-Dokumentation')).toContainText('Pill Aborted Probe')
   await page.getByRole('button', { name: 'Validieren & importieren' }).click()
   await page.getByLabel('Virtual Users').fill('1')
