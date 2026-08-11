@@ -53,23 +53,33 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      // `demo-traffic.spec.ts` is excluded here and run in its
-      // own project below (`chromium-demo-traffic`), because it
-      // is the one file that reads/mutates the backend's
-      // PROCESS-WIDE demo-traffic ring buffer
-      // (RingBufferDemoRequestLog — a single in-memory buffer,
-      // not scoped per test or per run) as its own assertion
-      // target. Any other file's tests that hit the demo API
-      // while `demo-traffic.spec.ts` is asserting against "the
-      // buffer is now empty" / "the buffer has exactly N
-      // entries" race that shared buffer and flip a correct
-      // implementation into a flaky failure. This was verified
-      // directly: running the full suite with `workers: 4` and
-      // no isolation produced `expect(payload.count).toBe(0)`
-      // failures with `Received: 3` — traffic from an unrelated
-      // spec file's k6 run landing in the buffer between the
-      // reset click and the follow-up assertion.
-      testIgnore: /demo-traffic\.spec\.ts$/,
+      // Three files are excluded here and run in the serial
+      // `chromium-demo-traffic` project below instead:
+      //
+      //  - `demo-traffic.spec.ts` reads/mutates the backend's
+      //    PROCESS-WIDE demo-traffic ring buffer
+      //    (RingBufferDemoRequestLog — a single in-memory
+      //    buffer, not scoped per test or per run) as its own
+      //    assertion target. Any other file's tests that hit
+      //    the demo API while this file is asserting "the
+      //    buffer is now empty" / "has exactly N entries" race
+      //    that shared buffer. Verified directly: running the
+      //    full suite with `workers: 4` and no isolation
+      //    produced `expect(payload.count).toBe(0)` failures
+      //    with `Received: 3` — traffic from an unrelated spec
+      //    file's k6 run landing in the buffer between the
+      //    reset click and the follow-up assertion.
+      //  - `pill-aborted.spec.ts` and `pill-failed.spec.ts`
+      //    both flip the demo-API switch OFF in the Settings
+      //    drawer to sidestep an unrelated race in `App.tsx`'s
+      //    demo-auto-load effect (fetching the bundled demo
+      //    spec into the same textarea a manual file upload
+      //    targets). That switch calls
+      //    `POST /api/demo-traffic/enabled`, the SAME
+      //    process-wide toggle — turning it off while another
+      //    worker's file relies on the demo API being reachable
+      //    would 404 that worker's requests.
+      testIgnore: [/demo-traffic\.spec\.ts$/, /pill-aborted\.spec\.ts$/, /pill-failed\.spec\.ts$/],
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://localhost:5173',
@@ -81,14 +91,15 @@ export default defineConfig({
     },
     {
       name: 'chromium-demo-traffic',
-      testMatch: /demo-traffic\.spec\.ts$/,
+      testMatch: [/demo-traffic\.spec\.ts$/, /pill-aborted\.spec\.ts$/, /pill-failed\.spec\.ts$/],
       // `dependencies` makes Playwright wait for EVERY test in
       // the `chromium` project to finish before this project's
       // first test starts — not just file-ordering within one
-      // worker. That is the actual isolation guarantee this file
-      // needs: no other spec file's k6 run can still be in
-      // flight (and writing to the shared ring buffer) while
-      // these tests assert on its exact contents.
+      // worker. That is the actual isolation guarantee these
+      // files need: no other spec file's k6 run / demo-API
+      // request can still be in flight while this project
+      // mutates the process-wide demo-traffic ring buffer or
+      // the process-wide demo-API toggle.
       dependencies: ['chromium'],
       use: {
         ...devices['Desktop Chrome'],

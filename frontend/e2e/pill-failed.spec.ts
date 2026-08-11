@@ -44,6 +44,14 @@ paths:
   // resolve AFTER our upload and silently overwrite it. Turning
   // the toggle off routes the effect into its synchronous
   // `else` branch instead, removing the race entirely.
+  //
+  // IMPORTANT: unchecking this switch calls `setDemoEnabled(false)`,
+  // which is a PROCESS-WIDE server toggle
+  // (`POST /api/demo-traffic/enabled` — DemoTrafficController.kt
+  // documents it as having "no per-user state"). This file is
+  // therefore pinned to the serial `chromium-demo-traffic`
+  // project in playwright.config.ts, so no other spec file's
+  // tests can be in flight while this toggle is off.
   await page.getByRole('button', { name: 'Einstellungen' }).click()
   await page.locator('[data-testid="settings-demo-api-switch"]').uncheck()
   await page.keyboard.press('Escape')

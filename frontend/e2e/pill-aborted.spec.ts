@@ -49,6 +49,17 @@ paths:
   // (`setSpecification(sample)`, a synchronous, one-shot reset)
   // instead of the racy `fetch` branch, removing the race
   // entirely rather than trying to out-wait it.
+  //
+  // IMPORTANT: unchecking this switch calls `setDemoEnabled(false)`,
+  // which is a PROCESS-WIDE server toggle
+  // (`POST /api/demo-traffic/enabled` — DemoTrafficController.kt
+  // documents it as having "no per-user state"). Doing this while
+  // other files run in parallel workers would 404 their demo-API
+  // calls. This file is therefore pinned to the serial
+  // `chromium-demo-traffic` project in playwright.config.ts
+  // (alongside demo-traffic.spec.ts, which has the same
+  // constraint), so no other spec file's tests can be in flight
+  // while this toggle is off.
   await page.getByRole('button', { name: 'Einstellungen' }).click()
   await page.locator('[data-testid="settings-demo-api-switch"]').uncheck()
   await page.keyboard.press('Escape')
